@@ -4,7 +4,7 @@ use crate::pixel::ZeroablePixel;
 // ADR-0044 Phase E: `MonoF32` appears in doctests and the `#[cfg(test)]`
 // module as the pixel-role float output type. Scoping the import to
 // `cfg(test)` keeps the non-test build free of the unused-import
-// warning while leaving the doctests' `# use irys_cv::pixel::MonoF32;`
+// warning while leaving the doctests' `# use fovea::pixel::MonoF32;`
 // preambles authoritative for rendered documentation examples.
 #[cfg(test)]
 use crate::pixel::MonoF32;
@@ -23,7 +23,7 @@ use crate::pixel::MonoF32;
 /// # Implementing `FoldOp`
 ///
 /// ```
-/// use irys_cv::transform::{FoldOp, FoldItem};
+/// use fovea::transform::{FoldOp, FoldItem};
 ///
 /// struct SumFold;
 ///
@@ -106,10 +106,10 @@ pub trait FoldOp<P, W> {
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, Neighborhood};
-/// use irys_cv::pixel::MonoF32;
-/// use irys_cv::transform::{ClosureFold, FoldItem, fold_neighborhood};
-/// use irys_cv::border::Clamp;
+/// use fovea::image::{Image, Neighborhood};
+/// use fovea::pixel::MonoF32;
+/// use fovea::transform::{ClosureFold, FoldItem, fold_neighborhood};
+/// use fovea::border::Clamp;
 ///
 /// let src = Image::fill(4, 4, 1u8);
 /// let kernel = Neighborhood::<f32, 3, 3>::box_blur_3x3();
@@ -192,7 +192,7 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::transform::FoldItem;
+/// use fovea::transform::FoldItem;
 ///
 /// let item = FoldItem { pixel: 42u8, weight: 1.0f32 };
 /// assert_eq!(item.pixel, 42);
@@ -242,11 +242,11 @@ pub struct FoldItem<P, W> {
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView, ImageViewMut, Neighborhood};
-/// use irys_cv::Size;
-/// use irys_cv::transform::FoldItem;
-/// use irys_cv::border::{BorderPolicy, Clamp};
-/// use irys_cv::transform::fold_neighborhood_into;
+/// use fovea::image::{Image, ImageView, ImageViewMut, Neighborhood};
+/// use fovea::Size;
+/// use fovea::transform::FoldItem;
+/// use fovea::border::{BorderPolicy, Clamp};
+/// use fovea::transform::fold_neighborhood_into;
 ///
 /// // 4×4 source filled with 1s
 /// let src = Image::fill(4, 4, 1u8);
@@ -261,10 +261,10 @@ pub struct FoldItem<P, W> {
 /// let out_region = BorderPolicy::<Image<u8>>::output_region(
 ///     &border, src.size(), weights.size(), anchor,
 /// );
-/// # use irys_cv::pixel::MonoF32;
+/// # use fovea::pixel::MonoF32;
 /// let mut out = Image::<MonoF32>::zero(out_region.size.width, out_region.size.height);
 ///
-/// use irys_cv::transform::ClosureFold;
+/// use fovea::transform::ClosureFold;
 ///
 /// fold_neighborhood_into(
 ///     &src, weights, anchor, &border, &mut out,
@@ -433,10 +433,10 @@ pub fn fold_neighborhood_into<I, WI, B, O, F, P, W, Out>(
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView, Neighborhood};
-/// use irys_cv::transform::FoldItem;
-/// use irys_cv::border::Skip;
-/// use irys_cv::transform::fold_neighborhood;
+/// use fovea::image::{Image, ImageView, Neighborhood};
+/// use fovea::transform::FoldItem;
+/// use fovea::border::Skip;
+/// use fovea::transform::fold_neighborhood;
 ///
 /// let src = Image::generate(5, 5, |x, y| (x + y * 5) as f32);
 /// let kernel = Neighborhood::<f32, 3, 3>::new([
@@ -446,7 +446,7 @@ pub fn fold_neighborhood_into<I, WI, B, O, F, P, W, Out>(
 /// ]);
 ///
 /// // Identity kernel with Skip: output is 3×3 (interior only)
-/// use irys_cv::transform::ClosureFold;
+/// use fovea::transform::ClosureFold;
 ///
 /// let result = fold_neighborhood(
 ///     &src,
@@ -458,7 +458,7 @@ pub fn fold_neighborhood_into<I, WI, B, O, F, P, W, Out>(
 ///         for item in neighbors {
 ///             sum += item.pixel * item.weight;
 ///         }
-///         irys_cv::pixel::MonoF32(sum)
+///         fovea::pixel::MonoF32(sum)
 ///     }),
 /// );
 ///
@@ -509,10 +509,10 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView, ImageViewMut, Neighborhood};
-/// use irys_cv::Size;
-/// use irys_cv::border::{BorderPolicy, Clamp};
-/// use irys_cv::transform::fold_neighborhood_fn_into;
+/// use fovea::image::{Image, ImageView, ImageViewMut, Neighborhood};
+/// use fovea::Size;
+/// use fovea::border::{BorderPolicy, Clamp};
+/// use fovea::transform::fold_neighborhood_fn_into;
 ///
 /// let src = Image::fill(4, 4, 1u8);
 /// let kernel = Neighborhood::<f32, 3, 3>::box_blur_3x3();
@@ -523,7 +523,7 @@ where
 /// let out_region = BorderPolicy::<Image<u8>>::output_region(
 ///     &border, src.size(), weights.size(), anchor,
 /// );
-/// # use irys_cv::pixel::MonoF32;
+/// # use fovea::pixel::MonoF32;
 /// let mut out = Image::<MonoF32>::zero(out_region.size.width, out_region.size.height);
 ///
 /// fold_neighborhood_fn_into(
@@ -565,11 +565,11 @@ pub fn fold_neighborhood_fn_into<I, WI, B, O, F, P, W, Out>(
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView, Neighborhood};
-/// use irys_cv::border::Skip;
-/// use irys_cv::transform::fold_neighborhood_fn;
+/// use fovea::image::{Image, ImageView, Neighborhood};
+/// use fovea::border::Skip;
+/// use fovea::transform::fold_neighborhood_fn;
 ///
-/// # use irys_cv::pixel::MonoF32;
+/// # use fovea::pixel::MonoF32;
 /// let src = Image::generate(5, 5, |x, y| (x + y * 5) as f32);
 /// let kernel = Neighborhood::<f32, 3, 3>::new([
 ///     0.0, 0.0, 0.0,

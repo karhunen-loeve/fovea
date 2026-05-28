@@ -1,5 +1,5 @@
-use irys_cv::pixel::{HomogeneousPixel, PlainChannel, PlainPixel};
-use irys_cv::{HomogeneousPixel as HomogeneousPixelDerive, PlainPixel as PlainPixelDerive};
+use fovea::pixel::{HomogeneousPixel, PlainChannel, PlainPixel};
+use fovea::{HomogeneousPixel as HomogeneousPixelDerive, PlainPixel as PlainPixelDerive};
 use std::num::Saturating;
 
 // ---------------------------------------------------------------------------
@@ -523,7 +523,7 @@ fn as_bytes_matches_channel_bytes() {
 
 #[test]
 fn standard_u8_uniform_pixel() {
-    use irys_cv::pixel::Rgb8;
+    use fovea::pixel::Rgb8;
 
     // u8 has a manual HomogeneousPixel impl
     assert_eq!(<u8 as HomogeneousPixel>::CHANNEL_COUNT, 1);

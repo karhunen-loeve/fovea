@@ -6,9 +6,9 @@
 //! Run with: `cargo run --example tiled_processing`
 
 fn main() {
-    use irys_cv::image::{Image, ImageView, SubView};
-    use irys_cv::pixel::Mono8;
-    use irys_cv::Size;
+    use fovea::image::{Image, ImageView, SubView};
+    use fovea::pixel::Mono8;
+    use fovea::Size;
 
     // ── Build a test image ────────────────────────────────────────────
     //
@@ -112,7 +112,7 @@ fn main() {
     // `SubView::roi` extracts an arbitrary rectangular sub-view.
     // Returns `None` if the rectangle extends beyond image bounds.
 
-    let roi_rect = irys_cv::Rectangle::new((2, 1), (4, 3));
+    let roi_rect = fovea::Rectangle::new((2, 1), (4, 3));
     let roi = img.roi(roi_rect).expect("ROI is within bounds");
 
     println!("\nROI at (2,1) size 4×3:");
@@ -142,7 +142,7 @@ fn main() {
 /// Uses nested x/y loops because sub-views (tiles, ROIs) are strided —
 /// their pixel rows are not contiguous in memory, so `as_slice()` is
 /// not available.
-fn average_intensity(view: impl irys_cv::image::ImageView<Pixel = irys_cv::pixel::Mono8>) -> f64 {
+fn average_intensity(view: impl fovea::image::ImageView<Pixel = fovea::pixel::Mono8>) -> f64 {
     let mut sum = 0u64;
     for y in 0..view.height() {
         for x in 0..view.width() {

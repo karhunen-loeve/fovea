@@ -12,7 +12,7 @@ use crate::image::ImageView;
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView, zip_pixels};
+/// use fovea::image::{Image, ImageView, zip_pixels};
 ///
 /// let a = Image::generate(3, 2, |x, y| (x + y) as u8);
 /// let b = Image::generate(3, 2, |x, y| (x * y) as u8);
@@ -108,7 +108,7 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageArray, ImageView, zip_pixels};
+/// use fovea::image::{Image, ImageArray, ImageView, zip_pixels};
 ///
 /// let img = Image::generate(4, 4, |x, y| (x + y * 4) as u8);
 /// let arr: ImageArray<u8, 4, 4> = ImageArray::generate(|x, y| (x * y) as u8);
@@ -122,7 +122,7 @@ where
 /// ```
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView, zip_pixels};
+/// use fovea::image::{Image, ImageView, zip_pixels};
 ///
 /// let a = Image::fill(3, 3, 1u8);
 /// let b = Image::fill(4, 3, 1u8);

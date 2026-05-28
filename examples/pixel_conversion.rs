@@ -2,7 +2,7 @@
 //!
 //! Demonstrates type-safe pixel conversion with named strategies.
 //!
-//! `irys-cv` uses *strategy types* to parameterize conversions: instead of a
+//! `fovea` uses *strategy types* to parameterize conversions: instead of a
 //! single "convert" function that guesses what you want, you pass a zero-sized
 //! type that names the exact mapping semantics.  This makes the intent visible
 //! in source code **and** lets the compiler verify that the conversion is
@@ -12,12 +12,12 @@
 
 fn main() {
     // ── Imports ──────────────────────────────────────────────────────────────
-    // Image types live under `irys_cv::image`, pixel types under
-    // `irys_cv::pixel`, and all conversion machinery under
-    // `irys_cv::transform`.
-    use irys_cv::image::{Image, ImageView};
-    use irys_cv::pixel::{Mono8, Mono16, Rgb8, RgbF32, Srgb8};
-    use irys_cv::transform::{ConvertPixel, FullRange, Luminance, SrgbGamma, convert_image};
+    // Image types live under `fovea::image`, pixel types under
+    // `fovea::pixel`, and all conversion machinery under
+    // `fovea::transform`.
+    use fovea::image::{Image, ImageView};
+    use fovea::pixel::{Mono8, Mono16, Rgb8, RgbF32, Srgb8};
+    use fovea::transform::{ConvertPixel, FullRange, Luminance, SrgbGamma, convert_image};
 
     // =====================================================================
     // 1. FullRange: scale 8-bit grayscale to 16-bit grayscale

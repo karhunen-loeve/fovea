@@ -35,9 +35,9 @@
 //! Single-channel natural histogram on `Mono8`:
 //!
 //! ```
-//! use irys_cv::analyze::histogram::{histogram, Histogram, NaturalBins};
-//! use irys_cv::image::Image;
-//! use irys_cv::pixel::Mono8;
+//! use fovea::analyze::histogram::{histogram, Histogram, NaturalBins};
+//! use fovea::image::Image;
+//! use fovea::pixel::Mono8;
 //!
 //! let img = Image::from_vec(2, 2, vec![
 //!     Mono8::new(0),
@@ -48,15 +48,15 @@
 //!
 //! let hist: Histogram<NaturalBins, _> = histogram(&img, &NaturalBins)?;
 //! assert_eq!(hist.count_at_bin(1), 2);
-//! # Ok::<(), irys_cv::Error>(())
+//! # Ok::<(), fovea::Error>(())
 //! ```
 //!
 //! RGB image as a fixed-size array of per-channel histograms:
 //!
 //! ```
-//! use irys_cv::analyze::histogram::{histogram, Histogram, NaturalBins};
-//! use irys_cv::image::Image;
-//! use irys_cv::pixel::Rgb8;
+//! use fovea::analyze::histogram::{histogram, Histogram, NaturalBins};
+//! use fovea::image::Image;
+//! use fovea::pixel::Rgb8;
 //!
 //! let img = Image::from_vec(1, 1, vec![Rgb8::new(10, 20, 30)])?;
 //!
@@ -64,15 +64,15 @@
 //! assert_eq!(r.count_at_bin(10), 1);
 //! assert_eq!(g.count_at_bin(20), 1);
 //! assert_eq!(b.count_at_bin(30), 1);
-//! # Ok::<(), irys_cv::Error>(())
+//! # Ok::<(), fovea::Error>(())
 //! ```
 //!
 //! Float-channel histogram with NaN counted but not silently lost:
 //!
 //! ```
-//! use irys_cv::analyze::histogram::{histogram, Histogram, LinearBins};
-//! use irys_cv::image::Image;
-//! use irys_cv::pixel::MonoF32;
+//! use fovea::analyze::histogram::{histogram, Histogram, LinearBins};
+//! use fovea::image::Image;
+//! use fovea::pixel::MonoF32;
 //!
 //! let img = Image::from_vec(2, 1, vec![
 //!     MonoF32::new(0.25),
@@ -84,7 +84,7 @@
 //!
 //! assert_eq!(hist.count_at_bin(1), 1);
 //! assert_eq!(hist.nan_count, 1);
-//! # Ok::<(), irys_cv::Error>(())
+//! # Ok::<(), fovea::Error>(())
 //! ```
 //!
 //! [`HomogeneousPixel::Channel`]: crate::pixel::HomogeneousPixel::Channel

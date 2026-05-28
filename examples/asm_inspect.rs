@@ -4,7 +4,7 @@
 //! appears as a distinct symbol in the assembly output.  Compile with:
 //!
 //! ```sh
-//! cargo asm -p irys-cv --example asm_inspect --target-cpu native <symbol>
+//! cargo asm -p fovea --example asm_inspect --target-cpu native <symbol>
 //! ```
 //!
 //! Useful symbols to inspect:
@@ -25,9 +25,9 @@
 //! - `vcvtdq2ps` / `vpmovzxbd` — u8→f32 conversion chain (u8 convolution)
 //! - `vmovdqu` / `vmovups` — packed loads (any vectorised path)
 
-use irys_cv::border::Clamp;
-use irys_cv::image::{Image, Kernel3x3, Mask3x3, RasterImage};
-use irys_cv::transform::{
+use fovea::border::Clamp;
+use fovea::image::{Image, Kernel3x3, Mask3x3, RasterImage};
+use fovea::transform::{
     FoldItem, FoldOp, MapItem, MapOp, convolve, dilate, erode, fold_neighborhood,
 };
 use std::hint::black_box;
@@ -160,13 +160,13 @@ struct DirectSumFold;
 // fold pipelines that go through pixel-role traits migrated from
 // `u8` to `Mono8`. `Mono8` is `#[repr(transparent)]` over
 // `Saturating<u8>`, so codegen is equivalent to the old `u8` path.
-impl FoldOp<irys_cv::pixel::Mono8, f32> for DirectSumFold {
+impl FoldOp<fovea::pixel::Mono8, f32> for DirectSumFold {
     type Accumulator = f32;
     // ADR-0044 Phase E: `f32` no longer implements `ZeroablePixel`, so the
     // `Output` of a `FoldOp` used with `fold_neighborhood` must be a real
     // pixel type. `MonoF32` is `#[repr(transparent)]` over `f32`, so this
     // is a zero-cost wrapping of the scalar weighted-sum result.
-    type Output = irys_cv::pixel::MonoF32;
+    type Output = fovea::pixel::MonoF32;
 
     #[inline(always)]
     fn init(&self) -> f32 {
@@ -174,13 +174,13 @@ impl FoldOp<irys_cv::pixel::Mono8, f32> for DirectSumFold {
     }
 
     #[inline(always)]
-    fn accumulate(&self, acc: &mut f32, item: FoldItem<irys_cv::pixel::Mono8, f32>) {
+    fn accumulate(&self, acc: &mut f32, item: FoldItem<fovea::pixel::Mono8, f32>) {
         *acc += item.pixel.value() as f32 * item.weight;
     }
 
     #[inline(always)]
-    fn finalize(&mut self, acc: f32) -> irys_cv::pixel::MonoF32 {
-        irys_cv::pixel::MonoF32::new(acc)
+    fn finalize(&mut self, acc: f32) -> fovea::pixel::MonoF32 {
+        fovea::pixel::MonoF32::new(acc)
     }
 }
 
@@ -222,7 +222,7 @@ pub fn fold_trait_convolve_u8_hot(acc: &mut [f32], src: &[u8], weight: f32) {
         op.accumulate(
             &mut acc[i],
             FoldItem {
-                pixel: irys_cv::pixel::Mono8::new(src[i]),
+                pixel: fovea::pixel::Mono8::new(src[i]),
                 weight,
             },
         );
@@ -392,12 +392,12 @@ pub fn map_multi_offset_dilate_u8(acc: &mut [u8], rows: &[&[u8]]) {
 #[unsafe(no_mangle)]
 #[inline(never)]
 pub fn real_convolve_u8(
-    img: &Image<irys_cv::pixel::Mono8>,
+    img: &Image<fovea::pixel::Mono8>,
     kernel: &Kernel3x3,
-) -> Image<irys_cv::pixel::MonoF32> {
+) -> Image<fovea::pixel::MonoF32> {
     // ADR-0045 Phase C: `Mono8::Accumulator = MonoF32`, so the
     // `Out` turbofish flips from raw `f32` to the named pixel type.
-    convolve::<_, _, _, _, irys_cv::pixel::MonoF32>(img, kernel, &Clamp)
+    convolve::<_, _, _, _, fovea::pixel::MonoF32>(img, kernel, &Clamp)
 }
 
 #[unsafe(no_mangle)]
@@ -419,9 +419,9 @@ pub fn real_dilate_u8(img: &Image<u8>, se: &Mask3x3) -> Image<u8> {
 // so the output `Image<f32>` carries scalar semantics rather than a pixel
 // intensity. No migration to `MonoF32` under ADR-0045 Phase C.
 pub fn real_fold_neighborhood_u8(
-    img: &Image<irys_cv::pixel::Mono8>,
+    img: &Image<fovea::pixel::Mono8>,
     kernel: &Kernel3x3,
-) -> Image<irys_cv::pixel::MonoF32> {
+) -> Image<fovea::pixel::MonoF32> {
     fold_neighborhood(
         img,
         kernel.weights(),
@@ -517,8 +517,8 @@ fn main() {
     // ADR-0045 Phase S4: `u8` is no longer a pixel. For the pipeline
     // calls that go through `LinearPixel` (convolve, fold_neighborhood),
     // build a parallel `Image<Mono8>` with the same underlying bytes.
-    let img_mono8: Image<irys_cv::pixel::Mono8> = Image::generate(w, h, |x, y| {
-        irys_cv::pixel::Mono8::new(((x * 17 + y * 31) % 256) as u8)
+    let img_mono8: Image<fovea::pixel::Mono8> = Image::generate(w, h, |x, y| {
+        fovea::pixel::Mono8::new(((x * 17 + y * 31) % 256) as u8)
     });
     let img_f32 = Image::generate(w, h, |x, y| (x * 17 + y * 31) as f32 / 256.0);
     let kernel = Kernel3x3::gaussian_3x3();

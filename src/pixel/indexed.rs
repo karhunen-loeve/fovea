@@ -3,7 +3,7 @@
 //! See [`Indexed8`] — a palette index, NOT a color value. The meaning depends
 //! entirely on an external lookup table (see `Depalettize`).
 
-use irys_cv_derive::{HomogeneousPixel, PlainPixel, WhiteChannel, ZeroablePixel};
+use fovea_derive::{HomogeneousPixel, PlainPixel, WhiteChannel, ZeroablePixel};
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Indexed (palette) pixel type
@@ -30,7 +30,7 @@ use irys_cv_derive::{HomogeneousPixel, PlainPixel, WhiteChannel, ZeroablePixel};
 /// # Examples
 ///
 /// ```
-/// # use irys_cv::pixel::Indexed8;
+/// # use fovea::pixel::Indexed8;
 /// let idx = Indexed8(42);
 /// assert_eq!(idx.0, 42);
 /// ```

@@ -9,7 +9,7 @@
 //! `sum / sum-of-squares` half of normalised cross-correlation.
 //!
 //! This module is the implementation of
-//! [ADR-0032](https://github.com/karhunen-loeve/irys-cv/blob/main/docs/adr/0032-integral-image-design.md);
+//! [ADR-0032](https://github.com/karhunen-loeve/fovea/blob/main/docs/adr/0032-integral-image-design.md);
 //! the file/PR breakdown lives in the project's `INTEGRAL_IMAGE_PLAN.md`.
 //!
 //! # Surface
@@ -55,10 +55,10 @@
 //! # Example
 //!
 //! ```
-//! use irys_cv::analyze::integral::{integral_image, IntegralImage};
-//! use irys_cv::image::Image;
-//! use irys_cv::pixel::{Mono8, Mono32};
-//! use irys_cv::{Coordinate, Rectangle, Size};
+//! use fovea::analyze::integral::{integral_image, IntegralImage};
+//! use fovea::image::Image;
+//! use fovea::pixel::{Mono8, Mono32};
+//! use fovea::{Coordinate, Rectangle, Size};
 //!
 //! // 4×4 image filled with the value 10.
 //! let img: Image<Mono8> = Image::fill(4, 4, Mono8::new(10));
@@ -69,7 +69,7 @@
 //! // Sum over a 2×3 rectangle: 2 × 3 × 10 = 60.
 //! let sum = sat.region_sum(Rectangle::new(Coordinate::new(1, 0), Size::new(2, 3)));
 //! assert_eq!(sum, Mono32::new(60));
-//! # Ok::<(), irys_cv::Error>(())
+//! # Ok::<(), fovea::Error>(())
 //! ```
 
 mod engine;

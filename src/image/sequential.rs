@@ -173,7 +173,7 @@ pub(crate) mod contiguous_sealed {
 ///
 /// # Example
 /// ```
-/// # use irys_cv::image::{Image, ImageView, ContiguousImage};
+/// # use fovea::image::{Image, ImageView, ContiguousImage};
 /// let img = Image::generate(3, 2, |x, y| (x + y * 3) as u8);
 /// let slice = img.as_slice();
 /// assert_eq!(slice, &[0, 1, 2, 3, 4, 5]);
@@ -192,7 +192,7 @@ pub trait ContiguousImage: RasterImage + contiguous_sealed::Sealed {
 ///
 /// # Example
 /// ```
-/// # use irys_cv::image::{Image, ImageView, ContiguousImageMut};
+/// # use fovea::image::{Image, ImageView, ContiguousImageMut};
 /// let mut img = Image::generate(2, 2, |_, _| 0u8);
 /// img.as_mut_slice().fill(42);
 /// assert_eq!(img.pixel_at(1, 1), 42);
@@ -241,7 +241,7 @@ where
 ///
 /// # Example
 /// ```
-/// # use irys_cv::image::{ImageView, ImageArray};
+/// # use fovea::image::{ImageView, ImageArray};
 /// let arr = [1u8,2,3,4,5,6,7,8,9,10,12,12];
 /// let mut img: ImageArray<u8, 3, 4> = ImageArray::new(arr);
 /// assert_eq!(img.width(), 3);
@@ -255,8 +255,8 @@ where
 ///
 /// The `ImageArray` can be generated using a closure:
 /// ```
-/// # use irys_cv::Size;
-/// # use irys_cv::image::{ImageView, ImageArray};
+/// # use fovea::Size;
+/// # use fovea::image::{ImageView, ImageArray};
 /// let img: ImageArray<u8, 3, 4> = ImageArray::generate(|x,y| (x + y * 3) as u8 + 1);
 /// assert_eq!(img.size(), Size::new(3, 4));
 /// assert_eq!(img.get(0, 0), Some(1));
@@ -289,7 +289,7 @@ where
     ///
     /// # Example
     /// ```
-    /// use irys_cv::image::{ImageView, ImageViewMut, ImageArray};
+    /// use fovea::image::{ImageView, ImageViewMut, ImageArray};
     ///
     /// let mut img: ImageArray<u8, 2, 2> = ImageArray::new([0; 4]);
     /// assert_eq!(img.width(), 2);
@@ -313,7 +313,7 @@ where
     ///
     /// # Example
     /// ```
-    /// # use irys_cv::image::ImageArray;
+    /// # use fovea::image::ImageArray;
     /// let img: ImageArray<u8, 3, 4> = ImageArray::generate(|x,y| (x + y * 3) as u8 + 1);
     /// ```
     pub fn generate(f: impl Fn(usize, usize) -> <ImageArray<T, W, H> as ImageView>::Pixel) -> Self {
@@ -957,8 +957,8 @@ impl<T: Copy> SubView for ImageRefMut<'_, T> {
 ///
 /// # Example
 /// ```
-/// # use irys_cv::image::{ImageView, ImageViewMut, Image};
-/// # use irys_cv::pixel::MonoF32;
+/// # use fovea::image::{ImageView, ImageViewMut, Image};
+/// # use fovea::pixel::MonoF32;
 /// // ADR-0044 / ADR-0045 Phase C: `MonoF32` is the named pixel type
 /// // over `f32` — use it whenever an image holds pixel data rather
 /// // than scalar kernel weights.
@@ -976,8 +976,8 @@ impl<T: Copy> SubView for ImageRefMut<'_, T> {
 ///
 /// The `Image` can be generated using a closure:
 /// ```
-/// # use irys_cv::Size;
-/// # use irys_cv::image::{ImageView, Image};
+/// # use fovea::Size;
+/// # use fovea::image::{ImageView, Image};
 /// let img: Image<u8> = Image::generate(3, 4, |x,y| (x + y * 3) as u8 + 1);
 /// assert_eq!(img.size(), Size::new(3, 4));
 /// assert_eq!(img.get(0, 0), Some(1));
@@ -1029,8 +1029,8 @@ impl<T> Image<T> {
     /// # Examples
     ///
     /// ```
-    /// # use irys_cv::image::{ImageView, Image};
-    /// # use irys_cv::pixel::Mono8;
+    /// # use fovea::image::{ImageView, Image};
+    /// # use fovea::pixel::Mono8;
     /// let raw = vec![10u8, 20, 30, 40, 50, 60];
     /// let img: Image<Mono8> = Image::from_raw_bytes(3, 2, raw).unwrap();
     /// assert_eq!(img.width(), 3);
@@ -1041,8 +1041,8 @@ impl<T> Image<T> {
     /// time, not at runtime:
     ///
     /// ```compile_fail
-    /// # use irys_cv::image::Image;
-    /// # use irys_cv::pixel::Mono16;
+    /// # use fovea::image::Image;
+    /// # use fovea::pixel::Mono16;
     /// let raw = vec![0u8; 4];
     /// // ERROR: T::ALIGN > 1 — use Image::from_bytes_copy for aligned pixels.
     /// let _: Image<Mono16> = Image::from_raw_bytes(2, 1, raw).unwrap();
@@ -1101,8 +1101,8 @@ impl<T> Image<T> {
     /// # Examples
     ///
     /// ```
-    /// use irys_cv::image::{Image, ImageView};
-    /// use irys_cv::pixel::Mono16;
+    /// use fovea::image::{Image, ImageView};
+    /// use fovea::pixel::Mono16;
     ///
     /// // Mono16 has ALIGN == 2, so from_raw_bytes won't compile.
     /// // from_bytes_copy works for any PlainPixel type.
@@ -1204,7 +1204,7 @@ impl<T> fmt::Debug for Image<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let pixel_ty = std::any::type_name::<T>();
         // Strip the leading module path for readability:
-        //   "irys_cv::pixel::srgb::Srgb8"  →  "Srgb8"
+        //   "fovea::pixel::srgb::Srgb8"  →  "Srgb8"
         let pixel_short = pixel_ty.rsplit("::").next().unwrap_or(pixel_ty);
         f.debug_struct("Image")
             .field("width", &self.size.width)

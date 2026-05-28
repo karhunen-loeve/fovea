@@ -164,16 +164,16 @@ impl<P: Copy + Ord> MapOp<P> for MedianOp<P> {
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView, ImageViewMut, Neighborhood};
-/// use irys_cv::Size;
-/// use irys_cv::border::Clamp;
-/// use irys_cv::transform::erode_into;
+/// use fovea::image::{Image, ImageView, ImageViewMut, Neighborhood};
+/// use fovea::Size;
+/// use fovea::border::Clamp;
+/// use fovea::transform::erode_into;
 ///
 /// let src = Image::fill(5, 5, 10u8);
 /// let se = Neighborhood::<bool, 3, 3>::full_rect_3x3();
 ///
 /// let border = Clamp;
-/// let out_region = irys_cv::border::BorderPolicy::<Image<u8>>::output_region(
+/// let out_region = fovea::border::BorderPolicy::<Image<u8>>::output_region(
 ///     &border, src.size(), se.weights().size(), se.anchor(),
 /// );
 /// let mut out = Image::<u8>::zero(out_region.size.width, out_region.size.height);
@@ -211,9 +211,9 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView, Neighborhood};
-/// use irys_cv::border::Clamp;
-/// use irys_cv::transform::erode;
+/// use fovea::image::{Image, ImageView, Neighborhood};
+/// use fovea::border::Clamp;
+/// use fovea::transform::erode;
 ///
 /// let src = Image::generate(5, 5, |x, y| (x + y * 5) as u8);
 /// let se = Neighborhood::<bool, 3, 3>::full_rect_3x3();
@@ -252,16 +252,16 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView, ImageViewMut, Neighborhood};
-/// use irys_cv::Size;
-/// use irys_cv::border::Clamp;
-/// use irys_cv::transform::dilate_into;
+/// use fovea::image::{Image, ImageView, ImageViewMut, Neighborhood};
+/// use fovea::Size;
+/// use fovea::border::Clamp;
+/// use fovea::transform::dilate_into;
 ///
 /// let src = Image::fill(5, 5, 10u8);
 /// let se = Neighborhood::<bool, 3, 3>::full_rect_3x3();
 ///
 /// let border = Clamp;
-/// let out_region = irys_cv::border::BorderPolicy::<Image<u8>>::output_region(
+/// let out_region = fovea::border::BorderPolicy::<Image<u8>>::output_region(
 ///     &border, src.size(), se.weights().size(), se.anchor(),
 /// );
 /// let mut out = Image::<u8>::zero(out_region.size.width, out_region.size.height);
@@ -299,9 +299,9 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView, Neighborhood};
-/// use irys_cv::border::Clamp;
-/// use irys_cv::transform::dilate;
+/// use fovea::image::{Image, ImageView, Neighborhood};
+/// use fovea::border::Clamp;
+/// use fovea::transform::dilate;
 ///
 /// let src = Image::generate(5, 5, |x, y| (x + y * 5) as u8);
 /// let se = Neighborhood::<bool, 3, 3>::full_rect_3x3();
@@ -343,9 +343,9 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView, ImageViewMut, Neighborhood};
-/// use irys_cv::border::Clamp;
-/// use irys_cv::transform::opening_into;
+/// use fovea::image::{Image, ImageView, ImageViewMut, Neighborhood};
+/// use fovea::border::Clamp;
+/// use fovea::transform::opening_into;
 ///
 /// let src = Image::fill(6, 6, 50u8);
 /// let se = Neighborhood::<bool, 3, 3>::full_rect_3x3();
@@ -393,9 +393,9 @@ pub fn opening_into<I, K, B, O, P>(
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView, ImageViewMut, Neighborhood};
-/// use irys_cv::border::Clamp;
-/// use irys_cv::transform::closing_into;
+/// use fovea::image::{Image, ImageView, ImageViewMut, Neighborhood};
+/// use fovea::border::Clamp;
+/// use fovea::transform::closing_into;
 ///
 /// let src = Image::fill(6, 6, 50u8);
 /// let se = Neighborhood::<bool, 3, 3>::full_rect_3x3();
@@ -435,9 +435,9 @@ pub fn closing_into<I, K, B, O, P>(
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView, Neighborhood};
-/// use irys_cv::border::Clamp;
-/// use irys_cv::transform::opening;
+/// use fovea::image::{Image, ImageView, Neighborhood};
+/// use fovea::border::Clamp;
+/// use fovea::transform::opening;
 ///
 /// let src = Image::fill(6, 6, 50u8);
 /// let se = Neighborhood::<bool, 3, 3>::full_rect_3x3();
@@ -472,9 +472,9 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView, Neighborhood};
-/// use irys_cv::border::Clamp;
-/// use irys_cv::transform::closing;
+/// use fovea::image::{Image, ImageView, Neighborhood};
+/// use fovea::border::Clamp;
+/// use fovea::transform::closing;
 ///
 /// let src = Image::fill(6, 6, 50u8);
 /// let se = Neighborhood::<bool, 3, 3>::full_rect_3x3();
@@ -514,9 +514,9 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView, Neighborhood};
-/// use irys_cv::border::Clamp;
-/// use irys_cv::transform::morphological_gradient;
+/// use fovea::image::{Image, ImageView, Neighborhood};
+/// use fovea::border::Clamp;
+/// use fovea::transform::morphological_gradient;
 ///
 /// let src = Image::fill(6, 6, 50u8);
 /// let se = Neighborhood::<bool, 3, 3>::full_rect_3x3();
@@ -560,9 +560,9 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView, Neighborhood};
-/// use irys_cv::border::Clamp;
-/// use irys_cv::transform::top_hat;
+/// use fovea::image::{Image, ImageView, Neighborhood};
+/// use fovea::border::Clamp;
+/// use fovea::transform::top_hat;
 ///
 /// let src = Image::fill(6, 6, 50u8);
 /// let se = Neighborhood::<bool, 3, 3>::full_rect_3x3();
@@ -583,9 +583,9 @@ where
 /// The trait bound rejects it at compile time:
 ///
 /// ```compile_fail
-/// use irys_cv::image::{Image, Neighborhood};
-/// use irys_cv::border::Skip;
-/// use irys_cv::transform::top_hat;
+/// use fovea::image::{Image, Neighborhood};
+/// use fovea::border::Skip;
+/// use fovea::transform::top_hat;
 ///
 /// let src = Image::fill(6, 6, 50u8);
 /// let se  = Neighborhood::<bool, 3, 3>::full_rect_3x3();
@@ -622,9 +622,9 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView, Neighborhood};
-/// use irys_cv::border::Clamp;
-/// use irys_cv::transform::black_hat;
+/// use fovea::image::{Image, ImageView, Neighborhood};
+/// use fovea::border::Clamp;
+/// use fovea::transform::black_hat;
 ///
 /// let src = Image::fill(6, 6, 50u8);
 /// let se = Neighborhood::<bool, 3, 3>::full_rect_3x3();
@@ -671,9 +671,9 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView, ImageViewMut, Neighborhood};
-/// use irys_cv::border::Clamp;
-/// use irys_cv::transform::median_filter;
+/// use fovea::image::{Image, ImageView, ImageViewMut, Neighborhood};
+/// use fovea::border::Clamp;
+/// use fovea::transform::median_filter;
 ///
 /// // 5×5 image filled with 50, with one bright spike at the center.
 /// let mut src = Image::fill(5, 5, 50u8);

@@ -37,7 +37,7 @@ use crate::pixel::ZeroablePixel;
 /// # Example
 ///
 /// ```
-/// use irys_cv::transform::MapItem;
+/// use fovea::transform::MapItem;
 ///
 /// let item = MapItem { pixel: 42u8, dx: -1, dy: 0 };
 /// assert_eq!(item.pixel, 42);
@@ -90,7 +90,7 @@ pub struct MapItem<P> {
 /// # Implementing `MapOp`
 ///
 /// ```
-/// use irys_cv::transform::{MapOp, MapItem};
+/// use fovea::transform::{MapOp, MapItem};
 ///
 /// struct MinOp;
 ///
@@ -169,9 +169,9 @@ pub trait MapOp<P> {
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView, Neighborhood};
-/// use irys_cv::transform::{ClosureMap, MapItem, map_neighborhood};
-/// use irys_cv::border::Clamp;
+/// use fovea::image::{Image, ImageView, Neighborhood};
+/// use fovea::transform::{ClosureMap, MapItem, map_neighborhood};
+/// use fovea::border::Clamp;
 ///
 /// let src = Image::fill(5, 5, 128u8);
 /// let mask = Neighborhood::<bool, 3, 3>::cross_3x3();
@@ -270,9 +270,9 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView, ImageViewMut, Neighborhood};
-/// use irys_cv::transform::{MapOp, MapItem, map_neighborhood_into};
-/// use irys_cv::border::{BorderPolicy, Clamp};
+/// use fovea::image::{Image, ImageView, ImageViewMut, Neighborhood};
+/// use fovea::transform::{MapOp, MapItem, map_neighborhood_into};
+/// use fovea::border::{BorderPolicy, Clamp};
 ///
 /// struct MinOp;
 /// impl MapOp<u8> for MinOp {
@@ -485,9 +485,9 @@ pub fn map_neighborhood_into<I, MI, B, O, M, P>(
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView, Neighborhood};
-/// use irys_cv::transform::{MapOp, MapItem, map_neighborhood};
-/// use irys_cv::border::Skip;
+/// use fovea::image::{Image, ImageView, Neighborhood};
+/// use fovea::transform::{MapOp, MapItem, map_neighborhood};
+/// use fovea::border::Skip;
 ///
 /// struct Identity;
 /// impl MapOp<u8> for Identity {
@@ -548,10 +548,10 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView, ImageViewMut, Neighborhood};
-/// use irys_cv::transform::MapItem;
-/// use irys_cv::border::{BorderPolicy, Clamp};
-/// use irys_cv::transform::map_neighborhood_fn_into;
+/// use fovea::image::{Image, ImageView, ImageViewMut, Neighborhood};
+/// use fovea::transform::MapItem;
+/// use fovea::border::{BorderPolicy, Clamp};
+/// use fovea::transform::map_neighborhood_fn_into;
 ///
 /// let src = Image::fill(5, 5, 7u8);
 /// let mask = Neighborhood::<bool, 3, 3>::full_rect_3x3();
@@ -610,9 +610,9 @@ pub fn map_neighborhood_fn_into<I, MI, B, O, F, P, Out>(
 /// # Example — Perona-Malik anisotropic diffusion (one step)
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView, Neighborhood};
-/// use irys_cv::transform::{map_neighborhood_fn, MapItem};
-/// use irys_cv::border::Clamp;
+/// use fovea::image::{Image, ImageView, Neighborhood};
+/// use fovea::transform::{map_neighborhood_fn, MapItem};
+/// use fovea::border::Clamp;
 ///
 /// let src = Image::fill(5, 5, 64u8);
 /// // Cross-shaped neighborhood: N, W, center, E, S.

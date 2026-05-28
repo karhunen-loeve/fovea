@@ -4,7 +4,7 @@
 //! variants (`Rgb<BITS>`, etc. for 10/12/14-bit), and floating-point
 //! variants (F32, F64).
 
-use irys_cv_derive::{HomogeneousPixel, LinearPixel, PlainPixel, WhiteChannel, ZeroablePixel};
+use fovea_derive::{HomogeneousPixel, LinearPixel, PlainPixel, WhiteChannel, ZeroablePixel};
 
 use crate::pixel::{
     HomogeneousPixel, IntegralPixel, IntegralSquaredPixel, PlainChannel, PlainPixel, ZeroablePixel,
@@ -1194,7 +1194,7 @@ mod integral_rgb_tests {
 // ── Accumulator Add / Sub regression tests ──────────────────────────
 //
 // `Add` / `Sub` on these pixel types are emitted by the `LinearPixel`
-// derive macro (`irys-cv-derive/src/linear_pixel.rs`); these tests
+// derive macro (`fovea-derive/src/linear_pixel.rs`); these tests
 // pin the per-channel arithmetic the summed-area-table engine in
 // `crate::analyze::integral` relies on (ADR-0032 §§3, 5).
 #[cfg(test)]

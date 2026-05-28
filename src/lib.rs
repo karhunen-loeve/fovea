@@ -1,4 +1,4 @@
-//! # irys-cv
+//! # fovea
 //!
 //! A type-safe computer vision library for Rust.
 //!
@@ -27,12 +27,12 @@
 //!
 //! ## Design Philosophy
 //!
-//! See [PHILOSOPHY.md](https://github.com/karhunen-loeve/irys-cv/blob/main/PHILOSOPHY.md)
+//! See [PHILOSOPHY.md](https://github.com/karhunen-loeve/fovea/blob/main/PHILOSOPHY.md)
 //! for the design principles behind this crate, and the
-//! [Architecture Decision Records](https://github.com/karhunen-loeve/irys-cv/blob/main/docs/adr/)
+//! [Architecture Decision Records](https://github.com/karhunen-loeve/fovea/blob/main/docs/adr/)
 //! for detailed rationale behind specific design choices.
 
-extern crate self as irys_cv;
+extern crate self as fovea;
 
 mod common;
 mod error;
@@ -56,10 +56,10 @@ pub mod border {
     pub use crate::image::border::*;
 }
 
-pub use irys_cv_derive::HomogeneousPixel;
-pub use irys_cv_derive::LinearPixel;
-pub use irys_cv_derive::PlainPixel;
-pub use irys_cv_derive::ZeroablePixel;
+pub use fovea_derive::HomogeneousPixel;
+pub use fovea_derive::LinearPixel;
+pub use fovea_derive::PlainPixel;
+pub use fovea_derive::ZeroablePixel;
 
 /// The pixel module contains definitions and implementations related to pixel types and operations.
 pub mod pixel;

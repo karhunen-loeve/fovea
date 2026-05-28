@@ -71,7 +71,7 @@
 //! processed with fast direct indexing; only the thin boundary strip goes
 //! through the [`crate::border::BorderPolicy`] accessor.
 //!
-//! [ADR-0022]: https://github.com/karhunen-loeve/irys-cv/blob/main/docs/adr/0022-flipped-view-and-lazy-evaluation.md
+//! [ADR-0022]: https://github.com/karhunen-loeve/fovea/blob/main/docs/adr/0022-flipped-view-and-lazy-evaluation.md
 
 mod combine;
 mod convert;

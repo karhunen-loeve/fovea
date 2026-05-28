@@ -4,7 +4,7 @@
 //! - [`Mono8`], [`Mono16`], [`Mono32`], [`Mono64`] — fixed-depth wrappers
 //! - [`MonoF32`], [`MonoF64`] — floating-point monochrome
 
-use irys_cv_derive::{HomogeneousPixel, LinearPixel, PlainPixel, WhiteChannel, ZeroablePixel};
+use fovea_derive::{HomogeneousPixel, LinearPixel, PlainPixel, WhiteChannel, ZeroablePixel};
 
 use crate::pixel::{
     FromLinear, HomogeneousPixel, IntegralPixel, IntegralSquaredPixel, LinearChannel, LinearPixel,
@@ -487,7 +487,7 @@ impl LinearPixel<f64> for Mono64 {
 /// # Examples
 ///
 /// ```
-/// # use irys_cv::pixel::MonoF32;
+/// # use fovea::pixel::MonoF32;
 /// let p = MonoF32::new(0.5);
 /// assert_eq!(p.value(), 0.5);
 /// assert_eq!(f32::from(p), 0.5);
@@ -565,7 +565,7 @@ impl Hash for MonoF32 {
 /// # Examples
 ///
 /// ```
-/// # use irys_cv::pixel::MonoF64;
+/// # use fovea::pixel::MonoF64;
 /// let p = MonoF64::new(0.5);
 /// assert_eq!(p.value(), 0.5);
 /// assert_eq!(f64::from(p), 0.5);
@@ -1134,7 +1134,7 @@ mod integral_tests {
 // ── Accumulator Add / Sub regression tests ──────────────────────────
 //
 // `Add` / `Sub` on these pixel types are emitted by the `LinearPixel`
-// derive macro (`irys-cv-derive/src/linear_pixel.rs`). These tests
+// derive macro (`fovea-derive/src/linear_pixel.rs`). These tests
 // pin the per-channel saturating behaviour the summed-area-table
 // engine in `crate::analyze::integral` relies on — specifically the
 // `(a - c) - (d - b)` evaluation order argument in ADR-0032 §5 and

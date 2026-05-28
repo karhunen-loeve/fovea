@@ -3,7 +3,7 @@
 //! Implements [ADR-0047] \u00a72\u20133. See the module-level docs for the
 //! public surface and the worked 4\u00d74 example.
 //!
-//! [ADR-0047]: https://github.com/karhunen-loeve/irys-cv/blob/main/docs/adr/0047-connected-components-design.md
+//! [ADR-0047]: https://github.com/karhunen-loeve/fovea/blob/main/docs/adr/0047-connected-components-design.md
 
 use crate::Error;
 use crate::image::{Image, ImageView, ImageViewMut, RasterImage};
@@ -27,14 +27,14 @@ use super::union_find::UnionFind;
 /// Returns [`Error::LabelOverflow`] if the input contains more
 /// connected components than `L::MAX_LABEL` can encode.
 ///
-/// [ADR-0025]: https://github.com/karhunen-loeve/irys-cv/blob/main/docs/adr/0025-error-handling-conventions.md
+/// [ADR-0025]: https://github.com/karhunen-loeve/fovea/blob/main/docs/adr/0025-error-handling-conventions.md
 ///
 /// # Examples
 ///
 /// ```
-/// use irys_cv::analyze::components::{connected_components, Connectivity4};
-/// use irys_cv::image::BinaryImage;
-/// use irys_cv::pixel::Label32;
+/// use fovea::analyze::components::{connected_components, Connectivity4};
+/// use fovea::image::BinaryImage;
+/// use fovea::pixel::Label32;
 ///
 /// let img = BinaryImage::fill(8, 8, true);
 /// let r = connected_components::<Label32, Connectivity4>(&img).unwrap();
@@ -68,7 +68,7 @@ where
 /// Returns [`Error::LabelOverflow`] if the input contains more
 /// connected components than `L::MAX_LABEL` can encode.
 ///
-/// [ADR-0025]: https://github.com/karhunen-loeve/irys-cv/blob/main/docs/adr/0025-error-handling-conventions.md
+/// [ADR-0025]: https://github.com/karhunen-loeve/fovea/blob/main/docs/adr/0025-error-handling-conventions.md
 pub fn connected_components_into<L, C>(
     image: &impl RasterImage<Pixel = bool>,
     out: &mut Image<L>,
@@ -103,11 +103,11 @@ where
 /// # Examples
 ///
 /// ```
-/// use irys_cv::analyze::components::{
+/// use fovea::analyze::components::{
 ///     connected_components_with_stats, Connectivity4,
 /// };
-/// use irys_cv::image::BinaryImage;
-/// use irys_cv::pixel::Label32;
+/// use fovea::image::BinaryImage;
+/// use fovea::pixel::Label32;
 ///
 /// // A 2x2 square.
 /// let img = BinaryImage::fill(2, 2, true);

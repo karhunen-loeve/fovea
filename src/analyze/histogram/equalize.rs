@@ -48,9 +48,9 @@ use crate::transform::ChannelLut;
 /// # Examples
 ///
 /// ```
-/// use irys_cv::analyze::histogram::{Histogram, NaturalBins, equalization_lut, histogram};
-/// use irys_cv::image::Image;
-/// use irys_cv::pixel::Mono8;
+/// use fovea::analyze::histogram::{Histogram, NaturalBins, equalization_lut, histogram};
+/// use fovea::image::Image;
+/// use fovea::pixel::Mono8;
 ///
 /// // Image with the full 0..=255 range — LUT should be (nearly) identity.
 /// let img: Image<Mono8> = Image::from_vec(
@@ -111,9 +111,9 @@ where
 /// # Examples
 ///
 /// ```
-/// use irys_cv::analyze::histogram::equalize_image;
-/// use irys_cv::image::{Image, ImageView};
-/// use irys_cv::pixel::Mono8;
+/// use fovea::analyze::histogram::equalize_image;
+/// use fovea::image::{Image, ImageView};
+/// use fovea::pixel::Mono8;
 ///
 /// // Pixels in [100, 110] — equalization stretches to [0, 255].
 /// let img: Image<Mono8> = Image::generate(11, 1, |x, _| Mono8::new(100 + x as u8));

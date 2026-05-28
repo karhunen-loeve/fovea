@@ -80,9 +80,9 @@ where
 ///
 /// # Example
 /// ```
-/// # use irys_cv::image::Image;
-/// # use irys_cv::pixel::MonoF32;
-/// # use irys_cv::transform::{resize_into, NearestNeighbor, Bilinear};
+/// # use fovea::image::Image;
+/// # use fovea::pixel::MonoF32;
+/// # use fovea::transform::{resize_into, NearestNeighbor, Bilinear};
 /// // ADR-0044 Phase E: the pixel role for floats is `MonoF32`,
 /// // not raw `f32`. `MonoF32` is `#[repr(transparent)]` over `f32`.
 /// let img: Image<MonoF32> = Image::fill(300, 400, MonoF32::new(3.0)); // Input image
@@ -95,9 +95,9 @@ where
 ///
 /// # Example with more complex pixel types
 /// ```
-/// # use irys_cv::image::Image;
-/// # use irys_cv::pixel::{Rgb8, RgbF32};
-/// # use irys_cv::transform::{resize_into, NearestNeighbor, Bilinear};
+/// # use fovea::image::Image;
+/// # use fovea::pixel::{Rgb8, RgbF32};
+/// # use fovea::transform::{resize_into, NearestNeighbor, Bilinear};
 /// let img: Image<Rgb8> = Image::fill(300, 400, Rgb8::new(255, 0, 0)); // Input image
 /// let mut out: Image<Rgb8> = Image::zero(100, 100); // Pre-allocated output image
 /// resize_into(&img, &mut out, NearestNeighbor);
@@ -108,9 +108,9 @@ where
 ///
 /// # Example with fix array images
 /// ```
-/// # use irys_cv::image::ImageArray;
-/// # use irys_cv::pixel::Rgba16;
-/// # use irys_cv::transform::{resize_into, NearestNeighbor, Bilinear};
+/// # use fovea::image::ImageArray;
+/// # use fovea::pixel::Rgba16;
+/// # use fovea::transform::{resize_into, NearestNeighbor, Bilinear};
 /// let img: ImageArray<Rgba16, 3, 3> = ImageArray::generate(|x,y| Rgba16::new((y*10 + x) as u16, (y*10 + x) as u16, (y*10 + x) as u16, 65535));
 /// let mut out: ImageArray<Rgba16, 2, 2> = ImageArray::generate(|_,_| Rgba16::new(0,0,0,0));
 ///

@@ -47,7 +47,7 @@ use crate::pixel::Mono;
 /// # Example
 ///
 /// ```
-/// use irys_cv::analyze::histogram::strategy::{BinIndex, BinningStrategy, NaturalBins};
+/// use fovea::analyze::histogram::strategy::{BinIndex, BinningStrategy, NaturalBins};
 ///
 /// assert_eq!(NaturalBins.bin_index(17_u8), BinIndex::In(17));
 /// ```
@@ -163,7 +163,7 @@ pub trait BinningStrategy<V: Copy> {
 /// # Example
 ///
 /// ```
-/// use irys_cv::analyze::histogram::strategy::{BinIndex, BinningStrategy, NaturalBins};
+/// use fovea::analyze::histogram::strategy::{BinIndex, BinningStrategy, NaturalBins};
 ///
 /// assert_eq!(<NaturalBins as BinningStrategy<u8>>::bin_count(&NaturalBins), 256);
 /// assert_eq!(NaturalBins.bin_index(0_u8), BinIndex::In(0));
@@ -260,7 +260,7 @@ impl BinningStrategy<Saturating<u8>> for NaturalBins {
 /// # Example
 ///
 /// ```
-/// use irys_cv::analyze::histogram::strategy::{BinIndex, BinningStrategy, LinearBins};
+/// use fovea::analyze::histogram::strategy::{BinIndex, BinningStrategy, LinearBins};
 ///
 /// let s = LinearBins { min: 0.0, max: 1.0, bin_count: 4 };
 /// assert_eq!(s.bin_index(0.0_f32), BinIndex::In(0));
@@ -502,7 +502,7 @@ impl<const BITS: usize> BinningStrategy<Mono<BITS>> for LinearBins {
 /// # Example
 ///
 /// ```
-/// use irys_cv::analyze::histogram::strategy::{BinIndex, BinningStrategy, CustomBins};
+/// use fovea::analyze::histogram::strategy::{BinIndex, BinningStrategy, CustomBins};
 ///
 /// let s = CustomBins { edges: vec![0.0, 0.5, 1.0, 4.0] };
 /// assert_eq!(<CustomBins as BinningStrategy<f32>>::bin_count(&s), 3);

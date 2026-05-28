@@ -1,6 +1,6 @@
 //! # Hello Image
 //!
-//! Your first irys-cv program: create an image, fill pixels, read them back.
+//! Your first fovea program: create an image, fill pixels, read them back.
 //!
 //! Run with: `cargo run --example hello_image`
 
@@ -10,8 +10,8 @@ fn main() {
     // - ImageView/ImageViewMut: trait-based read/write access (like &[T] / &mut [T])
     // - ContiguousImage: trait that provides as_slice() for row-major pixel access
     // - Mono8: single-channel 8-bit grayscale pixel
-    use irys_cv::image::{ContiguousImage, Image, ImageView, ImageViewMut};
-    use irys_cv::pixel::Mono8;
+    use fovea::image::{ContiguousImage, Image, ImageView, ImageViewMut};
+    use fovea::pixel::Mono8;
 
     // ── 1. Create an image filled with zeros ─────────────────────────────────
 
@@ -114,5 +114,5 @@ fn main() {
     let scaled = original * 0.5; // 180 * 0.5 = 90
     println!("180 * 0.5 = {}", scaled.value());
 
-    println!("\nDone! You've created and manipulated images with irys-cv.");
+    println!("\nDone! You've created and manipulated images with fovea.");
 }

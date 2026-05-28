@@ -3,14 +3,14 @@
 //! Each test creates an image with known pixel values, applies one or more
 //! transforms, extracts a region of interest, and verifies the result.
 
-use irys_cv::border::Clamp;
-use irys_cv::image::{Image, ImageView, SubView};
-use irys_cv::pixel::{Mono8, Mono16, MonoF32, Rgb8};
-use irys_cv::transform::{
+use fovea::border::Clamp;
+use fovea::image::{Image, ImageView, SubView};
+use fovea::pixel::{Mono8, Mono16, MonoF32, Rgb8};
+use fovea::transform::{
     AbsDiff, Broadcast, FullRange, Luminance, PixelAdd, combine_images, convert_image,
     gaussian_blur_3x3, sobel_x,
 };
-use irys_cv::{Rectangle, Size};
+use fovea::{Rectangle, Size};
 
 // ─── Test 1: create → gaussian blur → extract ROI → verify ─────────────────
 
@@ -253,7 +253,7 @@ fn pipeline_sobel_edge_detection_on_step() {
     // pixel type is `MonoF32` rather than raw `f32`. The magnitude
     // semantics are unchanged — `MonoF32::abs()` mirrors `f32::abs`
     // and `.0` extracts the scalar at the comparison boundary.
-    let edges: Image<irys_cv::pixel::MonoF32> = sobel_x(&img, &Clamp);
+    let edges: Image<fovea::pixel::MonoF32> = sobel_x(&img, &Clamp);
     assert_eq!(edges.size(), img.size());
 
     // The edge response should be strongest around columns 3–4

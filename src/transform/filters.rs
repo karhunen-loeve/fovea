@@ -32,10 +32,10 @@ use crate::transform::convolve_separable::convolve_separable;
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView};
-/// use irys_cv::border::Clamp;
-/// use irys_cv::pixel::Mono8;
-/// use irys_cv::transform::box_blur_3x3;
+/// use fovea::image::{Image, ImageView};
+/// use fovea::border::Clamp;
+/// use fovea::pixel::Mono8;
+/// use fovea::transform::box_blur_3x3;
 ///
 /// let src = Image::fill(8, 8, Mono8::new(100));
 /// let result: Image<Mono8> = box_blur_3x3(&src, &Clamp);
@@ -70,10 +70,10 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView};
-/// use irys_cv::border::Clamp;
-/// use irys_cv::pixel::Mono8;
-/// use irys_cv::transform::box_blur_5x5;
+/// use fovea::image::{Image, ImageView};
+/// use fovea::border::Clamp;
+/// use fovea::pixel::Mono8;
+/// use fovea::transform::box_blur_5x5;
 ///
 /// let src = Image::fill(10, 10, Mono8::new(50));
 /// let result: Image<Mono8> = box_blur_5x5(&src, &Clamp);
@@ -115,10 +115,10 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView};
-/// use irys_cv::border::Clamp;
-/// use irys_cv::pixel::MonoF32;
-/// use irys_cv::transform::gaussian_blur_3x3;
+/// use fovea::image::{Image, ImageView};
+/// use fovea::border::Clamp;
+/// use fovea::pixel::MonoF32;
+/// use fovea::transform::gaussian_blur_3x3;
 ///
 /// // ADR-0044 Phase E: the pixel role for floats is `MonoF32`,
 /// // not raw `f32`. `MonoF32` is `#[repr(transparent)]` over `f32`.
@@ -158,10 +158,10 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView};
-/// use irys_cv::border::Clamp;
-/// use irys_cv::pixel::MonoF32;
-/// use irys_cv::transform::gaussian_blur_5x5;
+/// use fovea::image::{Image, ImageView};
+/// use fovea::border::Clamp;
+/// use fovea::pixel::MonoF32;
+/// use fovea::transform::gaussian_blur_5x5;
 ///
 /// // ADR-0044 Phase E: the pixel role for floats is `MonoF32`.
 /// let src = Image::fill(10, 10, MonoF32::new(1.0));
@@ -204,10 +204,10 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView};
-/// use irys_cv::border::Clamp;
-/// use irys_cv::pixel::{Mono8, MonoF32};
-/// use irys_cv::transform::sobel_x;
+/// use fovea::image::{Image, ImageView};
+/// use fovea::border::Clamp;
+/// use fovea::pixel::{Mono8, MonoF32};
+/// use fovea::transform::sobel_x;
 ///
 /// let src = Image::fill(6, 6, Mono8::new(50));
 /// let result: Image<MonoF32> = sobel_x(&src, &Clamp);
@@ -242,10 +242,10 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView};
-/// use irys_cv::border::Clamp;
-/// use irys_cv::pixel::{Mono8, MonoF32};
-/// use irys_cv::transform::sobel_y;
+/// use fovea::image::{Image, ImageView};
+/// use fovea::border::Clamp;
+/// use fovea::pixel::{Mono8, MonoF32};
+/// use fovea::transform::sobel_y;
 ///
 /// let src = Image::fill(6, 6, Mono8::new(50));
 /// let result: Image<MonoF32> = sobel_y(&src, &Clamp);
@@ -278,10 +278,10 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView};
-/// use irys_cv::border::Clamp;
-/// use irys_cv::pixel::{Mono8, MonoF32};
-/// use irys_cv::transform::scharr_x;
+/// use fovea::image::{Image, ImageView};
+/// use fovea::border::Clamp;
+/// use fovea::pixel::{Mono8, MonoF32};
+/// use fovea::transform::scharr_x;
 ///
 /// let src = Image::fill(6, 6, Mono8::new(50));
 /// let result: Image<MonoF32> = scharr_x(&src, &Clamp);
@@ -311,10 +311,10 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView};
-/// use irys_cv::border::Clamp;
-/// use irys_cv::pixel::{Mono8, MonoF32};
-/// use irys_cv::transform::scharr_y;
+/// use fovea::image::{Image, ImageView};
+/// use fovea::border::Clamp;
+/// use fovea::pixel::{Mono8, MonoF32};
+/// use fovea::transform::scharr_y;
 ///
 /// let src = Image::fill(6, 6, Mono8::new(50));
 /// let result: Image<MonoF32> = scharr_y(&src, &Clamp);
@@ -346,10 +346,10 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView};
-/// use irys_cv::border::Clamp;
-/// use irys_cv::pixel::{Mono8, MonoF32};
-/// use irys_cv::transform::prewitt_x;
+/// use fovea::image::{Image, ImageView};
+/// use fovea::border::Clamp;
+/// use fovea::pixel::{Mono8, MonoF32};
+/// use fovea::transform::prewitt_x;
 ///
 /// let src = Image::fill(6, 6, Mono8::new(50));
 /// let result: Image<MonoF32> = prewitt_x(&src, &Clamp);
@@ -379,10 +379,10 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView};
-/// use irys_cv::border::Clamp;
-/// use irys_cv::pixel::{Mono8, MonoF32};
-/// use irys_cv::transform::prewitt_y;
+/// use fovea::image::{Image, ImageView};
+/// use fovea::border::Clamp;
+/// use fovea::pixel::{Mono8, MonoF32};
+/// use fovea::transform::prewitt_y;
 ///
 /// let src = Image::fill(6, 6, Mono8::new(50));
 /// let result: Image<MonoF32> = prewitt_y(&src, &Clamp);
@@ -421,10 +421,10 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView};
-/// use irys_cv::border::Clamp;
-/// use irys_cv::pixel::{Mono8, MonoF32};
-/// use irys_cv::transform::laplacian;
+/// use fovea::image::{Image, ImageView};
+/// use fovea::border::Clamp;
+/// use fovea::pixel::{Mono8, MonoF32};
+/// use fovea::transform::laplacian;
 ///
 /// let src = Image::fill(6, 6, Mono8::new(10));
 /// let result: Image<MonoF32> = laplacian(&src, &Clamp);
@@ -462,10 +462,10 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView};
-/// use irys_cv::border::Clamp;
-/// use irys_cv::pixel::{Mono8, MonoF32};
-/// use irys_cv::transform::laplacian_8;
+/// use fovea::image::{Image, ImageView};
+/// use fovea::border::Clamp;
+/// use fovea::pixel::{Mono8, MonoF32};
+/// use fovea::transform::laplacian_8;
 ///
 /// let src = Image::fill(6, 6, Mono8::new(10));
 /// let result: Image<MonoF32> = laplacian_8(&src, &Clamp);
@@ -504,10 +504,10 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView};
-/// use irys_cv::border::Clamp;
-/// use irys_cv::pixel::Mono8;
-/// use irys_cv::transform::sharpen;
+/// use fovea::image::{Image, ImageView};
+/// use fovea::border::Clamp;
+/// use fovea::pixel::Mono8;
+/// use fovea::transform::sharpen;
 ///
 /// let src = Image::fill(6, 6, Mono8::new(100));
 /// let result: Image<Mono8> = sharpen(&src, &Clamp);
@@ -549,10 +549,10 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView};
-/// use irys_cv::border::Clamp;
-/// use irys_cv::pixel::{Mono8, MonoF32};
-/// use irys_cv::transform::emboss;
+/// use fovea::image::{Image, ImageView};
+/// use fovea::border::Clamp;
+/// use fovea::pixel::{Mono8, MonoF32};
+/// use fovea::transform::emboss;
 ///
 /// let src = Image::fill(6, 6, Mono8::new(50));
 /// let result: Image<MonoF32> = emboss(&src, &Clamp);

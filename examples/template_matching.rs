@@ -16,8 +16,8 @@
 
 fn main() {
     // ── Imports ──────────────────────────────────────────────────────────
-    use irys_cv::image::{Image, ImageView};
-    use irys_cv::transform::{NCC, SAD, SSD, match_template};
+    use fovea::image::{Image, ImageView};
+    use fovea::transform::{NCC, SAD, SSD, match_template};
 
     // =====================================================================
     // 1. Build a synthetic test image with a known pattern
@@ -185,7 +185,7 @@ fn main() {
     // This is a Tier 2 error (data-dependent), not a panic.
 
     let big_template = Image::fill(20, 20, 0u8);
-    let result: Result<Image<irys_cv::pixel::MonoF32>, _> =
+    let result: Result<Image<fovea::pixel::MonoF32>, _> =
         match_template(&image, &big_template, SAD);
     println!("\n── Error handling ──");
     match result {
@@ -194,7 +194,7 @@ fn main() {
     }
 
     assert!(
-        match_template::<_, _, irys_cv::pixel::MonoF32, _>(&image, &big_template, SAD).is_err(),
+        match_template::<_, _, fovea::pixel::MonoF32, _>(&image, &big_template, SAD).is_err(),
         "oversized template should return Err"
     );
 

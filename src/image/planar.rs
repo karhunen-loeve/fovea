@@ -15,8 +15,8 @@ use std::mem::size_of;
 /// # Split → Process → Merge workflow
 ///
 /// ```
-/// # use irys_cv::image::{Image, ImageView, ImagePlanes};
-/// # use irys_cv::pixel::Rgb8;
+/// # use fovea::image::{Image, ImageView, ImagePlanes};
+/// # use fovea::pixel::Rgb8;
 /// # use std::num::Saturating;
 /// // 1. Start with an interleaved RGB image
 /// let original = Image::generate(4, 4, |x, y| {
@@ -85,8 +85,8 @@ impl<P: HomogeneousPixel> ImagePlanes<P> {
     ///
     /// # Example
     /// ```
-    /// # use irys_cv::image::ImagePlanes;
-    /// # use irys_cv::pixel::Rgb8;
+    /// # use fovea::image::ImagePlanes;
+    /// # use fovea::pixel::Rgb8;
     /// // Create a gradient image
     /// let planes: ImagePlanes<Rgb8> = ImagePlanes::generate(4, 4, |x, y| {
     ///     Rgb8::new((x * 64) as u8, (y * 64) as u8, 128)
@@ -147,8 +147,8 @@ impl<P: HomogeneousPixel> ImagePlanes<P> {
     ///
     /// # Example
     /// ```
-    /// # use irys_cv::image::{Image, ImageView, ImagePlanes};
-    /// # use irys_cv::pixel::Rgb8;
+    /// # use fovea::image::{Image, ImageView, ImagePlanes};
+    /// # use fovea::pixel::Rgb8;
     /// let mut planes = ImagePlanes::<Rgb8>::zero(4, 4);
     /// let new_red = Image::fill(4, 4, std::num::Saturating(255u8));
     /// let old_red = planes.replace_plane(0, new_red);
@@ -187,8 +187,8 @@ impl<P: HomogeneousPixel> ImagePlanes<P> {
     ///
     /// # Example
     /// ```
-    /// # use irys_cv::image::{Image, ImageView, ImagePlanes};
-    /// # use irys_cv::pixel::Rgb8;
+    /// # use fovea::image::{Image, ImageView, ImagePlanes};
+    /// # use fovea::pixel::Rgb8;
     /// # use std::num::Saturating;
     /// let r = Image::fill(4, 4, Saturating(255u8));
     /// let g = Image::fill(4, 4, Saturating(0u8));
@@ -228,8 +228,8 @@ impl<P: HomogeneousPixel> ImagePlanes<P> {
     /// # Example
     ///
     /// ```
-    /// # use irys_cv::image::{Image, ImageView, ImagePlanes};
-    /// # use irys_cv::pixel::Rgb8;
+    /// # use fovea::image::{Image, ImageView, ImagePlanes};
+    /// # use fovea::pixel::Rgb8;
     /// # use std::num::Saturating;
     /// let r = Image::fill(4, 4, Saturating(255u8));
     /// let g = Image::fill(4, 4, Saturating(0u8));
@@ -262,8 +262,8 @@ impl<P: HomogeneousPixel> ImagePlanes<P> {
     ///
     /// # Example
     /// ```
-    /// # use irys_cv::image::{Image, ImageView, ImagePlanes};
-    /// # use irys_cv::pixel::Rgb8;
+    /// # use fovea::image::{Image, ImageView, ImagePlanes};
+    /// # use fovea::pixel::Rgb8;
     /// # use std::num::Saturating;
     /// let planes_vec = vec![
     ///     Image::fill(4, 4, Saturating(255u8)),

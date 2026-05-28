@@ -1,5 +1,5 @@
-use irys_cv::ZeroablePixel;
-use irys_cv::pixel::ZeroablePixel as ZeroablePixelTrait;
+use fovea::ZeroablePixel;
+use fovea::pixel::ZeroablePixel as ZeroablePixelTrait;
 use std::num::Saturating;
 
 // ---------------------------------------------------------------------------
@@ -313,7 +313,7 @@ fn derived_matches_manual_zero() {
 
 #[test]
 fn zeroable_pixel_default_equals_zero() {
-    use irys_cv::pixel::{Mono8, Rgb8, ZeroablePixel};
+    use fovea::pixel::{Mono8, Rgb8, ZeroablePixel};
     assert_eq!(Rgb8::default(), Rgb8::zero());
     assert_eq!(Mono8::default(), Mono8::zero());
 }

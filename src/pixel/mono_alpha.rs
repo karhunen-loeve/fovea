@@ -2,7 +2,7 @@
 //!
 //! Two-channel pixels: value (v) + alpha (a). See ADR-0009 for rationale.
 
-use irys_cv_derive::{HomogeneousPixel, LinearPixel, PlainPixel, WhiteChannel, ZeroablePixel};
+use fovea_derive::{HomogeneousPixel, LinearPixel, PlainPixel, WhiteChannel, ZeroablePixel};
 
 use std::{
     hash::{Hash, Hasher},

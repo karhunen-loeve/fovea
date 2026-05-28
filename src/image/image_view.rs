@@ -90,7 +90,7 @@ pub trait ImageViewMut: ImageView {
 ///
 /// # Example
 /// ```
-/// # use irys_cv::image::{Image, ImageView, RasterImage};
+/// # use fovea::image::{Image, ImageView, RasterImage};
 /// let img = Image::generate(4, 3, |x, y| (y * 4 + x) as u8);
 /// let row1 = img.row(1);
 /// assert_eq!(row1, &[4, 5, 6, 7]);
@@ -104,7 +104,7 @@ pub trait RasterImage: ImageView {
     /// # Panics
     ///
     /// Panics if `y >= self.height()` (Tier 3 — programmer bug per
-    /// [ADR-0025](https://github.com/karhunen-loeve/irys-cv/blob/main/docs/adr/0025-error-handling-conventions.md)).
+    /// [ADR-0025](https://github.com/karhunen-loeve/fovea/blob/main/docs/adr/0025-error-handling-conventions.md)).
     fn row(&self, y: usize) -> &[Self::Pixel];
 }
 
@@ -115,7 +115,7 @@ pub trait RasterImage: ImageView {
 ///
 /// # Example
 /// ```
-/// # use irys_cv::image::{Image, RasterImage, RasterImageMut};
+/// # use fovea::image::{Image, RasterImage, RasterImageMut};
 /// let mut img = Image::generate(3, 2, |x, y| (y * 3 + x) as u8);
 /// img.row_mut(0).fill(42);
 /// assert_eq!(img.row(0), &[42, 42, 42]);

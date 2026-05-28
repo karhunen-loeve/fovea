@@ -1,6 +1,6 @@
 //! # FMA Optimization
 //!
-//! Demonstrates how fused multiply-add (FMA) optimization works in irys-cv,
+//! Demonstrates how fused multiply-add (FMA) optimization works in fovea,
 //! how to check whether it's enabled, and how to enable it.
 //!
 //! Run with: `cargo run --example fma_optimization`
@@ -11,22 +11,22 @@
 //! ```
 
 fn main() {
-    use irys_cv::border::Clamp;
-    use irys_cv::image::{Image, ImageView, Neighborhood};
-    use irys_cv::pixel::Mono8;
-    use irys_cv::transform::convolve;
+    use fovea::border::Clamp;
+    use fovea::image::{Image, ImageView, Neighborhood};
+    use fovea::pixel::Mono8;
+    use fovea::transform::convolve;
 
     // =====================================================================
     // 1. Check compile-time FMA status
     // =====================================================================
     //
-    // irys-cv uses `#[cfg(target_feature = "fma")]` to gate FMA codegen.
+    // fovea uses `#[cfg(target_feature = "fma")]` to gate FMA codegen.
     // This is a compile-time check — the compiler embeds either the FMA
     // instruction (`vfmadd213ps`) or separate multiply+add (`vmulps` +
     // `vaddps`) into the binary at build time.
 
     let fma_enabled = cfg!(target_feature = "fma");
-    println!("=== irys-cv FMA Optimization ===\n");
+    println!("=== fovea FMA Optimization ===\n");
     println!(
         "Compile-time FMA: {}",
         if fma_enabled {
@@ -154,7 +154,7 @@ fn main() {
     println!("  cargo install cargo-show-asm\n");
     println!("Then run:");
     println!(
-        "  cargo asm -p irys-cv --example asm_inspect --target-cpu native fold_convolve_u8_hot\n"
+        "  cargo asm -p fovea --example asm_inspect --target-cpu native fold_convolve_u8_hot\n"
     );
     println!("Look for:");
     if fma_enabled {

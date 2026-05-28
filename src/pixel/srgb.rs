@@ -6,7 +6,7 @@
 //! attempts to use them with interpolation algorithms. Convert to linear
 //! light first with the `SrgbGamma` strategy.
 
-use irys_cv_derive::{HomogeneousPixel, PlainPixel, WhiteChannel, ZeroablePixel};
+use fovea_derive::{HomogeneousPixel, PlainPixel, WhiteChannel, ZeroablePixel};
 
 use std::num::Saturating;
 
@@ -30,8 +30,8 @@ use std::num::Saturating;
 /// `SrgbGamma` conversion strategy:
 ///
 /// ```
-/// # use irys_cv::pixel::{Srgb8, RgbF32};
-/// # use irys_cv::transform::{ConvertPixel, SrgbGamma};
+/// # use fovea::pixel::{Srgb8, RgbF32};
+/// # use fovea::transform::{ConvertPixel, SrgbGamma};
 /// let srgb = Srgb8::new(128, 64, 200);
 /// let linear: RgbF32 = SrgbGamma.convert(&srgb);
 /// ```
@@ -75,8 +75,8 @@ impl Srgb8 {
 /// linear light first using the `SrgbGamma` conversion strategy:
 ///
 /// ```
-/// # use irys_cv::pixel::{Srgba8, RgbaF32};
-/// # use irys_cv::transform::{ConvertPixel, SrgbGamma};
+/// # use fovea::pixel::{Srgba8, RgbaF32};
+/// # use fovea::transform::{ConvertPixel, SrgbGamma};
 /// let srgb = Srgba8::new(128, 64, 200, 255);
 /// let linear: RgbaF32 = SrgbGamma.convert(&srgb);
 /// ```
@@ -138,8 +138,8 @@ impl Srgba8 {
 /// `SrgbGamma` conversion strategy:
 ///
 /// ```
-/// # use irys_cv::pixel::{SrgbMono8, MonoF32};
-/// # use irys_cv::transform::{ConvertPixel, SrgbGamma};
+/// # use fovea::pixel::{SrgbMono8, MonoF32};
+/// # use fovea::transform::{ConvertPixel, SrgbGamma};
 /// let srgb = SrgbMono8::new(128);
 /// let linear: MonoF32 = SrgbGamma.convert(&srgb);
 /// // Mid-gray sRGB ≈ 0.216 linear, not 0.502
@@ -244,8 +244,8 @@ impl SrgbMonoA8 {
 /// `SrgbGamma` conversion strategy:
 ///
 /// ```
-/// # use irys_cv::pixel::{Srgb16, RgbF32};
-/// # use irys_cv::transform::{ConvertPixel, SrgbGamma};
+/// # use fovea::pixel::{Srgb16, RgbF32};
+/// # use fovea::transform::{ConvertPixel, SrgbGamma};
 /// let srgb = Srgb16::new(32768, 16384, 65535);
 /// let linear: RgbF32 = SrgbGamma.convert(&srgb);
 /// ```
@@ -289,8 +289,8 @@ impl Srgb16 {
 /// linear light first using the `SrgbGamma` conversion strategy:
 ///
 /// ```
-/// # use irys_cv::pixel::{Srgba16, RgbaF32};
-/// # use irys_cv::transform::{ConvertPixel, SrgbGamma};
+/// # use fovea::pixel::{Srgba16, RgbaF32};
+/// # use fovea::transform::{ConvertPixel, SrgbGamma};
 /// let srgb = Srgba16::new(32768, 16384, 65535, 65535);
 /// let linear: RgbaF32 = SrgbGamma.convert(&srgb);
 /// ```
@@ -336,8 +336,8 @@ impl Srgba16 {
 /// `SrgbGamma` conversion strategy:
 ///
 /// ```
-/// # use irys_cv::pixel::{SrgbMono16, MonoF32};
-/// # use irys_cv::transform::{ConvertPixel, SrgbGamma};
+/// # use fovea::pixel::{SrgbMono16, MonoF32};
+/// # use fovea::transform::{ConvertPixel, SrgbGamma};
 /// let srgb = SrgbMono16::new(32768);
 /// let linear: MonoF32 = SrgbGamma.convert(&srgb);
 /// ```

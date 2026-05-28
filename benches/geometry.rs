@@ -1,4 +1,4 @@
-//! Benchmarks for `irys_cv::transform::geometry`.
+//! Benchmarks for `fovea::transform::geometry`.
 //!
 //! Goal: measure each axis-aligned transform on a typical
 //! megapixel-scale image and confirm the cache-locality story claimed
@@ -26,15 +26,15 @@
 //! Run with:
 //!
 //! ```text
-//! cargo bench -p irys-cv --bench geometry
+//! cargo bench -p fovea --bench geometry
 //! ```
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
 
-use irys_cv::image::{Image, RasterImage, RasterImageMut};
-use irys_cv::pixel::Mono8;
-use irys_cv::transform::{
+use fovea::image::{Image, RasterImage, RasterImageMut};
+use fovea::pixel::Mono8;
+use fovea::transform::{
     flip_h_into, flip_v_into, rotate_90_into, rotate_180_into, rotate_270_into, transpose_into,
 };
 

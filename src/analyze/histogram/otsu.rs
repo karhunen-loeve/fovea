@@ -52,9 +52,9 @@ use crate::transform::{BinaryMask, convert_image};
 /// # Examples
 ///
 /// ```
-/// use irys_cv::analyze::histogram::{Histogram, NaturalBins, histogram, otsu_threshold};
-/// use irys_cv::image::Image;
-/// use irys_cv::pixel::Mono8;
+/// use fovea::analyze::histogram::{Histogram, NaturalBins, histogram, otsu_threshold};
+/// use fovea::image::Image;
+/// use fovea::pixel::Mono8;
 ///
 /// // 4 dark pixels and 4 bright ones — a clean bimodal split.
 /// let img = Image::from_vec(
@@ -141,9 +141,9 @@ where
 /// # Examples
 ///
 /// ```
-/// use irys_cv::analyze::histogram::otsu_binary_mask;
-/// use irys_cv::image::{Image, ImageView};
-/// use irys_cv::pixel::Mono8;
+/// use fovea::analyze::histogram::otsu_binary_mask;
+/// use fovea::image::{Image, ImageView};
+/// use fovea::pixel::Mono8;
 ///
 /// let img = Image::from_vec(
 ///     2,
