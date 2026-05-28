@@ -17,16 +17,16 @@
 //!
 //! See [ADR-0047] and `CONNECTED_COMPONENTS_PLAN.md` for the design.
 //!
-//! [ADR-0047]: https://github.com/karhunen-loeve/irys-cv/blob/main/docs/adr/0047-connected-components-design.md
+//! [ADR-0047]: https://github.com/karhunen-loeve/fovea/blob/main/docs/adr/0047-connected-components-design.md
 //!
 //! # Example
 //!
 //! ```
-//! use irys_cv::analyze::components::{
+//! use fovea::analyze::components::{
 //!     connected_components, Connectivity4, Labeling,
 //! };
-//! use irys_cv::image::{BinaryImage, ImageView};
-//! use irys_cv::pixel::Label32;
+//! use fovea::image::{BinaryImage, ImageView};
+//! use fovea::pixel::Label32;
 //!
 //! //  . # # .
 //! //  # # . .

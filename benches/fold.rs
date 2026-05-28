@@ -11,12 +11,12 @@
 //! ```
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
-use irys_cv::border::Clamp;
-use irys_cv::image::{
+use fovea::border::Clamp;
+use fovea::image::{
     Image, Kernel3x3, Kernel5x5, Kernel7x7, Mask3x3, Mask5x5, Neighborhood, SeparableKernel,
 };
-use irys_cv::pixel::{Mono8, MonoF32};
-use irys_cv::transform::{
+use fovea::pixel::{Mono8, MonoF32};
+use fovea::transform::{
     ClosureFold, FoldItem, FoldOp, convolve, convolve_separable, dilate, erode, fold_neighborhood,
     opening,
 };

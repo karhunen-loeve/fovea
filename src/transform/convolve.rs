@@ -94,17 +94,17 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView, ImageViewMut, Neighborhood};
-/// use irys_cv::Size;
-/// use irys_cv::border::Clamp;
-/// use irys_cv::pixel::MonoF32;
-/// use irys_cv::transform::convolve_into;
+/// use fovea::image::{Image, ImageView, ImageViewMut, Neighborhood};
+/// use fovea::Size;
+/// use fovea::border::Clamp;
+/// use fovea::pixel::MonoF32;
+/// use fovea::transform::convolve_into;
 ///
 /// let src = Image::fill(5, 5, MonoF32(1.0));
 /// let kernel = Neighborhood::<f32, 3, 3>::identity_3x3();
 ///
 /// let border = Clamp;
-/// let out_region = irys_cv::border::BorderPolicy::<Image<MonoF32>>::output_region(
+/// let out_region = fovea::border::BorderPolicy::<Image<MonoF32>>::output_region(
 ///     &border, src.size(), kernel.weights().size(), kernel.anchor(),
 /// );
 /// let mut out = Image::<MonoF32>::zero(out_region.size.width, out_region.size.height);
@@ -155,10 +155,10 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView, Neighborhood};
-/// use irys_cv::border::Clamp;
-/// use irys_cv::pixel::Mono8;
-/// use irys_cv::transform::convolve;
+/// use fovea::image::{Image, ImageView, Neighborhood};
+/// use fovea::border::Clamp;
+/// use fovea::pixel::Mono8;
+/// use fovea::transform::convolve;
 ///
 /// let src = Image::fill(5, 5, Mono8::new(10));
 /// let kernel = Neighborhood::<f32, 3, 3>::box_blur_3x3();
@@ -211,17 +211,17 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView, ImageViewMut, Neighborhood};
-/// use irys_cv::Size;
-/// use irys_cv::border::Clamp;
-/// use irys_cv::pixel::MonoF32;
-/// use irys_cv::transform::correlate_into;
+/// use fovea::image::{Image, ImageView, ImageViewMut, Neighborhood};
+/// use fovea::Size;
+/// use fovea::border::Clamp;
+/// use fovea::pixel::MonoF32;
+/// use fovea::transform::correlate_into;
 ///
 /// let src = Image::fill(5, 5, MonoF32(2.0));
 /// let kernel = Neighborhood::<f32, 3, 3>::identity_3x3();
 ///
 /// let border = Clamp;
-/// let out_region = irys_cv::border::BorderPolicy::<Image<MonoF32>>::output_region(
+/// let out_region = fovea::border::BorderPolicy::<Image<MonoF32>>::output_region(
 ///     &border, src.size(), kernel.weights().size(), kernel.anchor(),
 /// );
 /// let mut out = Image::<MonoF32>::zero(out_region.size.width, out_region.size.height);
@@ -266,10 +266,10 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView, Neighborhood};
-/// use irys_cv::border::Clamp;
-/// use irys_cv::pixel::MonoF32;
-/// use irys_cv::transform::correlate;
+/// use fovea::image::{Image, ImageView, Neighborhood};
+/// use fovea::border::Clamp;
+/// use fovea::pixel::MonoF32;
+/// use fovea::transform::correlate;
 ///
 /// let src = Image::fill(5, 5, MonoF32(2.0));
 /// let kernel = Neighborhood::<f32, 3, 3>::identity_3x3();

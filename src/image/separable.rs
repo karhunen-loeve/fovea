@@ -16,7 +16,7 @@
 //! # Example
 //!
 //! ```
-//! use irys_cv::image::SeparableKernel;
+//! use fovea::image::SeparableKernel;
 //!
 //! // Symmetric 3×3 box blur: [1/3, 1/3, 1/3] in both directions
 //! let kernel = SeparableKernel::<3, 3>::box_blur_3();
@@ -47,7 +47,7 @@ use crate::image::Image;
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::SeparableKernel;
+/// use fovea::image::SeparableKernel;
 ///
 /// let kernel = SeparableKernel::symmetric([1.0, 2.0, 1.0]);
 /// assert_eq!(kernel.h_anchor(), 1);
@@ -62,7 +62,7 @@ use crate::image::Image;
 /// Zero-sized kernels are rejected at compile time:
 ///
 /// ```compile_fail
-/// use irys_cv::image::SeparableKernel;
+/// use fovea::image::SeparableKernel;
 /// // SeparableKernel<0, _> and SeparableKernel<_, 0> would underflow
 /// // `HK - 1` / `VK - 1` in `flipped()` and the convolution passes.
 /// let _ = SeparableKernel::<0, 3>::new([], [1.0, 2.0, 1.0]);
@@ -102,7 +102,7 @@ impl<const HK: usize, const VK: usize> SeparableKernel<HK, VK> {
     /// # Example
     ///
     /// ```
-    /// use irys_cv::image::SeparableKernel;
+    /// use fovea::image::SeparableKernel;
     ///
     /// let k = SeparableKernel::new([1.0, 2.0, 1.0], [1.0, 4.0, 6.0, 4.0, 1.0]);
     /// assert_eq!(k.h_anchor(), 1); // 3 / 2
@@ -128,7 +128,7 @@ impl<const HK: usize, const VK: usize> SeparableKernel<HK, VK> {
     /// # Example
     ///
     /// ```
-    /// use irys_cv::image::SeparableKernel;
+    /// use fovea::image::SeparableKernel;
     ///
     /// let k = SeparableKernel::with_anchors(
     ///     [1.0, 0.0, 0.0], 0,
@@ -188,7 +188,7 @@ impl<const HK: usize, const VK: usize> SeparableKernel<HK, VK> {
     /// # Example
     ///
     /// ```
-    /// use irys_cv::image::SeparableKernel;
+    /// use fovea::image::SeparableKernel;
     ///
     /// let k = SeparableKernel::with_anchors(
     ///     [1.0, 2.0, 3.0], 0,
@@ -239,7 +239,7 @@ impl<const K: usize> SeparableKernel<K, K> {
     /// # Example
     ///
     /// ```
-    /// use irys_cv::image::SeparableKernel;
+    /// use fovea::image::SeparableKernel;
     ///
     /// let k = SeparableKernel::symmetric([1.0, 2.0, 1.0]);
     /// assert_eq!(k.h_weights(), k.v_weights());
@@ -267,7 +267,7 @@ impl SeparableKernel<3, 3> {
     /// # Example
     ///
     /// ```
-    /// use irys_cv::image::SeparableKernel;
+    /// use fovea::image::SeparableKernel;
     ///
     /// let k = SeparableKernel::gaussian_3();
     /// assert_eq!(k.h_weights(), &[1.0, 2.0, 1.0]);
@@ -285,7 +285,7 @@ impl SeparableKernel<3, 3> {
     /// # Example
     ///
     /// ```
-    /// use irys_cv::image::SeparableKernel;
+    /// use fovea::image::SeparableKernel;
     ///
     /// let k = SeparableKernel::box_blur_3();
     /// let third = 1.0f32 / 3.0;
@@ -308,7 +308,7 @@ impl SeparableKernel<5, 5> {
     /// # Example
     ///
     /// ```
-    /// use irys_cv::image::SeparableKernel;
+    /// use fovea::image::SeparableKernel;
     ///
     /// let k = SeparableKernel::gaussian_5();
     /// assert_eq!(k.h_weights(), &[1.0, 4.0, 6.0, 4.0, 1.0]);
@@ -326,7 +326,7 @@ impl SeparableKernel<5, 5> {
     /// # Example
     ///
     /// ```
-    /// use irys_cv::image::SeparableKernel;
+    /// use fovea::image::SeparableKernel;
     ///
     /// let k = SeparableKernel::box_blur_5();
     /// let fifth = 1.0f32 / 5.0;

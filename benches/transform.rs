@@ -1,5 +1,5 @@
 use criterion::{Criterion, criterion_group, criterion_main};
-use irys_cv::{
+use fovea::{
     Size,
     image::Image,
     pixel::{FromLinear, LinearPixel, LinearSpace, Mono8, Rgb8, ZeroablePixel},

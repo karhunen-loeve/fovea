@@ -13,8 +13,8 @@
 //! # Examples
 //!
 //! ```
-//! use irys_cv::image::{Image, ImageView};
-//! use irys_cv::transform::{match_template, SAD};
+//! use fovea::image::{Image, ImageView};
+//! use fovea::transform::{match_template, SAD};
 //!
 //! let image = Image::fill(10, 10, 0u8);
 //! let template = Image::fill(3, 3, 0u8);
@@ -160,8 +160,8 @@ where
 /// # Examples
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView};
-/// use irys_cv::transform::{match_template, SAD};
+/// use fovea::image::{Image, ImageView};
+/// use fovea::transform::{match_template, SAD};
 ///
 /// let image = Image::fill(10, 10, 0u8);
 /// let template = Image::fill(3, 3, 0u8);
@@ -326,8 +326,8 @@ where
 /// # Examples
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView};
-/// use irys_cv::transform::{match_template, SAD};
+/// use fovea::image::{Image, ImageView};
+/// use fovea::transform::{match_template, SAD};
 ///
 /// let image = Image::fill(5, 5, 100u8);
 /// let template = Image::fill(3, 3, 100u8);
@@ -336,7 +336,7 @@ where
 /// // Perfect match everywhere — all scores are 0
 /// assert_eq!(result.width(), 3);
 /// assert_eq!(result.height(), 3);
-/// # use irys_cv::pixel::MonoF32;
+/// # use fovea::pixel::MonoF32;
 /// for y in 0..result.height() {
 ///     for x in 0..result.width() {
 ///         assert_eq!(result.pixel_at(x, y), MonoF32(0.0));
@@ -397,15 +397,15 @@ where
 /// # Examples
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView};
-/// use irys_cv::transform::{match_template, SSD};
+/// use fovea::image::{Image, ImageView};
+/// use fovea::transform::{match_template, SSD};
 ///
 /// let image = Image::fill(5, 5, 100u8);
 /// let template = Image::fill(3, 3, 100u8);
 /// let result = match_template(&image, &template, SSD).unwrap();
 ///
 /// // Perfect match everywhere — all scores are 0
-/// # use irys_cv::pixel::MonoF32;
+/// # use fovea::pixel::MonoF32;
 /// for y in 0..result.height() {
 ///     for x in 0..result.width() {
 ///         assert_eq!(result.pixel_at(x, y), MonoF32(0.0));
@@ -547,8 +547,8 @@ where
 /// # Examples
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView};
-/// use irys_cv::transform::{match_template, NCC};
+/// use fovea::image::{Image, ImageView};
+/// use fovea::transform::{match_template, NCC};
 ///
 /// // 3×1 image with a gradient
 /// let image = Image::from_vec(3, 1, vec![10u8, 20, 30]).unwrap();

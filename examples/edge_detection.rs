@@ -16,17 +16,17 @@ fn main() {
     // ImageView / ImageViewMut are *traits* — they must be in scope so we
     // can call `.width()`, `.height()`, `.pixel_at()`, and `.pixel_at_mut()`
     // on any image type.
-    use irys_cv::image::{Image, ImageView, ImageViewMut};
+    use fovea::image::{Image, ImageView, ImageViewMut};
 
     // Mono8 is a single-channel, 8-bit grayscale pixel backed by
     // `Saturating<u8>`, which means arithmetic saturates instead of wrapping.
-    use irys_cv::pixel::{Mono8, MonoF32};
+    use fovea::pixel::{Mono8, MonoF32};
 
     // Clamp is a border policy: when a filter kernel overlaps the image
     // boundary, out-of-bounds reads return the nearest edge pixel.
     // This is the most common choice for gradient filters because it
     // avoids introducing artificial edges at the border.
-    use irys_cv::border::Clamp;
+    use fovea::border::Clamp;
 
     // sobel_x computes the horizontal image derivative (dI/dx).
     // Vertical edges — where intensity changes left-to-right — produce a
@@ -35,7 +35,7 @@ fn main() {
     // (bright→dark) are preserved. Under ADR-0045 / ADR-0044, gradient
     // images are pixel-role spatial grids of signed intensities; the
     // `MonoF32` wrapper names that semantic explicitly.
-    use irys_cv::transform::sobel_x;
+    use fovea::transform::sobel_x;
 
     // ── Build a synthetic test image ────────────────────────────────────
     //

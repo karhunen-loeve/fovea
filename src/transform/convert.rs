@@ -28,8 +28,8 @@ use crate::pixel::{
 ///
 /// # Implementing a custom strategy
 /// ```
-/// # use irys_cv::pixel::{Rgb8, Mono8};
-/// # use irys_cv::transform::ConvertPixel;
+/// # use fovea::pixel::{Rgb8, Mono8};
+/// # use fovea::transform::ConvertPixel;
 /// struct MaxChannel;
 ///
 /// impl ConvertPixel<Rgb8, Mono8> for MaxChannel {
@@ -68,8 +68,8 @@ pub trait ConvertPixel<Src, Dst> {
 /// - `Mono8(255)` → `f32(1.0)` — max maps to 1.0
 ///
 /// ```
-/// # use irys_cv::pixel::{Mono8, Mono16};
-/// # use irys_cv::transform::{ConvertPixel, FullRange};
+/// # use fovea::pixel::{Mono8, Mono16};
+/// # use fovea::transform::{ConvertPixel, FullRange};
 /// let lo = Mono8::new(0);
 /// let hi = Mono8::new(255);
 /// let lo16: Mono16 = FullRange.convert(&lo);
@@ -92,8 +92,8 @@ pub struct FullRange;
 /// - `Mono16(42)` → `Mono8(42)` — fits, so preserved
 ///
 /// ```
-/// # use irys_cv::pixel::{Mono8, Mono16};
-/// # use irys_cv::transform::{ConvertPixel, Narrow};
+/// # use fovea::pixel::{Mono8, Mono16};
+/// # use fovea::transform::{ConvertPixel, Narrow};
 /// let a: Mono8 = Narrow.convert(&Mono16::new(42));
 /// assert_eq!(a, Mono8::new(42));
 /// let b: Mono8 = Narrow.convert(&Mono16::new(300));
@@ -123,8 +123,8 @@ pub struct Narrow;
 ///
 /// # Examples
 /// ```
-/// # use irys_cv::pixel::{Rgb8, Mono8};
-/// # use irys_cv::transform::{ConvertPixel, Luminance};
+/// # use fovea::pixel::{Rgb8, Mono8};
+/// # use fovea::transform::{ConvertPixel, Luminance};
 /// let white = Rgb8::new(255, 255, 255);
 /// assert_eq!(Luminance.convert(&white), Mono8::new(255));
 ///
@@ -142,8 +142,8 @@ pub struct Luminance;
 ///
 /// # Examples
 /// ```
-/// # use irys_cv::pixel::{Mono8, Rgb8};
-/// # use irys_cv::transform::{ConvertPixel, Broadcast};
+/// # use fovea::pixel::{Mono8, Rgb8};
+/// # use fovea::transform::{ConvertPixel, Broadcast};
 /// let gray = Mono8::new(128);
 /// let rgb: Rgb8 = Broadcast.convert(&gray);
 /// assert_eq!(rgb, Rgb8::new(128, 128, 128));
@@ -159,8 +159,8 @@ pub struct Broadcast;
 ///
 /// # Examples
 /// ```
-/// # use irys_cv::pixel::{Rgb8, Bgr8};
-/// # use irys_cv::transform::{ConvertPixel, ColorSwap};
+/// # use fovea::pixel::{Rgb8, Bgr8};
+/// # use fovea::transform::{ConvertPixel, ColorSwap};
 /// let rgb = Rgb8::new(200, 100, 50);
 /// let bgr: Bgr8 = ColorSwap.convert(&rgb);
 /// assert_eq!(bgr, Bgr8::new(50, 100, 200));
@@ -177,8 +177,8 @@ pub struct ColorSwap;
 ///
 /// # Examples
 /// ```
-/// # use irys_cv::pixel::{Rgb8, Rgba8};
-/// # use irys_cv::transform::{ConvertPixel, AddAlpha};
+/// # use fovea::pixel::{Rgb8, Rgba8};
+/// # use fovea::transform::{ConvertPixel, AddAlpha};
 /// let rgb = Rgb8::new(10, 20, 30);
 /// let rgba: Rgba8 = AddAlpha.convert(&rgb);
 /// assert_eq!(rgba, Rgba8::new(10, 20, 30, 255));
@@ -204,8 +204,8 @@ pub struct AddAlpha;
 ///
 /// Decode sRGB to linear:
 /// ```
-/// # use irys_cv::pixel::{Srgb8, RgbF32};
-/// # use irys_cv::transform::{ConvertPixel, SrgbGamma};
+/// # use fovea::pixel::{Srgb8, RgbF32};
+/// # use fovea::transform::{ConvertPixel, SrgbGamma};
 /// let srgb = Srgb8::new(128, 64, 255);
 /// let linear: RgbF32 = SrgbGamma.convert(&srgb);
 /// // Mid-gray sRGB ≈ 0.216 linear, not 0.502
@@ -214,8 +214,8 @@ pub struct AddAlpha;
 ///
 /// Encode linear to sRGB:
 /// ```
-/// # use irys_cv::pixel::{Srgb8, RgbF32};
-/// # use irys_cv::transform::{ConvertPixel, SrgbGamma};
+/// # use fovea::pixel::{Srgb8, RgbF32};
+/// # use fovea::transform::{ConvertPixel, SrgbGamma};
 /// let linear = RgbF32::new(0.5, 0.0, 1.0);
 /// let srgb: Srgb8 = SrgbGamma.convert(&linear);
 /// // 0.5 linear ≈ 188 sRGB, not 128
@@ -224,8 +224,8 @@ pub struct AddAlpha;
 ///
 /// Compose with other strategies via [`.then()`](ConvertPixelExt::then):
 /// ```
-/// # use irys_cv::pixel::{Srgb8, Rgb16, RgbF32};
-/// # use irys_cv::transform::{ConvertPixel, ConvertPixelExt, SrgbGamma, FullRange};
+/// # use fovea::pixel::{Srgb8, Rgb16, RgbF32};
+/// # use fovea::transform::{ConvertPixel, ConvertPixelExt, SrgbGamma, FullRange};
 /// // sRGB 8-bit → linear f32 → linear 16-bit
 /// let method = SrgbGamma.then::<RgbF32, _>(FullRange);
 /// let result: Rgb16 = method.convert(&Srgb8::new(128, 128, 128));
@@ -1618,9 +1618,9 @@ impl ConvertPixel<MonoAF32, SrgbMonoA16> for SrgbGamma {
 ///
 /// # Example
 /// ```
-/// # use irys_cv::image::{Image, ImageView};
-/// # use irys_cv::pixel::Mono8;
-/// # use irys_cv::transform::{BinaryThreshold, convert_image};
+/// # use fovea::image::{Image, ImageView};
+/// # use fovea::pixel::Mono8;
+/// # use fovea::transform::{BinaryThreshold, convert_image};
 /// let img = Image::fill(4, 4, Mono8::new(200));
 /// let out: Image<Mono8> = convert_image(&img, BinaryThreshold { thresh: Mono8::new(128) });
 /// assert_eq!(out.pixel_at(0, 0), Mono8::new(255));
@@ -1658,9 +1658,9 @@ where
 ///
 /// # Example
 /// ```
-/// # use irys_cv::image::{Image, ImageView};
-/// # use irys_cv::pixel::Mono8;
-/// # use irys_cv::transform::{BinaryThresholdInv, convert_image};
+/// # use fovea::image::{Image, ImageView};
+/// # use fovea::pixel::Mono8;
+/// # use fovea::transform::{BinaryThresholdInv, convert_image};
 /// let img = Image::fill(4, 4, Mono8::new(200));
 /// let out: Image<Mono8> = convert_image(&img, BinaryThresholdInv { thresh: Mono8::new(128) });
 /// assert_eq!(out.pixel_at(0, 0), Mono8::new(0));
@@ -1698,9 +1698,9 @@ where
 ///
 /// # Example
 /// ```
-/// # use irys_cv::image::{Image, ImageView};
-/// # use irys_cv::pixel::Mono8;
-/// # use irys_cv::transform::{TruncateThreshold, convert_image};
+/// # use fovea::image::{Image, ImageView};
+/// # use fovea::pixel::Mono8;
+/// # use fovea::transform::{TruncateThreshold, convert_image};
 /// let img = Image::fill(4, 4, Mono8::new(200));
 /// let out: Image<Mono8> = convert_image(&img, TruncateThreshold { thresh: Mono8::new(128) });
 /// assert_eq!(out.pixel_at(0, 0), Mono8::new(128));
@@ -1734,9 +1734,9 @@ where
 ///
 /// # Example
 /// ```
-/// # use irys_cv::image::{Image, ImageView};
-/// # use irys_cv::pixel::Mono8;
-/// # use irys_cv::transform::{ToZeroThreshold, convert_image};
+/// # use fovea::image::{Image, ImageView};
+/// # use fovea::pixel::Mono8;
+/// # use fovea::transform::{ToZeroThreshold, convert_image};
 /// let img = Image::fill(4, 4, Mono8::new(200));
 /// let out: Image<Mono8> = convert_image(&img, ToZeroThreshold { thresh: Mono8::new(128) });
 /// assert_eq!(out.pixel_at(0, 0), Mono8::new(200));
@@ -1774,9 +1774,9 @@ where
 ///
 /// # Example
 /// ```
-/// # use irys_cv::image::{Image, ImageView};
-/// # use irys_cv::pixel::Mono8;
-/// # use irys_cv::transform::{ToZeroThresholdInv, convert_image};
+/// # use fovea::image::{Image, ImageView};
+/// # use fovea::pixel::Mono8;
+/// # use fovea::transform::{ToZeroThresholdInv, convert_image};
 /// let img = Image::fill(4, 4, Mono8::new(200));
 /// let out: Image<Mono8> = convert_image(&img, ToZeroThresholdInv { thresh: Mono8::new(128) });
 /// assert_eq!(out.pixel_at(0, 0), Mono8::new(0));
@@ -1827,9 +1827,9 @@ where
 ///
 /// # Example
 /// ```
-/// # use irys_cv::image::{BinaryImage, Image, ImageView};
-/// # use irys_cv::pixel::Mono8;
-/// # use irys_cv::transform::{BinaryMask, convert_image};
+/// # use fovea::image::{BinaryImage, Image, ImageView};
+/// # use fovea::pixel::Mono8;
+/// # use fovea::transform::{BinaryMask, convert_image};
 /// let img = Image::fill(4, 4, Mono8::new(200));
 /// let mask: BinaryImage = convert_image(&img, BinaryMask { thresh: Mono8::new(128) });
 /// assert!(mask.pixel_at(0, 0));
@@ -1877,9 +1877,9 @@ where
 ///
 /// # Example
 /// ```
-/// # use irys_cv::image::{Image, ImageView};
-/// # use irys_cv::pixel::Mono8;
-/// # use irys_cv::transform::{Invert, convert_image};
+/// # use fovea::image::{Image, ImageView};
+/// # use fovea::pixel::Mono8;
+/// # use fovea::transform::{Invert, convert_image};
 /// let img = Image::fill(4, 4, Mono8::new(10));
 /// let out: Image<Mono8> = convert_image(&img, Invert);
 /// assert_eq!(out.pixel_at(0, 0), Mono8::new(245));
@@ -1935,9 +1935,9 @@ where
 ///
 /// # Example
 /// ```
-/// # use irys_cv::image::{Image, ImageView};
-/// # use irys_cv::pixel::Mono8;
-/// # use irys_cv::transform::{Clamp, convert_image};
+/// # use fovea::image::{Image, ImageView};
+/// # use fovea::pixel::Mono8;
+/// # use fovea::transform::{Clamp, convert_image};
 /// let img = Image::fill(4, 4, Mono8::new(10));
 /// let out: Image<Mono8> = convert_image(
 ///     &img,
@@ -1948,8 +1948,8 @@ where
 ///
 /// Per-channel ranges on multi-channel pixels are naturally expressible:
 /// ```
-/// # use irys_cv::pixel::Rgb8;
-/// # use irys_cv::transform::{Clamp, ConvertPixel};
+/// # use fovea::pixel::Rgb8;
+/// # use fovea::transform::{Clamp, ConvertPixel};
 /// let strat = Clamp::new(
 ///     Rgb8::new(16, 16, 16),
 ///     Rgb8::new(235, 240, 235),
@@ -1961,8 +1961,8 @@ where
 /// invariant cannot be bypassed:
 ///
 /// ```compile_fail
-/// # use irys_cv::pixel::Mono8;
-/// # use irys_cv::transform::Clamp;
+/// # use fovea::pixel::Mono8;
+/// # use fovea::transform::Clamp;
 /// // ERROR: field `lo` of struct `Clamp` is private.
 /// let _ = Clamp { lo: Mono8::new(200), hi: Mono8::new(50) };
 /// ```
@@ -1993,8 +1993,8 @@ where
     /// # Example
     ///
     /// ```
-    /// # use irys_cv::pixel::Mono8;
-    /// # use irys_cv::transform::Clamp;
+    /// # use fovea::pixel::Mono8;
+    /// # use fovea::transform::Clamp;
     /// let strat = Clamp::new(Mono8::new(20), Mono8::new(235));
     /// assert_eq!(strat.lo(), Mono8::new(20));
     /// assert_eq!(strat.hi(), Mono8::new(235));
@@ -2003,8 +2003,8 @@ where
     /// Inverted ranges are rejected:
     ///
     /// ```should_panic
-    /// # use irys_cv::pixel::Mono8;
-    /// # use irys_cv::transform::Clamp;
+    /// # use fovea::pixel::Mono8;
+    /// # use fovea::transform::Clamp;
     /// let _ = Clamp::new(Mono8::new(200), Mono8::new(50));
     /// ```
     #[inline]
@@ -2099,9 +2099,9 @@ where
 ///
 /// # Example
 /// ```
-/// # use irys_cv::image::{Image, ImageView};
-/// # use irys_cv::pixel::Mono8;
-/// # use irys_cv::transform::{BrightnessContrast, convert_image};
+/// # use fovea::image::{Image, ImageView};
+/// # use fovea::pixel::Mono8;
+/// # use fovea::transform::{BrightnessContrast, convert_image};
 /// let img = Image::fill(4, 4, Mono8::new(100));
 /// // Increase contrast 1.5x and brightness +10.
 /// let out: Image<Mono8> = convert_image(
@@ -2114,9 +2114,9 @@ where
 ///
 /// Identity (contrast = 1.0, brightness = 0.0) preserves the image:
 /// ```
-/// # use irys_cv::image::{Image, ImageView};
-/// # use irys_cv::pixel::Mono8;
-/// # use irys_cv::transform::{BrightnessContrast, convert_image};
+/// # use fovea::image::{Image, ImageView};
+/// # use fovea::pixel::Mono8;
+/// # use fovea::transform::{BrightnessContrast, convert_image};
 /// let img = Image::fill(2, 2, Mono8::new(123));
 /// let out: Image<Mono8> = convert_image(
 ///     &img,
@@ -2191,9 +2191,9 @@ where
 /// Pseudocolor mapping:
 ///
 /// ```
-/// # use irys_cv::image::{Image, ImageView};
-/// # use irys_cv::pixel::{Mono8, Rgb8};
-/// # use irys_cv::transform::{Lut, convert_image};
+/// # use fovea::image::{Image, ImageView};
+/// # use fovea::pixel::{Mono8, Rgb8};
+/// # use fovea::transform::{Lut, convert_image};
 /// // Heat map: black → red → yellow → white.
 /// let lut: Lut<Rgb8> = Lut::from_fn(|v| {
 ///     if v < 128 {
@@ -2210,8 +2210,8 @@ where
 /// Identity LUT is a no-op on `Mono8`:
 ///
 /// ```
-/// # use irys_cv::pixel::Mono8;
-/// # use irys_cv::transform::{ConvertPixel, Lut};
+/// # use fovea::pixel::Mono8;
+/// # use fovea::transform::{ConvertPixel, Lut};
 /// let lut: Lut<Mono8> = Lut::from_fn(Mono8::new);
 /// assert_eq!(lut.convert(&Mono8::new(42)), Mono8::new(42));
 /// ```
@@ -2275,8 +2275,8 @@ impl<V: Copy> ConvertPixel<Mono8, V> for Lut<V> {
 /// Per-channel gamma-like curve applied to all three channels of an Rgb8:
 ///
 /// ```
-/// # use irys_cv::pixel::Rgb8;
-/// # use irys_cv::transform::{ChannelLut, ConvertPixel};
+/// # use fovea::pixel::Rgb8;
+/// # use fovea::transform::{ChannelLut, ConvertPixel};
 /// // Simple contrast-boost curve.
 /// let curve = ChannelLut::from_fn(|v| ((v as u16) * 3 / 2).min(255) as u8);
 /// assert_eq!(curve.convert(&Rgb8::new(100, 150, 200)), Rgb8::new(150, 225, 255));
@@ -2345,8 +2345,8 @@ where
 /// # Examples
 ///
 /// ```
-/// # use irys_cv::pixel::{Indexed8, Rgb8};
-/// # use irys_cv::transform::{ConvertPixel, Depalettize};
+/// # use fovea::pixel::{Indexed8, Rgb8};
+/// # use fovea::transform::{ConvertPixel, Depalettize};
 /// let palette = [Rgb8::new(0, 0, 0); 256]; // all black
 /// let strategy = Depalettize::new(palette);
 /// assert_eq!(strategy.convert(&Indexed8(0)), Rgb8::new(0, 0, 0));
@@ -2361,8 +2361,8 @@ impl<P: Copy> Depalettize<P> {
     /// # Examples
     ///
     /// ```
-    /// # use irys_cv::pixel::{Indexed8, Rgb8};
-    /// # use irys_cv::transform::{ConvertPixel, Depalettize};
+    /// # use fovea::pixel::{Indexed8, Rgb8};
+    /// # use fovea::transform::{ConvertPixel, Depalettize};
     /// let palette = [Rgb8::new(0, 0, 0); 256];
     /// let strategy = Depalettize::new(palette);
     /// assert_eq!(strategy.convert(&Indexed8(0)), Rgb8::new(0, 0, 0));
@@ -2383,8 +2383,8 @@ impl<P: Copy + ZeroablePixel> Depalettize<P> {
     /// # Examples
     ///
     /// ```
-    /// # use irys_cv::pixel::{Indexed8, Rgb8};
-    /// # use irys_cv::transform::{ConvertPixel, Depalettize};
+    /// # use fovea::pixel::{Indexed8, Rgb8};
+    /// # use fovea::transform::{ConvertPixel, Depalettize};
     /// let entries = [Rgb8::new(255, 0, 0), Rgb8::new(0, 255, 0)];
     /// let strategy = Depalettize::from_slice(&entries);
     /// assert_eq!(strategy.convert(&Indexed8(0)), Rgb8::new(255, 0, 0));
@@ -2419,9 +2419,9 @@ impl<P: Copy> ConvertPixel<Indexed8, P> for Depalettize<P> {
 ///
 /// # Examples
 /// ```
-/// # use irys_cv::image::{Image, ImageView};
-/// # use irys_cv::pixel::{Mono8, PlainChannel};
-/// # use irys_cv::transform::{ConvertPixel, PixelMap, convert_image};
+/// # use fovea::image::{Image, ImageView};
+/// # use fovea::pixel::{Mono8, PlainChannel};
+/// # use fovea::transform::{ConvertPixel, PixelMap, convert_image};
 /// let img = Image::fill(2, 2, Mono8::new(200));
 /// // ADR-0046: byte-layout items (`as_bytes`, `SIZE`, …) live on
 /// // `PlainChannel`; `PlainPixel` extends it but the call below only
@@ -2434,7 +2434,7 @@ impl<P: Copy> ConvertPixel<Indexed8, P> for Depalettize<P> {
 ///
 /// Custom pixel types work just as well:
 /// ```
-/// # use irys_cv::transform::{ConvertPixel, PixelMap};
+/// # use fovea::transform::{ConvertPixel, PixelMap};
 /// // Hypothetical: convert a complex-valued pixel to its magnitude.
 /// // let res: Image<f64> = convert_image(&img, PixelMap(|c: &Complex| c.magnitude()));
 /// ```
@@ -2469,8 +2469,8 @@ where
 /// [`ConvertPixelExt::then`] method instead:
 ///
 /// ```
-/// # use irys_cv::pixel::{Rgb8, Bgr8, Bgr16};
-/// # use irys_cv::transform::{ConvertPixel, ConvertPixelExt, ColorSwap, FullRange};
+/// # use fovea::pixel::{Rgb8, Bgr8, Bgr16};
+/// # use fovea::transform::{ConvertPixel, ConvertPixelExt, ColorSwap, FullRange};
 /// // Rgb8 → Bgr8 → Bgr16  (cross-depth colour swap, single pass)
 /// let method = ColorSwap.then::<Bgr8, _>(FullRange);
 /// let result: Bgr16 = method.convert(&Rgb8::new(200, 100, 50));
@@ -2479,8 +2479,8 @@ where
 /// Chains of any length are supported via repeated `.then()` calls:
 ///
 /// ```
-/// # use irys_cv::pixel::{Rgb8, Bgr8, Bgra8, Bgra16};
-/// # use irys_cv::transform::{ConvertPixel, ConvertPixelExt, ColorSwap, AddAlpha, FullRange};
+/// # use fovea::pixel::{Rgb8, Bgr8, Bgra8, Bgra16};
+/// # use fovea::transform::{ConvertPixel, ConvertPixelExt, ColorSwap, AddAlpha, FullRange};
 /// // Rgb8 → Bgr8 → Bgra8 → Bgra16  (three steps, zero intermediate images)
 /// let method = ColorSwap.then::<Bgr8, _>(AddAlpha).then::<Bgra8, _>(FullRange);
 /// let result: Bgra16 = method.convert(&Rgb8::new(255, 0, 0));
@@ -2525,9 +2525,9 @@ where
 /// Cross-depth colour swap (`Rgb8 → Bgr8 → Bgr16`):
 ///
 /// ```
-/// # use irys_cv::image::Image;
-/// # use irys_cv::pixel::{Rgb8, Bgr8, Bgr16};
-/// # use irys_cv::transform::{convert_image, ConvertPixelExt, ColorSwap, FullRange};
+/// # use fovea::image::Image;
+/// # use fovea::pixel::{Rgb8, Bgr8, Bgr16};
+/// # use fovea::transform::{convert_image, ConvertPixelExt, ColorSwap, FullRange};
 /// let img = Image::fill(4, 4, Rgb8::new(200, 100, 50));
 /// let out: Image<Bgr16> = convert_image(&img, ColorSwap.then::<Bgr8, _>(FullRange));
 /// ```
@@ -2535,9 +2535,9 @@ where
 /// Cross-depth luminance (`Rgb16 → Mono16 → Mono8`):
 ///
 /// ```
-/// # use irys_cv::image::Image;
-/// # use irys_cv::pixel::{Rgb16, Mono8, Mono16};
-/// # use irys_cv::transform::{convert_image, ConvertPixelExt, Luminance, FullRange};
+/// # use fovea::image::Image;
+/// # use fovea::pixel::{Rgb16, Mono8, Mono16};
+/// # use fovea::transform::{convert_image, ConvertPixelExt, Luminance, FullRange};
 /// let img = Image::fill(4, 4, Rgb16::new(65535, 65535, 65535));
 /// let out: Image<Mono8> = convert_image(&img, Luminance.then::<Mono16, _>(FullRange));
 /// ```
@@ -2545,8 +2545,8 @@ where
 /// Triple chain (`Rgb8 → Bgr8 → Bgra8 → Bgra16`):
 ///
 /// ```
-/// # use irys_cv::pixel::{Rgb8, Bgr8, Bgra8, Bgra16};
-/// # use irys_cv::transform::{ConvertPixel, ConvertPixelExt, ColorSwap, AddAlpha, FullRange};
+/// # use fovea::pixel::{Rgb8, Bgr8, Bgra8, Bgra16};
+/// # use fovea::transform::{ConvertPixel, ConvertPixelExt, ColorSwap, AddAlpha, FullRange};
 /// let px = Rgb8::new(255, 0, 0);
 /// let result: Bgra16 = ColorSwap
 ///     .then::<Bgr8, _>(AddAlpha)
@@ -2568,8 +2568,8 @@ pub trait ConvertPixelExt: Sized {
     /// # Example
     ///
     /// ```
-    /// # use irys_cv::pixel::{Rgb8, Bgr8, Bgr16};
-    /// # use irys_cv::transform::{ConvertPixel, ConvertPixelExt, ColorSwap, FullRange};
+    /// # use fovea::pixel::{Rgb8, Bgr8, Bgr16};
+    /// # use fovea::transform::{ConvertPixel, ConvertPixelExt, ColorSwap, FullRange};
     /// let bgr16: Bgr16 = ColorSwap.then::<Bgr8, _>(FullRange).convert(&Rgb8::new(1, 2, 3));
     /// ```
     fn then<Mid, B>(self, next: B) -> Then<Self, B, Mid> {
@@ -2596,9 +2596,9 @@ impl<T: Sized> ConvertPixelExt for T {}
 ///
 /// # Example
 /// ```
-/// # use irys_cv::image::Image;
-/// # use irys_cv::pixel::{Mono8, Mono16};
-/// # use irys_cv::transform::{convert_image_into, FullRange};
+/// # use fovea::image::Image;
+/// # use fovea::pixel::{Mono8, Mono16};
+/// # use fovea::transform::{convert_image_into, FullRange};
 /// let img: Image<Mono8> = Image::fill(4, 4, Mono8::new(128));
 /// let mut out: Image<Mono16> = Image::zero(4, 4);
 /// convert_image_into(&img, &mut out, FullRange);
@@ -2630,9 +2630,9 @@ where
 ///
 /// # Example
 /// ```
-/// # use irys_cv::image::Image;
-/// # use irys_cv::pixel::{Mono8, Mono16};
-/// # use irys_cv::transform::{convert_image, FullRange};
+/// # use fovea::image::Image;
+/// # use fovea::pixel::{Mono8, Mono16};
+/// # use fovea::transform::{convert_image, FullRange};
 /// let img: Image<Mono8> = Image::fill(4, 4, Mono8::new(128));
 /// let out: Image<Mono16> = convert_image(&img, FullRange);
 /// ```

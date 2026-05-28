@@ -25,8 +25,8 @@ pub trait SubView: ImageView {
     /// # Example
     ///
     /// ```
-    /// use irys_cv::Size;
-    /// use irys_cv::image::{Image, ImageView, SubView};
+    /// use fovea::Size;
+    /// use fovea::image::{Image, ImageView, SubView};
     ///
     /// let img = Image::generate(6, 4, |x, y| (x + y * 6) as u8);
     /// let tiles: Vec<_> = img.into_tiles(Size::new(3, 2)).collect();
@@ -49,8 +49,8 @@ pub trait SubView: ImageView {
     /// For custom strides, use the [`SlidingWindow`] builder instead:
     ///
     /// ```
-    /// use irys_cv::{Size, Stride};
-    /// use irys_cv::image::{Image, ImageView, SubView, SlidingWindow};
+    /// use fovea::{Size, Stride};
+    /// use fovea::image::{Image, ImageView, SubView, SlidingWindow};
     ///
     /// let img = Image::generate(8, 8, |x, y| (x + y) as u8);
     ///
@@ -64,8 +64,8 @@ pub trait SubView: ImageView {
     /// # Example
     ///
     /// ```
-    /// use irys_cv::Size;
-    /// use irys_cv::image::{Image, ImageView, SubView};
+    /// use fovea::Size;
+    /// use fovea::image::{Image, ImageView, SubView};
     ///
     /// let img = Image::generate(4, 4, |x, y| (x + y * 4) as u8);
     /// // 3×3 window on a 4×4 image with stride 1 → 2×2 = 4 positions
@@ -167,8 +167,8 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::{Size, Stride};
-/// use irys_cv::image::{Image, ImageView, SubView, SlidingWindow};
+/// use fovea::{Size, Stride};
+/// use fovea::image::{Image, ImageView, SubView, SlidingWindow};
 ///
 /// let img = Image::generate(10, 10, |x, y| (x + y) as u8);
 ///
@@ -230,8 +230,8 @@ impl SlidingWindow {
 /// # Example
 ///
 /// ```
-/// use irys_cv::{Size, Stride};
-/// use irys_cv::image::{Image, ImageView, SubView, SlidingWindow};
+/// use fovea::{Size, Stride};
+/// use fovea::image::{Image, ImageView, SubView, SlidingWindow};
 ///
 /// let img = Image::generate(6, 6, |x, y| (x + y * 6) as u8);
 ///
@@ -305,8 +305,8 @@ where
     /// # Example
     ///
     /// ```
-    /// use irys_cv::Size;
-    /// use irys_cv::image::{Image, ImageView, SubView};
+    /// use fovea::Size;
+    /// use fovea::image::{Image, ImageView, SubView};
     ///
     /// let img = Image::generate(5, 5, |x, y| (x + y * 5) as u8);
     /// for ((col, row), window) in img.sliding_windows(Size::new(3, 3)).enumerate_positions() {
@@ -428,8 +428,8 @@ impl<'a, T> ExactSizeIterator for EnumeratePositions<'a, T> where T: SubView {}
 /// # Example
 ///
 /// ```
-/// use irys_cv::Size;
-/// use irys_cv::image::{Image, ImageView, ImageViewMut, IntoTilesMut};
+/// use fovea::Size;
+/// use fovea::image::{Image, ImageView, ImageViewMut, IntoTilesMut};
 ///
 /// let mut img = Image::fill(6, 4, 0u8);
 /// let mut tile_count = 0;
@@ -571,8 +571,8 @@ mod sealed {
 /// # Example
 ///
 /// ```
-/// use irys_cv::Size;
-/// use irys_cv::image::{Image, ImageView, ImageViewMut, IntoTilesMut};
+/// use fovea::Size;
+/// use fovea::image::{Image, ImageView, ImageViewMut, IntoTilesMut};
 ///
 /// let mut img = Image::fill(8, 8, 0u8);
 /// for mut tile in (&mut img).into_tiles_mut(Size::new(4, 4)) {

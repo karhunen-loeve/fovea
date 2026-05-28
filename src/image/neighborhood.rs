@@ -16,7 +16,7 @@ use crate::image::sequential::{ContiguousImage, ImageArray};
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Neighborhood, Kernel, ImageView};
+/// use fovea::image::{Neighborhood, Kernel, ImageView};
 ///
 /// let kernel = Neighborhood::<f32, 3, 3>::sobel_x();
 /// let flipped = kernel.flipped();
@@ -79,7 +79,7 @@ pub trait Kernel {
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Neighborhood, ImageView};
+/// use fovea::image::{Neighborhood, ImageView};
 ///
 /// // A simple 3×3 box blur kernel (un-normalised)
 /// let kernel = Neighborhood::<f32, 3, 3>::new([
@@ -93,7 +93,7 @@ pub trait Kernel {
 /// ```
 ///
 /// ```
-/// use irys_cv::image::{Neighborhood, ImageView};
+/// use fovea::image::{Neighborhood, ImageView};
 ///
 /// // Iterate over kernel positions relative to anchor
 /// let kernel = Neighborhood::<i32, 3, 1>::new([1, 2, 1]);
@@ -122,7 +122,7 @@ where
     /// # Example
     ///
     /// ```
-    /// use irys_cv::image::Neighborhood;
+    /// use fovea::image::Neighborhood;
     ///
     /// let kernel = Neighborhood::<f32, 3, 3>::new([
     ///     0.0, -1.0,  0.0,
@@ -149,7 +149,7 @@ where
     /// # Example
     ///
     /// ```
-    /// use irys_cv::image::Neighborhood;
+    /// use fovea::image::Neighborhood;
     ///
     /// // Anchor at top-left corner
     /// let kernel = Neighborhood::<f32, 3, 3>::with_anchor(
@@ -185,10 +185,10 @@ where
     /// # Example
     ///
     /// ```
-    /// use irys_cv::image::{Neighborhood, ImageView};
+    /// use fovea::image::{Neighborhood, ImageView};
     ///
     /// let kernel = Neighborhood::<f32, 3, 3>::new([1.0; 9]);
-    /// assert_eq!(kernel.weights().size(), irys_cv::Size::new(3, 3));
+    /// assert_eq!(kernel.weights().size(), fovea::Size::new(3, 3));
     /// assert_eq!(kernel.weights().pixel_at(0, 0), 1.0);
     /// ```
     pub fn weights(&self) -> &ImageArray<W, KW, KH> {
@@ -231,7 +231,7 @@ where
     /// # Example
     ///
     /// ```
-    /// use irys_cv::image::Neighborhood;
+    /// use fovea::image::Neighborhood;
     ///
     /// let kernel = Neighborhood::<f32, 3, 3>::new([
     ///     1.0, 2.0, 3.0,
@@ -445,7 +445,7 @@ impl Neighborhood<f32, 3, 3> {
     /// # Example
     ///
     /// ```
-    /// use irys_cv::image::Neighborhood;
+    /// use fovea::image::Neighborhood;
     ///
     /// let k = Neighborhood::box_blur_3x3();
     /// assert_eq!(k.anchor(), (1, 1));
@@ -463,7 +463,7 @@ impl Neighborhood<f32, 3, 3> {
     /// # Example
     ///
     /// ```
-    /// use irys_cv::image::Neighborhood;
+    /// use fovea::image::Neighborhood;
     ///
     /// let k = Neighborhood::gaussian_3x3();
     /// let sum: f32 = k.positions().map(|(_, _, w)| w).sum();
@@ -604,7 +604,7 @@ impl Neighborhood<f32, 5, 5> {
     /// # Example
     ///
     /// ```
-    /// use irys_cv::image::Neighborhood;
+    /// use fovea::image::Neighborhood;
     ///
     /// let k = Neighborhood::gaussian_5x5();
     /// let sum: f32 = k.positions().map(|(_, _, w)| w).sum();
@@ -707,7 +707,7 @@ impl Neighborhood<bool, 3, 3> {
     /// # Example
     ///
     /// ```
-    /// use irys_cv::image::Neighborhood;
+    /// use fovea::image::Neighborhood;
     ///
     /// let se = Neighborhood::full_rect_3x3();
     /// assert_eq!(se.positions().filter(|&(_, _, w)| w).count(), 9);

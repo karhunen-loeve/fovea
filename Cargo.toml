@@ -7,7 +7,7 @@ description = "A high-precision, type-safe computer vision library guaranteeing 
 repository = "https://github.com/karhunen-loeve/fovea"
 
 [dependencies]
-fovea-derive = "0.1.0"
+fovea-derive = { version = "0.1.0", path = "../fovea-derive" }
 
 [dev-dependencies]
 criterion = { version = "0.7.0", features = ["html_reports"] }

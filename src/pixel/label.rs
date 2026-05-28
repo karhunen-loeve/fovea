@@ -7,11 +7,11 @@
 //! See [ADR-0047] and the consumer module
 //! [`crate::analyze::components`].
 //!
-//! [ADR-0047]: https://github.com/karhunen-loeve/irys-cv/blob/main/docs/adr/0047-connected-components-design.md
+//! [ADR-0047]: https://github.com/karhunen-loeve/fovea/blob/main/docs/adr/0047-connected-components-design.md
 
 use std::num::Saturating;
 
-use irys_cv_derive::{HomogeneousPixel, PlainPixel, ZeroablePixel};
+use fovea_derive::{HomogeneousPixel, PlainPixel, ZeroablePixel};
 
 use crate::pixel::LabelPixel;
 
@@ -55,7 +55,7 @@ use crate::pixel::LabelPixel;
 /// # Examples
 ///
 /// ```
-/// use irys_cv::pixel::{Label32, LabelPixel, ZeroablePixel};
+/// use fovea::pixel::{Label32, LabelPixel, ZeroablePixel};
 ///
 /// // Round-trip through the label-index API.
 /// let l = Label32::from_label_index(7).unwrap();

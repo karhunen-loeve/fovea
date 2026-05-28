@@ -1,7 +1,7 @@
 //! Axis-aligned geometric transforms — physical (allocating) flips and
 //! rotations.
 //!
-//! See [ADR-0022](https://github.com/karhunen-loeve/irys-cv/blob/main/docs/adr/0022-flipped-view-and-lazy-evaluation.md)
+//! See [ADR-0022](https://github.com/karhunen-loeve/fovea/blob/main/docs/adr/0022-flipped-view-and-lazy-evaluation.md)
 //! for why these are physical operations rather than view wrappers.
 //!
 //! ## Functions
@@ -36,7 +36,7 @@
 //!
 //! ## Measured throughput
 //!
-//! `cargo bench -p irys-cv --bench geometry`, `Mono8`, single thread,
+//! `cargo bench -p fovea --bench geometry`, `Mono8`, single thread,
 //! Windows / x86–64 (numbers will vary, but the relative shape is
 //! what matters):
 //!
@@ -73,14 +73,14 @@ use crate::pixel::ZeroablePixel;
 /// # Panics
 ///
 /// Panics if `out.size() != img.size()` (Tier 3 — programmer bug per
-/// [ADR-0025](https://github.com/karhunen-loeve/irys-cv/blob/main/docs/adr/0025-error-handling-conventions.md)).
+/// [ADR-0025](https://github.com/karhunen-loeve/fovea/blob/main/docs/adr/0025-error-handling-conventions.md)).
 ///
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView};
-/// use irys_cv::pixel::Mono8;
-/// use irys_cv::transform::flip_h_into;
+/// use fovea::image::{Image, ImageView};
+/// use fovea::pixel::Mono8;
+/// use fovea::transform::flip_h_into;
 ///
 /// let src = Image::from_vec(2, 1, vec![Mono8::new(1), Mono8::new(2)]).unwrap();
 /// let mut dst = Image::<Mono8>::zero(2, 1);
@@ -117,9 +117,9 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView};
-/// use irys_cv::pixel::Mono8;
-/// use irys_cv::transform::flip_h;
+/// use fovea::image::{Image, ImageView};
+/// use fovea::pixel::Mono8;
+/// use fovea::transform::flip_h;
 ///
 /// let src = Image::from_vec(2, 1, vec![Mono8::new(1), Mono8::new(2)]).unwrap();
 /// let dst = flip_h(&src);
@@ -151,9 +151,9 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView};
-/// use irys_cv::pixel::Mono8;
-/// use irys_cv::transform::flip_v_into;
+/// use fovea::image::{Image, ImageView};
+/// use fovea::pixel::Mono8;
+/// use fovea::transform::flip_v_into;
 ///
 /// let src = Image::from_vec(1, 2, vec![Mono8::new(1), Mono8::new(2)]).unwrap();
 /// let mut dst = Image::<Mono8>::zero(1, 2);
@@ -187,9 +187,9 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView};
-/// use irys_cv::pixel::Mono8;
-/// use irys_cv::transform::flip_v;
+/// use fovea::image::{Image, ImageView};
+/// use fovea::pixel::Mono8;
+/// use fovea::transform::flip_v;
 ///
 /// let src = Image::from_vec(1, 2, vec![Mono8::new(1), Mono8::new(2)]).unwrap();
 /// let dst = flip_v(&src);
@@ -221,9 +221,9 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView};
-/// use irys_cv::pixel::Mono8;
-/// use irys_cv::transform::rotate_90_into;
+/// use fovea::image::{Image, ImageView};
+/// use fovea::pixel::Mono8;
+/// use fovea::transform::rotate_90_into;
 ///
 /// // 2×1 image: [1, 2]
 /// let src = Image::from_vec(2, 1, vec![Mono8::new(1), Mono8::new(2)]).unwrap();
@@ -265,9 +265,9 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView};
-/// use irys_cv::pixel::Mono8;
-/// use irys_cv::transform::rotate_90;
+/// use fovea::image::{Image, ImageView};
+/// use fovea::pixel::Mono8;
+/// use fovea::transform::rotate_90;
 ///
 /// let src = Image::from_vec(2, 1, vec![Mono8::new(1), Mono8::new(2)]).unwrap();
 /// let dst = rotate_90(&src);
@@ -299,9 +299,9 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView};
-/// use irys_cv::pixel::Mono8;
-/// use irys_cv::transform::rotate_180_into;
+/// use fovea::image::{Image, ImageView};
+/// use fovea::pixel::Mono8;
+/// use fovea::transform::rotate_180_into;
 ///
 /// let src = Image::from_vec(2, 1, vec![Mono8::new(1), Mono8::new(2)]).unwrap();
 /// let mut dst = Image::<Mono8>::zero(2, 1);
@@ -336,9 +336,9 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView};
-/// use irys_cv::pixel::Mono8;
-/// use irys_cv::transform::rotate_180;
+/// use fovea::image::{Image, ImageView};
+/// use fovea::pixel::Mono8;
+/// use fovea::transform::rotate_180;
 ///
 /// let src = Image::from_vec(2, 1, vec![Mono8::new(1), Mono8::new(2)]).unwrap();
 /// let dst = rotate_180(&src);
@@ -370,9 +370,9 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView};
-/// use irys_cv::pixel::Mono8;
-/// use irys_cv::transform::rotate_270_into;
+/// use fovea::image::{Image, ImageView};
+/// use fovea::pixel::Mono8;
+/// use fovea::transform::rotate_270_into;
 ///
 /// // 2×1 image: [1, 2]
 /// let src = Image::from_vec(2, 1, vec![Mono8::new(1), Mono8::new(2)]).unwrap();
@@ -414,9 +414,9 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView};
-/// use irys_cv::pixel::Mono8;
-/// use irys_cv::transform::rotate_270;
+/// use fovea::image::{Image, ImageView};
+/// use fovea::pixel::Mono8;
+/// use fovea::transform::rotate_270;
 ///
 /// let src = Image::from_vec(2, 1, vec![Mono8::new(1), Mono8::new(2)]).unwrap();
 /// let dst = rotate_270(&src);
@@ -450,9 +450,9 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView};
-/// use irys_cv::pixel::Mono8;
-/// use irys_cv::transform::transpose_into;
+/// use fovea::image::{Image, ImageView};
+/// use fovea::pixel::Mono8;
+/// use fovea::transform::transpose_into;
 ///
 /// let src = Image::from_vec(2, 1, vec![Mono8::new(1), Mono8::new(2)]).unwrap();
 /// let mut dst = Image::<Mono8>::zero(1, 2);
@@ -491,9 +491,9 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView};
-/// use irys_cv::pixel::Mono8;
-/// use irys_cv::transform::transpose;
+/// use fovea::image::{Image, ImageView};
+/// use fovea::pixel::Mono8;
+/// use fovea::transform::transpose;
 ///
 /// let src = Image::from_vec(2, 1, vec![Mono8::new(1), Mono8::new(2)]).unwrap();
 /// let dst = transpose(&src);

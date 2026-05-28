@@ -164,11 +164,11 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView, ImageViewMut, SeparableKernel};
-/// use irys_cv::border::Clamp;
-/// use irys_cv::transform::convolve_separable_into;
+/// use fovea::image::{Image, ImageView, ImageViewMut, SeparableKernel};
+/// use fovea::border::Clamp;
+/// use fovea::transform::convolve_separable_into;
 ///
-/// use irys_cv::pixel::MonoF32;
+/// use fovea::pixel::MonoF32;
 ///
 /// let src = Image::fill(6, 6, MonoF32(1.0));
 /// let kernel = SeparableKernel::box_blur_3();
@@ -223,10 +223,10 @@ pub fn convolve_separable_into<I, B, O, P, Acc, Out, const HK: usize, const VK: 
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView, SeparableKernel};
-/// use irys_cv::border::Clamp;
-/// use irys_cv::pixel::Mono8;
-/// use irys_cv::transform::convolve_separable;
+/// use fovea::image::{Image, ImageView, SeparableKernel};
+/// use fovea::border::Clamp;
+/// use fovea::pixel::Mono8;
+/// use fovea::transform::convolve_separable;
 ///
 /// let src = Image::fill(8, 8, Mono8::new(5));
 /// let kernel = SeparableKernel::box_blur_3();

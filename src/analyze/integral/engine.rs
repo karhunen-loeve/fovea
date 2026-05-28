@@ -78,16 +78,16 @@ use super::preflight::{self, IntegralCapacity, IntegralSquaredCapacity};
 /// # Examples
 ///
 /// ```
-/// use irys_cv::analyze::integral::{integral_image, IntegralImage};
-/// use irys_cv::image::Image;
-/// use irys_cv::pixel::{Mono8, Mono32};
-/// use irys_cv::{Coordinate, Rectangle, Size};
+/// use fovea::analyze::integral::{integral_image, IntegralImage};
+/// use fovea::image::Image;
+/// use fovea::pixel::{Mono8, Mono32};
+/// use fovea::{Coordinate, Rectangle, Size};
 ///
 /// let img: Image<Mono8> = Image::fill(4, 4, Mono8::new(7));
 /// let sat: IntegralImage<Mono32> = integral_image::<_, Mono32>(&img)?;
 /// let rect = Rectangle::new(Coordinate::new(0, 0), Size::new(4, 4));
 /// assert_eq!(sat.region_sum(rect), Mono32::new(4 * 4 * 7));
-/// # Ok::<(), irys_cv::Error>(())
+/// # Ok::<(), fovea::Error>(())
 /// ```
 #[allow(private_bounds)] // see module docs
 #[must_use]

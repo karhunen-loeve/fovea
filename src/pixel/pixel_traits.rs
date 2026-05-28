@@ -212,7 +212,7 @@ pub unsafe trait PlainPixel: PlainChannel {
     /// # Examples
     ///
     /// ```
-    /// # use irys_cv::pixel::{PlainPixel, Mono8};
+    /// # use fovea::pixel::{PlainPixel, Mono8};
     /// let raw = [10u8, 20, 30];
     /// let pixels: &[Mono8] = Mono8::cast_slice(&raw).unwrap();
     /// assert_eq!(pixels.len(), 3);
@@ -239,7 +239,7 @@ pub unsafe trait PlainPixel: PlainChannel {
     /// # Examples
     ///
     /// ```
-    /// # use irys_cv::pixel::{PlainPixel, Mono8};
+    /// # use fovea::pixel::{PlainPixel, Mono8};
     /// let mut raw = [10u8, 20, 30];
     /// let pixels: &mut [Mono8] = Mono8::cast_slice_mut(&mut raw).unwrap();
     /// assert_eq!(pixels.len(), 3);
@@ -378,7 +378,7 @@ pub trait LabelPixel: Copy + Eq + Ord + core::hash::Hash + ZeroablePixel {
 ///
 /// # See also
 ///
-/// - [ADR-0032](https://github.com/karhunen-loeve/irys-cv/blob/main/docs/adr/0032-integral-image-design.md)
+/// - [ADR-0032](https://github.com/karhunen-loeve/fovea/blob/main/docs/adr/0032-integral-image-design.md)
 /// - [`IntegralSquaredPixel`] — parallel trait for sum-of-squares.
 pub trait IntegralPixel<A: Copy>: Copy {
     /// Convert a single source pixel to the accumulator representation.
@@ -446,7 +446,7 @@ pub trait IntegralSquaredPixel<A: Copy>: Copy {
 /// # Example
 ///
 /// ```
-/// # use irys_cv::pixel::BoundedChannel;
+/// # use fovea::pixel::BoundedChannel;
 /// assert_eq!(<u8 as BoundedChannel>::MAX, 255);
 /// assert_eq!(<u16 as BoundedChannel>::MAX, u16::MAX);
 /// ```
@@ -598,7 +598,7 @@ pub trait LinearPixel<S = f32>: Sized + Copy {
     /// # Example
     ///
     /// ```
-    /// # use irys_cv::pixel::{LinearPixel, MonoF32};
+    /// # use fovea::pixel::{LinearPixel, MonoF32};
     /// // ADR-0044 Phase E: `f32` is no longer a pixel; the pixel-role
     /// // float type is `MonoF32`. `MonoF32::uniform` returns the
     /// // accumulator (`MonoF32`) with the scalar broadcast across
@@ -628,7 +628,7 @@ pub trait LinearPixel<S = f32>: Sized + Copy {
 /// # Example
 ///
 /// ```
-/// # use irys_cv::pixel::LinearChannel;
+/// # use fovea::pixel::LinearChannel;
 /// let x = <u8 as LinearChannel<f32>>::scale(&100u8, 0.5);
 /// assert_eq!(x, 50.0f32);
 /// ```

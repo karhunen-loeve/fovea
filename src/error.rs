@@ -21,8 +21,8 @@ use core::fmt;
 /// # Examples
 ///
 /// ```
-/// use irys_cv::Error;
-/// use irys_cv::Size;
+/// use fovea::Error;
+/// use fovea::Size;
 ///
 /// let err = Error::LengthMismatch { expected: 100, actual: 50 };
 /// assert_eq!(
@@ -129,7 +129,7 @@ pub enum Error {
     /// [`connected_components_into`](crate::analyze::components::connected_components_into)
     /// when pass 1 would allocate the `(label_capacity + 1)`-th
     /// provisional label (ADR-0047 §6). This is a Tier 2 / data-dependent
-    /// error per [ADR-0025](https://github.com/karhunen-loeve/irys-cv/blob/main/docs/adr/0025-error-handling-conventions.md):
+    /// error per [ADR-0025](https://github.com/karhunen-loeve/fovea/blob/main/docs/adr/0025-error-handling-conventions.md):
     /// a pre-flight check is impossible without running the labeling pass.
     ///
     /// `label_capacity` is `L::MAX_LABEL` for the chosen label type — the

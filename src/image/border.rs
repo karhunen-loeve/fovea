@@ -29,9 +29,9 @@ use crate::{Rectangle, Size};
 /// # Example
 ///
 /// ```
-/// use irys_cv::{Size, Rectangle, Coordinate};
-/// use irys_cv::image::{Image, ImageView};
-/// use irys_cv::border::{BorderPolicy, Clamp};
+/// use fovea::{Size, Rectangle, Coordinate};
+/// use fovea::image::{Image, ImageView};
+/// use fovea::border::{BorderPolicy, Clamp};
 ///
 /// let img = Image::generate(4, 4, |x, y| (x + y * 4) as u8);
 /// let policy = Clamp;
@@ -85,8 +85,8 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::Size;
-/// use irys_cv::border::compute_interior_region;
+/// use fovea::Size;
+/// use fovea::border::compute_interior_region;
 ///
 /// // 10×10 image, 3×3 kernel, centered anchor (1,1)
 /// let interior = compute_interior_region(
@@ -150,9 +150,9 @@ fn full_image_region(image_size: Size) -> Rectangle {
 /// # Example
 ///
 /// ```
-/// use irys_cv::{Size, Rectangle};
-/// use irys_cv::image::{Image, ImageView};
-/// use irys_cv::border::{BorderPolicy, Skip};
+/// use fovea::{Size, Rectangle};
+/// use fovea::image::{Image, ImageView};
+/// use fovea::border::{BorderPolicy, Skip};
 ///
 /// let img = Image::<u8>::zero(10, 10);
 /// let region = BorderPolicy::<Image<u8>>::output_region(
@@ -209,9 +209,9 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::Size;
-/// use irys_cv::image::{Image, ImageView};
-/// use irys_cv::border::{BorderPolicy, Clamp};
+/// use fovea::Size;
+/// use fovea::image::{Image, ImageView};
+/// use fovea::border::{BorderPolicy, Clamp};
 ///
 /// let img = Image::generate(4, 4, |x, y| (x + y * 4) as u8);
 /// let policy = Clamp;
@@ -270,8 +270,8 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView};
-/// use irys_cv::border::{BorderPolicy, Mirror};
+/// use fovea::image::{Image, ImageView};
+/// use fovea::border::{BorderPolicy, Mirror};
 ///
 /// let img = Image::generate(4, 1, |x, _| x as u8);
 /// // pixels: [0, 1, 2, 3]
@@ -355,8 +355,8 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView};
-/// use irys_cv::border::{BorderPolicy, Wrap};
+/// use fovea::image::{Image, ImageView};
+/// use fovea::border::{BorderPolicy, Wrap};
 ///
 /// let img = Image::generate(4, 1, |x, _| x as u8);
 /// // pixels: [0, 1, 2, 3]
@@ -421,8 +421,8 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView};
-/// use irys_cv::border::{BorderPolicy, Constant};
+/// use fovea::image::{Image, ImageView};
+/// use fovea::border::{BorderPolicy, Constant};
 ///
 /// let img = Image::generate(3, 3, |x, y| (x + y * 3) as u8);
 /// let policy = Constant(0u8);

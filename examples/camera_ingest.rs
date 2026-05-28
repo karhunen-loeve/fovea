@@ -6,8 +6,8 @@
 //! Run with: `cargo run --example camera_ingest`
 
 fn main() {
-    use irys_cv::image::{Image, ImageRef, ImageView};
-    use irys_cv::pixel::{Mono8, Mono16, PlainChannel, Rgb8};
+    use fovea::image::{Image, ImageRef, ImageView};
+    use fovea::pixel::{Mono8, Mono16, PlainChannel, Rgb8};
 
     // ── Scenario 1: Zero-copy from a byte buffer (Mono8) ──────────────
     //

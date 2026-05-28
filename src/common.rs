@@ -2,7 +2,7 @@
 ///
 /// # Example
 /// ```
-/// # use irys_cv::Size;
+/// # use fovea::Size;
 /// let size = Size::new(640, 480);
 /// assert_eq!(size.area(), 640 * 480);
 /// ```
@@ -46,7 +46,7 @@ impl From<(usize, usize)> for Size {
 ///
 /// # Example
 /// ```
-/// # use irys_cv::Coordinate;
+/// # use fovea::Coordinate;
 /// let coordinate = Coordinate::new(10, 20);
 /// assert_eq!(coordinate.x, 10);
 /// assert_eq!(coordinate.y, 20);
@@ -72,7 +72,7 @@ impl From<(usize, usize)> for Coordinate {
 ///
 /// # Example
 /// ```
-/// # use irys_cv::{Coordinate, Size, Rectangle};
+/// # use fovea::{Coordinate, Size, Rectangle};
 /// let rect = Rectangle::new(Coordinate::new(10, 20), Size::new(100, 50));
 /// assert_eq!(rect.offset.x, 10);
 /// assert_eq!(rect.offset.y, 20);
@@ -148,7 +148,7 @@ impl Rectangle {
 /// # Example
 ///
 /// ```
-/// # use irys_cv::{Stride, Size};
+/// # use fovea::{Stride, Size};
 /// // Explicit construction
 /// let stride = Stride::new(2, 2);
 /// assert_eq!(stride.horizontal(), 2);

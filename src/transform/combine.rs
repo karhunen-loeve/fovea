@@ -11,7 +11,7 @@
 //! Everything is re-exported from the parent [`transform`](super) module:
 //!
 //! ```
-//! use irys_cv::transform::{CombinePixels, PixelAdd, AbsDiff, Blend, Magnitude};
+//! use fovea::transform::{CombinePixels, PixelAdd, AbsDiff, Blend, Magnitude};
 //! ```
 
 use std::ops::Add as StdAdd;
@@ -40,8 +40,8 @@ use crate::pixel::{HomogeneousPixel, LinearPixel, LinearSpace, ZeroablePixel};
 /// # Example: custom strategy
 ///
 /// ```
-/// use irys_cv::transform::CombinePixels;
-/// use irys_cv::pixel::Mono8;
+/// use fovea::transform::CombinePixels;
+/// use fovea::pixel::Mono8;
 ///
 /// struct Average;
 ///
@@ -69,8 +69,8 @@ pub trait CombinePixels<A, B> {
 /// # Example
 ///
 /// ```
-/// use irys_cv::transform::{CombinePixels, ClosureCombine};
-/// use irys_cv::pixel::Mono8;
+/// use fovea::transform::{CombinePixels, ClosureCombine};
+/// use fovea::pixel::Mono8;
 ///
 /// let strategy = ClosureCombine(|a: &Mono8, b: &Mono8| {
 ///     Mono8::new(a.value().max(b.value()))
@@ -108,9 +108,9 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView};
-/// use irys_cv::pixel::Mono8;
-/// use irys_cv::transform::{ClosureCombine, combine_images_into};
+/// use fovea::image::{Image, ImageView};
+/// use fovea::pixel::Mono8;
+/// use fovea::transform::{ClosureCombine, combine_images_into};
 ///
 /// let a = Image::fill(4, 4, Mono8::new(100));
 /// let b = Image::fill(4, 4, Mono8::new(50));
@@ -174,9 +174,9 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView};
-/// use irys_cv::pixel::Mono8;
-/// use irys_cv::transform::{ClosureCombine, combine_images};
+/// use fovea::image::{Image, ImageView};
+/// use fovea::pixel::Mono8;
+/// use fovea::transform::{ClosureCombine, combine_images};
 ///
 /// let a = Image::fill(3, 3, Mono8::new(200));
 /// let b = Image::fill(3, 3, Mono8::new(100));
@@ -221,9 +221,9 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView};
-/// use irys_cv::pixel::{Mono8, Mono32};
-/// use irys_cv::transform::combine_images_fn_into;
+/// use fovea::image::{Image, ImageView};
+/// use fovea::pixel::{Mono8, Mono32};
+/// use fovea::transform::combine_images_fn_into;
 ///
 /// let a = Image::fill(2, 2, Mono8::new(200));
 /// let b = Image::fill(2, 2, Mono8::new(100));
@@ -259,9 +259,9 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::image::{Image, ImageView};
-/// use irys_cv::pixel::{Mono8, Mono32};
-/// use irys_cv::transform::combine_images_fn;
+/// use fovea::image::{Image, ImageView};
+/// use fovea::pixel::{Mono8, Mono32};
+/// use fovea::transform::combine_images_fn;
 ///
 /// let a = Image::fill(3, 3, Mono8::new(10));
 /// let b = Image::fill(3, 3, Mono8::new(20));
@@ -296,8 +296,8 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::transform::{CombinePixels, PixelAdd};
-/// use irys_cv::pixel::Mono8;
+/// use fovea::transform::{CombinePixels, PixelAdd};
+/// use fovea::pixel::Mono8;
 ///
 /// // 200 + 100 saturates to 255 for Mono8
 /// assert_eq!(PixelAdd.combine(&Mono8::new(200), &Mono8::new(100)), Mono8::new(255));
@@ -325,8 +325,8 @@ impl<P: Copy + StdAdd<Output = P>> CombinePixels<P, P> for PixelAdd {
 /// # Example
 ///
 /// ```
-/// use irys_cv::transform::{CombinePixels, PixelSubtract};
-/// use irys_cv::pixel::Mono8;
+/// use fovea::transform::{CombinePixels, PixelSubtract};
+/// use fovea::pixel::Mono8;
 ///
 /// // 50 - 100 saturates to 0 for Mono8
 /// assert_eq!(PixelSubtract.combine(&Mono8::new(50), &Mono8::new(100)), Mono8::new(0));
@@ -352,8 +352,8 @@ impl<P: Copy + StdSub<Output = P>> CombinePixels<P, P> for PixelSubtract {
 /// # Example
 ///
 /// ```
-/// use irys_cv::transform::{CombinePixels, PixelMultiply};
-/// use irys_cv::pixel::MonoF32;
+/// use fovea::transform::{CombinePixels, PixelMultiply};
+/// use fovea::pixel::MonoF32;
 ///
 /// assert_eq!(
 ///     PixelMultiply.combine(&MonoF32::new(0.5), &MonoF32::new(0.5)),
@@ -389,8 +389,8 @@ impl<P: Copy + StdMul<Output = P>> CombinePixels<P, P> for PixelMultiply {
 /// # Example
 ///
 /// ```
-/// use irys_cv::transform::{CombinePixels, AbsDiff};
-/// use irys_cv::pixel::Mono8;
+/// use fovea::transform::{CombinePixels, AbsDiff};
+/// use fovea::pixel::Mono8;
 ///
 /// assert_eq!(AbsDiff.combine(&Mono8::new(100), &Mono8::new(150)), Mono8::new(50));
 /// // Result is the same regardless of operand order
@@ -436,8 +436,8 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::transform::{CombinePixels, Max};
-/// use irys_cv::pixel::Mono8;
+/// use fovea::transform::{CombinePixels, Max};
+/// use fovea::pixel::Mono8;
 ///
 /// assert_eq!(Max.combine(&Mono8::new(100), &Mono8::new(200)), Mono8::new(200));
 /// assert_eq!(Max.combine(&Mono8::new(200), &Mono8::new(100)), Mono8::new(200));
@@ -471,8 +471,8 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::transform::{CombinePixels, Min};
-/// use irys_cv::pixel::Mono8;
+/// use fovea::transform::{CombinePixels, Min};
+/// use fovea::pixel::Mono8;
 ///
 /// assert_eq!(Min.combine(&Mono8::new(100), &Mono8::new(200)), Mono8::new(100));
 /// assert_eq!(Min.combine(&Mono8::new(200), &Mono8::new(100)), Mono8::new(100));
@@ -511,8 +511,8 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::transform::{CombinePixels, LinearCombine};
-/// use irys_cv::pixel::{Mono8, MonoF32};
+/// use fovea::transform::{CombinePixels, LinearCombine};
+/// use fovea::pixel::{Mono8, MonoF32};
 ///
 /// // Equal-weight average: 0.5·100 + 0.5·200 = 150
 /// let mid = LinearCombine { wa: 0.5, wb: 0.5 }.combine(&Mono8::new(100), &Mono8::new(200));
@@ -547,8 +547,8 @@ impl<P: LinearPixel + LinearSpace> CombinePixels<P, P> for LinearCombine {
 /// # Example
 ///
 /// ```
-/// use irys_cv::transform::{CombinePixels, Blend};
-/// use irys_cv::pixel::{Mono8, MonoF32};
+/// use fovea::transform::{CombinePixels, Blend};
+/// use fovea::pixel::{Mono8, MonoF32};
 ///
 /// let mid = Blend { alpha: 0.5 }.combine(&Mono8::new(0), &Mono8::new(200));
 /// // ADR-0045 Phase C: `Mono8::Accumulator = MonoF32`, so `mid: MonoF32`.
@@ -614,8 +614,8 @@ impl MagnitudeChannel for f64 {
 /// # Example
 ///
 /// ```
-/// use irys_cv::transform::{CombinePixels, Magnitude};
-/// use irys_cv::pixel::MonoF32;
+/// use fovea::transform::{CombinePixels, Magnitude};
+/// use fovea::pixel::MonoF32;
 ///
 /// // 3-4-5 Pythagorean triple
 /// let mag = Magnitude.combine(&MonoF32::new(3.0), &MonoF32::new(4.0));
@@ -651,9 +651,9 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::transform::add;
-/// use irys_cv::image::{Image, ImageView};
-/// use irys_cv::pixel::Mono8;
+/// use fovea::transform::add;
+/// use fovea::image::{Image, ImageView};
+/// use fovea::pixel::Mono8;
 ///
 /// let a = Image::fill(3, 3, Mono8::new(100));
 /// let b = Image::fill(3, 3, Mono8::new(50));
@@ -683,9 +683,9 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::transform::subtract;
-/// use irys_cv::image::{Image, ImageView};
-/// use irys_cv::pixel::Mono8;
+/// use fovea::transform::subtract;
+/// use fovea::image::{Image, ImageView};
+/// use fovea::pixel::Mono8;
 ///
 /// let a = Image::fill(3, 3, Mono8::new(200));
 /// let b = Image::fill(3, 3, Mono8::new(50));
@@ -716,9 +716,9 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::transform::abs_diff;
-/// use irys_cv::image::{Image, ImageView};
-/// use irys_cv::pixel::Mono8;
+/// use fovea::transform::abs_diff;
+/// use fovea::image::{Image, ImageView};
+/// use fovea::pixel::Mono8;
 ///
 /// let a = Image::fill(3, 3, Mono8::new(200));
 /// let b = Image::fill(3, 3, Mono8::new(50));
@@ -751,9 +751,9 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::transform::image_min;
-/// use irys_cv::image::{Image, ImageView};
-/// use irys_cv::pixel::Mono8;
+/// use fovea::transform::image_min;
+/// use fovea::image::{Image, ImageView};
+/// use fovea::pixel::Mono8;
 ///
 /// let a = Image::fill(3, 3, Mono8::new(100));
 /// let b = Image::fill(3, 3, Mono8::new(200));
@@ -780,9 +780,9 @@ where
 /// # Example
 ///
 /// ```
-/// use irys_cv::transform::image_max;
-/// use irys_cv::image::{Image, ImageView};
-/// use irys_cv::pixel::Mono8;
+/// use fovea::transform::image_max;
+/// use fovea::image::{Image, ImageView};
+/// use fovea::pixel::Mono8;
 ///
 /// let a = Image::fill(3, 3, Mono8::new(100));
 /// let b = Image::fill(3, 3, Mono8::new(200));

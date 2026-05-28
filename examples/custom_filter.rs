@@ -3,7 +3,7 @@
 //! Implement a custom neighborhood filter using the `FoldOp` trait.
 //!
 //! The `FoldOp` trait is the extensibility point for neighborhood operations in
-//! `irys-cv`.  The library provides built-in operations (convolution, erosion,
+//! `fovea`.  The library provides built-in operations (convolution, erosion,
 //! dilation, median), but you can define your own by implementing `FoldOp`.
 //!
 //! This example builds a simple **weighted-average** filter from scratch — the
@@ -18,16 +18,16 @@ fn main() {
     // `Image` is the owned image container; `ImageView` / `ImageViewMut` are
     // the read / write trait interfaces that all image types implement.
     // `Neighborhood` bundles a weight grid with an anchor point.
-    use irys_cv::image::{Image, ImageView, ImageViewMut, Neighborhood};
+    use fovea::image::{Image, ImageView, ImageViewMut, Neighborhood};
     // `Mono8` is an 8-bit grayscale pixel (single channel, u8 storage).
-    use irys_cv::pixel::Mono8;
+    use fovea::pixel::Mono8;
     // `Clamp` replicates the nearest edge pixel for out-of-bounds accesses —
     // the same as OpenCV's `BORDER_REPLICATE`.  (The library calls it `Clamp`
     // because it clamps coordinates to the valid range.)
-    use irys_cv::border::Clamp;
+    use fovea::border::Clamp;
     // `FoldOp` is the trait we implement; `FoldItem` is the per-neighbor
     // (pixel, weight) pair; `fold_neighborhood` drives the iteration.
-    use irys_cv::transform::{FoldItem, FoldOp, fold_neighborhood};
+    use fovea::transform::{FoldItem, FoldOp, fold_neighborhood};
 
     // =====================================================================
     // 1. Define a custom FoldOp

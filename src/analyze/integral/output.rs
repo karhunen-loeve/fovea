@@ -37,10 +37,10 @@ use crate::pixel::ZeroablePixel;
 /// # Examples
 ///
 /// ```
-/// use irys_cv::analyze::integral::{integral_image, IntegralImage};
-/// use irys_cv::image::Image;
-/// use irys_cv::pixel::{Mono8, Mono32};
-/// use irys_cv::{Coordinate, Rectangle, Size};
+/// use fovea::analyze::integral::{integral_image, IntegralImage};
+/// use fovea::image::Image;
+/// use fovea::pixel::{Mono8, Mono32};
+/// use fovea::{Coordinate, Rectangle, Size};
 ///
 /// let img: Image<Mono8> = Image::fill(4, 4, Mono8::new(10));
 /// let sat: IntegralImage<Mono32> = integral_image::<_, Mono32>(&img)?;
@@ -49,7 +49,7 @@ use crate::pixel::ZeroablePixel;
 /// // Full-image sum: 4 × 4 × 10.
 /// let total = sat.region_sum(Rectangle::new(Coordinate::new(0, 0), Size::new(4, 4)));
 /// assert_eq!(total, Mono32::new(160));
-/// # Ok::<(), irys_cv::Error>(())
+/// # Ok::<(), fovea::Error>(())
 /// ```
 #[derive(Clone)]
 pub struct IntegralImage<A: Copy> {

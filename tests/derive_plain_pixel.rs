@@ -1,6 +1,6 @@
-use irys_cv::PlainPixel;
-use irys_cv::pixel::PlainChannel;
-use irys_cv::pixel::PlainPixel as PlainPixelTrait;
+use fovea::PlainPixel;
+use fovea::pixel::PlainChannel;
+use fovea::pixel::PlainPixel as PlainPixelTrait;
 use std::num::Saturating;
 
 #[derive(Clone, Copy, Debug, PartialEq, PlainPixel)]

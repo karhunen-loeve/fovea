@@ -56,8 +56,8 @@ use super::strategy::{BinIndex, BinningStrategy};
 ///
 /// ```ignore
 /// // (Engine entry point lands in M4; this is the M3 surface.)
-/// use irys_cv::analyze::histogram::histogram::Histogram;
-/// use irys_cv::analyze::histogram::strategy::NaturalBins;
+/// use fovea::analyze::histogram::histogram::Histogram;
+/// use fovea::analyze::histogram::strategy::NaturalBins;
 ///
 /// let h: &Histogram<NaturalBins, u8> = /* … */;
 /// assert_eq!(h.bins().len(), 256);

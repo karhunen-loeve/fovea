@@ -58,9 +58,9 @@ pub use zip::{ZipPixelsIter, zip_pixels};
 ///
 /// # Example
 /// ```
-/// # use irys_cv::image::{BinaryImage, Image, ImageView};
-/// # use irys_cv::pixel::Mono8;
-/// # use irys_cv::transform::{BinaryMask, convert_image};
+/// # use fovea::image::{BinaryImage, Image, ImageView};
+/// # use fovea::pixel::Mono8;
+/// # use fovea::transform::{BinaryMask, convert_image};
 /// let img: Image<Mono8> = Image::fill(4, 4, Mono8::new(200));
 /// let mask: BinaryImage = convert_image(&img, BinaryMask { thresh: Mono8::new(128) });
 /// assert!(mask.pixel_at(0, 0));
