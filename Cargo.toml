@@ -5,3 +5,48 @@ edition = "2024"
 license = "MIT"
 description = "A high-precision, type-safe computer vision library guaranteeing absolute image correctness at compile time"
 repository = "https://github.com/karhunen-loeve/fovea"
+
+[dependencies]
+fovea-derive = "0.1.0"
+
+[dev-dependencies]
+criterion = { version = "0.7.0", features = ["html_reports"] }
+
+[[bench]]
+name = "transform"
+harness = false
+
+[[bench]]
+name = "fold"
+harness = false
+
+[[bench]]
+name = "geometry"
+harness = false
+
+[[example]]
+name = "hello_image"
+
+[[example]]
+name = "edge_detection"
+
+[[example]]
+name = "pixel_conversion"
+
+[[example]]
+name = "custom_filter"
+
+[[example]]
+name = "camera_ingest"
+
+[[example]]
+name = "tiled_processing"
+
+[[example]]
+name = "asm_inspect"
+
+[[example]]
+name = "fma_optimization"
+
+[[example]]
+name = "template_matching"
