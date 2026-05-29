@@ -25,7 +25,7 @@ pub use tiles::{
 };
 pub use zip::{ZipPixelsIter, zip_pixels};
 
-// ─── Binary image vocabulary (PLAN §1.1) ────────────────────────────────────
+// ─── Binary image vocabulary ────────────────────────────────────
 //
 // Binary images are images whose pixel type is `bool`. The `bool` type
 // already rides the `T: Copy` pathway through `Image<T>`, `ImageView`,

@@ -22,7 +22,7 @@ impl UnionFind {
     /// Construct an empty union-find with an initial capacity hint
     /// `cap` (number of *foreground* labels expected; the background
     /// slot is always allocated).
-    pub fn with_capacity(cap: usize) -> Self {
+    pub(super) fn with_capacity(cap: usize) -> Self {
         let mut parent = Vec::with_capacity(cap + 1);
         let mut rank = Vec::with_capacity(cap + 1);
         // Background sentinel at index 0.
@@ -34,7 +34,7 @@ impl UnionFind {
     /// Allocate a new singleton set and return its label.
     ///
     /// The first call returns `1`; the `k`th call returns `k`.
-    pub fn make_set(&mut self) -> u64 {
+    pub(super) fn make_set(&mut self) -> u64 {
         let id = self.parent.len() as u64;
         self.parent.push(id);
         self.rank.push(0);
@@ -46,7 +46,7 @@ impl UnionFind {
     /// # Panics
     ///
     /// Panics if `x` is out of bounds (programmer error).
-    pub fn find(&mut self, x: u64) -> u64 {
+    pub(super) fn find(&mut self, x: u64) -> u64 {
         // Pass 1: locate the root.
         let mut root = x;
         while self.parent[root as usize] != root {
@@ -63,7 +63,7 @@ impl UnionFind {
     }
 
     /// Union the sets containing `a` and `b`, by rank.
-    pub fn union(&mut self, a: u64, b: u64) {
+    pub(super) fn union(&mut self, a: u64, b: u64) {
         let ra = self.find(a);
         let rb = self.find(b);
         if ra == rb {
@@ -83,14 +83,14 @@ impl UnionFind {
     /// Total number of allocated slots, including the background
     /// sentinel at index 0. The largest valid foreground label is
     /// `len() - 1`.
-    pub fn len(&self) -> u64 {
+    pub(super) fn len(&self) -> u64 {
         self.parent.len() as u64
     }
 
     /// Number of foreground labels allocated (excludes the background
     /// sentinel). Equal to `len() - 1`.
     #[cfg(test)]
-    pub fn label_count(&self) -> u64 {
+    pub(super) fn label_count(&self) -> u64 {
         self.len() - 1
     }
 

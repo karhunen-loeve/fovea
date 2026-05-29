@@ -1,4 +1,4 @@
-//! The [`IntegralImage<A>`] output type — see ADR-0032 §4.
+//! The [`IntegralImage<A>`] output type.
 
 use std::ops::Sub;
 
@@ -18,9 +18,8 @@ use crate::pixel::ZeroablePixel;
 /// special-case.
 ///
 /// `A` is the **accumulator pixel** — the user names it explicitly when
-/// constructing the integral image (ADR-0032 §1). The valid
-/// combinations of source and accumulator are gated at compile time by
-/// the [`IntegralPixel`](crate::pixel::IntegralPixel) and
+/// constructing the integral image. The valid combinations of source
+/// and accumulator are gated at compile time by the [`IntegralPixel`](crate::pixel::IntegralPixel) and
 /// [`IntegralSquaredPixel`](crate::pixel::IntegralSquaredPixel) traits.
 ///
 /// # What this type is *not*
@@ -28,7 +27,7 @@ use crate::pixel::ZeroablePixel;
 /// `IntegralImage<A>` deliberately does **not** implement
 /// [`ImageView`](crate::image::ImageView) (nor any of its descendants).
 /// Passing an integral image where a regular image is expected is a
-/// known bug class in other libraries (ADR-0032 §4); the distinct type
+/// known bug class in other libraries; the distinct type
 /// makes that mistake a compile error. Callers who genuinely need raw
 /// access to the underlying `(W+1) × (H+1)` table go through
 /// [`IntegralImage::as_table_view`] and acknowledge the offset
@@ -146,7 +145,7 @@ impl<A: Copy> IntegralImage<A> {
     /// exact shape the four-corner formula expects, so the lookups go
     /// directly into the `(W+1) × (H+1)` table with no `+1` adjustment.
     ///
-    /// # Panics — Tier 3 (ADR-0025)
+    /// # Panics — Tier 3
     ///
     /// Panics if `rect` is not fully contained in
     /// [`source_size`](Self::source_size). For the Tier 1 form that
@@ -220,9 +219,9 @@ impl<A: Copy> IntegralImage<A> {
     ///
     /// # Evaluation order
     ///
-    /// `(a − c) − (d − b)` per ADR-0032 §5. Important because integer
-    /// accumulator pixels (`Mono32`, `Mono64`, `Rgb32`, `Rgb64`) use
-    /// `Saturating<T>` arithmetic (ADR-0013). Both inner subtractions
+    /// `(a − c) − (d − b)`. Important because integer accumulator
+    /// pixels (`Mono32`, `Mono64`, `Rgb32`, `Rgb64`) use
+    /// `Saturating<T>` arithmetic. Both inner subtractions
     /// are partial-strip sums and therefore non-negative; the outer
     /// subtraction is the region sum and is also non-negative; so no
     /// intermediate underflows. Any other order is *correct* for
@@ -360,7 +359,7 @@ mod tests {
 
     #[test]
     fn region_sum_evaluation_order_under_saturating() {
-        // ADR-0032 §5: `(a - c) - (d - b)` keeps every intermediate
+        // `(a - c) - (d - b)` keeps every intermediate
         // non-negative under Saturating arithmetic. To exercise the
         // path with values close to `u32::MAX / area`, build a small
         // Mono32 table where each source pixel is large.

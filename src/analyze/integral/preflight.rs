@@ -1,8 +1,8 @@
 //! Pre-flight overflow check for the integral-image engine.
 //!
 //! This module implements the **O(1), zero-per-pixel-cost** correctness
-//! gate from ADR-0032 §3. The idea: before the engine touches any pixel
-//! data, verify that the worst-case sum
+//! gate. The idea: before the engine touches any pixel data, verify
+//! that the worst-case sum
 //!
 //! ```text
 //! W × H × max_integral_value()
@@ -18,9 +18,8 @@
 //! exact-integer range of `f64` (`2^53`) — beyond that, integer sums
 //! lose precision, which is what the check is trying to prevent.
 //!
-//! See ADR-0032 §3 for the design rationale and ADR-0025 for why this
-//! is a Tier-2 (`Result`) failure rather than a Tier-3 panic — the
-//! caller's choice of accumulator may be data-dependent.
+//! This is a Tier-2 (`Result`) failure rather than a Tier-3 panic —
+//! the caller's choice of accumulator may be data-dependent.
 
 use crate::Error;
 use crate::pixel::{
@@ -32,16 +31,17 @@ use crate::pixel::{
 // These traits stay crate-private: they are an implementation detail of
 // the pre-flight check, not part of the public surface. Promoting them
 // to `pub` would invite users to add custom accumulators that bypass
-// the check, undermining ADR-0032 §3's guarantee. Philosophy §3 — bind
+// the check, undermining the gate's guarantee. Philosophy §3 — bind
 // on the tightest trait that admits the operation, and nothing more.
 
 /// Per-channel capacity of an accumulator pixel, in `u128` units, for
 /// the *non-squared* integral check.
 ///
 /// The pre-flight verdict is "per-channel max × W × H ≤ per-channel
-/// capacity". Because accumulation is per-channel (ADR-0032 §2 / RGB
-/// row of the impl table), the worst-case bound is independent across
-/// channels and a single per-channel comparison suffices.
+/// capacity". Because accumulation is per-channel (matching the RGB
+/// row of the supported-source/accumulator table), the worst-case
+/// bound is independent across channels and a single per-channel
+/// comparison suffices.
 pub(super) trait IntegralCapacity: Copy {
     /// The capacity of one channel of this accumulator, expressed as
     /// `u128`. For integer pixels this is the underlying scalar's

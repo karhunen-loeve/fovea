@@ -516,7 +516,7 @@ where
 ///
 /// // Equal-weight average: 0.5·100 + 0.5·200 = 150
 /// let mid = LinearCombine { wa: 0.5, wb: 0.5 }.combine(&Mono8::new(100), &Mono8::new(200));
-/// // ADR-0045 Phase C: `Mono8::Accumulator = MonoF32`, so `mid: MonoF32`.
+/// // `Mono8::Accumulator = MonoF32`, so `mid: MonoF32`.
 /// assert!((mid - MonoF32(150.0)).abs().0 < 1e-5);
 /// ```
 pub struct LinearCombine {
@@ -551,7 +551,7 @@ impl<P: LinearPixel + LinearSpace> CombinePixels<P, P> for LinearCombine {
 /// use fovea::pixel::{Mono8, MonoF32};
 ///
 /// let mid = Blend { alpha: 0.5 }.combine(&Mono8::new(0), &Mono8::new(200));
-/// // ADR-0045 Phase C: `Mono8::Accumulator = MonoF32`, so `mid: MonoF32`.
+/// // `Mono8::Accumulator = MonoF32`, so `mid: MonoF32`.
 /// assert!((mid - MonoF32(100.0)).abs().0 < 1e-5);
 /// ```
 pub struct Blend {
@@ -1839,7 +1839,7 @@ mod tests {
     fn linear_combine_image_mono8() {
         let a = Image::fill(3, 3, Mono8::new(100));
         let b = Image::fill(3, 3, Mono8::new(200));
-        // ADR-0045 Phase C: `Mono8::Accumulator = MonoF32`, so the
+        // `Mono8::Accumulator = MonoF32`, so the
         // combined image is `Image<MonoF32>` rather than `Image<f32>`.
         let out: Image<MonoF32> =
             combine_images(&a, &b, LinearCombine { wa: 0.5, wb: 0.5 }).unwrap();
@@ -1909,7 +1909,7 @@ mod tests {
     fn blend_image_mono8() {
         let a = Image::fill(3, 3, Mono8::new(0));
         let b = Image::fill(3, 3, Mono8::new(200));
-        // ADR-0045 Phase C: accumulator is `MonoF32`, not raw `f32`.
+        // accumulator is `MonoF32`, not raw `f32`.
         let out: Image<MonoF32> = combine_images(&a, &b, Blend { alpha: 0.5 }).unwrap();
         assert!((out.pixel_at(1, 1) - MonoF32(100.0)).abs().0 < 1e-5);
     }

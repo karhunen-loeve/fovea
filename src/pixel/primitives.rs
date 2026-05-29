@@ -1,18 +1,18 @@
 //! Pixel trait implementations for Rust primitive types.
 //!
-//! After ADR-0045, channel primitives (`u8`–`u64`, `i8`–`i64`,
-//! `Saturating<_>`) implement [`LinearChannel`] (the arithmetic
-//! substrate the derive macro walks when composing a pixel's
-//! accumulator) and no longer implement [`LinearPixel`].
+//! Channel primitives (`u8`–`u64`, `i8`–`i64`, `Saturating<_>`)
+//! implement [`LinearChannel`] (the arithmetic substrate the derive
+//! macro walks when composing a pixel's accumulator) and do not
+//! implement [`LinearPixel`].
 //!
-//! After ADR-0044 Phase E, `f32` and `f64` are *not* pixels. They
-//! remain `LinearChannel` implementors (their legitimate arithmetic
-//! role — see ADR-0045) but no longer implement `PlainPixel`,
-//! `HomogeneousPixel`, `ZeroablePixel`, `LinearPixel`, or
-//! `LinearSpace`. Spatial-sample sites that previously used
-//! `Image<f32>` / `Image<f64>` now use `Image<MonoF32>` /
-//! `Image<MonoF64>`. Kernel-weight sites (`Image<T: Copy>`) are
-//! unaffected and continue to use bare `f32` / `f64` coefficients.
+//! `f32` and `f64` are *not* pixels. They remain `LinearChannel`
+//! implementors (their legitimate arithmetic role) but do not
+//! implement `PlainPixel`, `HomogeneousPixel`, `ZeroablePixel`,
+//! `LinearPixel`, or `LinearSpace`. Spatial-sample sites that
+//! previously used `Image<f32>` / `Image<f64>` now use
+//! `Image<MonoF32>` / `Image<MonoF64>`. Kernel-weight sites
+//! (`Image<T: Copy>`) are unaffected and continue to use bare
+//! `f32` / `f64` coefficients.
 
 use crate::pixel::{
     BoundedChannel, FromLinear, HomogeneousPixel, LinearChannel, MonoF32, MonoF64, PlainChannel,
@@ -20,14 +20,13 @@ use crate::pixel::{
 };
 use std::num::Saturating;
 
-// ADR-0046: `PlainChannel` impls for every byte-layout primitive.
-// These are the channel-role byte-layout witnesses. Every primitive
-// that currently implements `PlainPixel` (u/i{8,16,32,64}) gets a
-// matching `PlainChannel` impl — `PlainPixel` now extends
-// `PlainChannel`, so both roles must be supplied. `f32` and `f64` get
-// `PlainChannel` impls but NOT `PlainPixel` (ADR-0044): they are
-// first-class channels inside `MonoF32` / `RgbF32` / etc., never
-// first-class pixels.
+// `PlainChannel` impls for every byte-layout primitive. These are
+// the channel-role byte-layout witnesses. Every primitive that
+// implements `PlainPixel` (u/i{8,16,32,64}) gets a matching
+// `PlainChannel` impl — `PlainPixel` extends `PlainChannel`, so both
+// roles must be supplied. `f32` and `f64` get `PlainChannel` impls
+// but NOT `PlainPixel`: they are first-class channels inside
+// `MonoF32` / `RgbF32` / etc., never first-class pixels.
 //
 // Method bodies are the `PlainChannel` defaults in all cases; the
 // `unsafe impl` blocks exist only to assert the layout invariants
@@ -46,7 +45,7 @@ unsafe impl PlainChannel for i8 {}
 unsafe impl PlainChannel for i16 {}
 unsafe impl PlainChannel for i32 {}
 unsafe impl PlainChannel for i64 {}
-// ADR-0046 raison d'être: raw floats are channels but not pixels.
+// Raw floats are channels but not pixels.
 unsafe impl PlainChannel for f32 {}
 unsafe impl PlainChannel for f64 {}
 // SAFETY: `#[repr(transparent)]` over `T` preserves layout; the
@@ -61,17 +60,17 @@ impl ZeroablePixel for u8 {
         0
     }
 }
-// `impl LinearPixel for u8` removed (ADR-0045 Phase S4). The
-// arithmetic now lives on `LinearChannel<f32> for u8` below.
+// `impl LinearPixel for u8` removed: the arithmetic now lives on
+// `LinearChannel<f32> for u8` below.
 impl FromLinear<f32> for u8 {
     #[inline(always)]
     fn from_linear(acc: f32) -> Self {
         acc.round().clamp(0.0, u8::MAX as f32) as u8
     }
 }
-// ADR-0045 Phase A: named-float-accumulator sibling. Delegates to
-// the bare-float body; `MonoF32` is `#[repr(transparent)] over f32`
-// so the `.0` extraction is zero-cost.
+// Named-float-accumulator sibling. Delegates to the bare-float body;
+// `MonoF32` is `#[repr(transparent)]` over `f32` so the `.0`
+// extraction is zero-cost.
 impl FromLinear<MonoF32> for u8 {
     #[inline(always)]
     fn from_linear(acc: MonoF32) -> Self {
@@ -91,14 +90,15 @@ impl ZeroablePixel for u16 {
         0
     }
 }
-// `impl LinearPixel for u16` removed (ADR-0045 Phase S4).
+// `impl LinearPixel for u16` removed; arithmetic lives on
+// `LinearChannel<f32> for u16` below.
 impl FromLinear<f32> for u16 {
     #[inline(always)]
     fn from_linear(acc: f32) -> Self {
         acc.round().clamp(0.0, u16::MAX as f32) as u16
     }
 }
-// ADR-0045 Phase A: named-float-accumulator sibling.
+// Named-float-accumulator sibling.
 impl FromLinear<MonoF32> for u16 {
     #[inline(always)]
     fn from_linear(acc: MonoF32) -> Self {
@@ -118,15 +118,15 @@ impl ZeroablePixel for u32 {
     }
 }
 // `impl LinearPixel for u32` and `impl LinearPixel<f64> for u32`
-// removed (ADR-0045 Phase S4). Both scalar roles live on
-// `LinearChannel<f32|f64> for u32` below.
+// removed. Both scalar roles live on `LinearChannel<f32|f64> for u32`
+// below.
 impl FromLinear<f64> for u32 {
     #[inline(always)]
     fn from_linear(acc: f64) -> Self {
         acc.round().clamp(0.0, u32::MAX as f64) as u32
     }
 }
-// ADR-0045 Phase A: named-float-accumulator sibling.
+// Named-float-accumulator sibling.
 impl FromLinear<MonoF64> for u32 {
     #[inline(always)]
     fn from_linear(acc: MonoF64) -> Self {
@@ -146,14 +146,14 @@ impl ZeroablePixel for u64 {
     }
 }
 // `impl LinearPixel for u64` and `impl LinearPixel<f64> for u64`
-// removed (ADR-0045 Phase S4).
+// removed; arithmetic lives on `LinearChannel<f64> for u64` below.
 impl FromLinear<f64> for u64 {
     #[inline(always)]
     fn from_linear(acc: f64) -> Self {
         acc.round().clamp(0.0, u64::MAX as f64) as u64
     }
 }
-// ADR-0045 Phase A: named-float-accumulator sibling.
+// Named-float-accumulator sibling.
 impl FromLinear<MonoF64> for u64 {
     #[inline(always)]
     fn from_linear(acc: MonoF64) -> Self {
@@ -172,11 +172,10 @@ impl ZeroablePixel for i8 {
         0
     }
 }
-// `impl LinearPixel for i8` removed (ADR-0045 Phase S4).
-// `impl FromLinear<f32> for i8` removed (ADR-0045 Phase S4.2 —
-// signed-integer `FromLinear` impls were speculative; no
-// library-shipping pixel used them, and they were parallel to
-// the ADR-0043 signed-`BoundedChannel` removal).
+// `impl LinearPixel for i8` removed.
+// `impl FromLinear<f32> for i8` removed: signed-integer `FromLinear`
+// impls were speculative; no library-shipping pixel used them, and
+// they paralleled the signed-`BoundedChannel` removal.
 unsafe impl HomogeneousPixel for i8 {
     type Channel = i8;
     type Channels = [i8; 1];
@@ -190,7 +189,7 @@ impl ZeroablePixel for i16 {
     }
 }
 // `impl LinearPixel for i16` and `impl FromLinear<f32> for i16`
-// removed (ADR-0045 Phase S4 / S4.2).
+// removed.
 unsafe impl HomogeneousPixel for i16 {
     type Channel = i16;
     type Channels = [i16; 1];
@@ -204,7 +203,7 @@ impl ZeroablePixel for i32 {
     }
 }
 // `impl LinearPixel for i32`, `impl LinearPixel<f64> for i32` and
-// `impl FromLinear<f64> for i32` removed (ADR-0045 Phase S4 / S4.2).
+// `impl FromLinear<f64> for i32` removed.
 unsafe impl HomogeneousPixel for i32 {
     type Channel = i32;
     type Channels = [i32; 1];
@@ -218,17 +217,16 @@ impl ZeroablePixel for i64 {
     }
 }
 // `impl LinearPixel for i64`, `impl LinearPixel<f64> for i64` and
-// `impl FromLinear<f64> for i64` removed (ADR-0045 Phase S4 / S4.2).
+// `impl FromLinear<f64> for i64` removed.
 unsafe impl HomogeneousPixel for i64 {
     type Channel = i64;
     type Channels = [i64; 1];
 }
 
-// ADR-0044 Phase E: `f32` / `f64` are no longer pixels. They remain
-// `LinearChannel` implementors below (the arithmetic role) but the
-// `PlainPixel` / `ZeroablePixel` / `HomogeneousPixel` / `LinearPixel`
-// impls that used to live here have been removed. Spatial-sample
-// code should use `MonoF32` / `MonoF64` instead.
+// `f32` / `f64` are not pixels. They remain `LinearChannel`
+// implementors below (the arithmetic role) but do not implement
+// `PlainPixel` / `ZeroablePixel` / `HomogeneousPixel` / `LinearPixel`.
+// Spatial-sample code should use `MonoF32` / `MonoF64` instead.
 
 unsafe impl<T> PlainPixel for Saturating<T>
 where
@@ -241,28 +239,28 @@ impl<T: ZeroablePixel> ZeroablePixel for Saturating<T> {
         Saturating(T::zero())
     }
 }
-// `impl LinearPixel for Saturating<u8>` removed (ADR-0045 Phase S4).
+// `impl LinearPixel for Saturating<u8>` removed.
 impl FromLinear<f32> for Saturating<u8> {
     #[inline(always)]
     fn from_linear(acc: f32) -> Self {
         Saturating(acc.round().clamp(0.0, u8::MAX as f32) as u8)
     }
 }
-// ADR-0045 Phase A: named-float-accumulator sibling.
+// Named-float-accumulator sibling.
 impl FromLinear<MonoF32> for Saturating<u8> {
     #[inline(always)]
     fn from_linear(acc: MonoF32) -> Self {
         <Self as FromLinear<f32>>::from_linear(acc.0)
     }
 }
-// `impl LinearPixel for Saturating<u16>` removed (ADR-0045 Phase S4).
+// `impl LinearPixel for Saturating<u16>` removed.
 impl FromLinear<f32> for Saturating<u16> {
     #[inline(always)]
     fn from_linear(acc: f32) -> Self {
         Saturating(acc.round().clamp(0.0, u16::MAX as f32) as u16)
     }
 }
-// ADR-0045 Phase A: named-float-accumulator sibling.
+// Named-float-accumulator sibling.
 impl FromLinear<MonoF32> for Saturating<u16> {
     #[inline(always)]
     fn from_linear(acc: MonoF32) -> Self {
@@ -270,15 +268,14 @@ impl FromLinear<MonoF32> for Saturating<u16> {
     }
 }
 // `impl LinearPixel for Saturating<u32>` and
-// `impl LinearPixel<f64> for Saturating<u32>` removed
-// (ADR-0045 Phase S4).
+// `impl LinearPixel<f64> for Saturating<u32>` removed.
 impl FromLinear<f64> for Saturating<u32> {
     #[inline(always)]
     fn from_linear(acc: f64) -> Self {
         Saturating(acc.round().clamp(0.0, u32::MAX as f64) as u32)
     }
 }
-// ADR-0045 Phase A: named-float-accumulator sibling.
+// Named-float-accumulator sibling.
 impl FromLinear<MonoF64> for Saturating<u32> {
     #[inline(always)]
     fn from_linear(acc: MonoF64) -> Self {
@@ -286,15 +283,14 @@ impl FromLinear<MonoF64> for Saturating<u32> {
     }
 }
 // `impl LinearPixel for Saturating<u64>` and
-// `impl LinearPixel<f64> for Saturating<u64>` removed
-// (ADR-0045 Phase S4).
+// `impl LinearPixel<f64> for Saturating<u64>` removed.
 impl FromLinear<f64> for Saturating<u64> {
     #[inline(always)]
     fn from_linear(acc: f64) -> Self {
         Saturating(acc.round().clamp(0.0, u64::MAX as f64) as u64)
     }
 }
-// ADR-0045 Phase A: named-float-accumulator sibling.
+// Named-float-accumulator sibling.
 impl FromLinear<MonoF64> for Saturating<u64> {
     #[inline(always)]
     fn from_linear(acc: MonoF64) -> Self {
@@ -303,25 +299,19 @@ impl FromLinear<MonoF64> for Saturating<u64> {
 }
 
 // `LinearSpace` is a pixel-role marker (`LinearSpace: LinearPixel`).
-// After ADR-0045 Phase S4, channel primitives no longer implement
-// `LinearPixel`, so the `LinearSpace` impls on them are both
-// unreachable (the super-trait bound fails) and semantically wrong
-// (a channel is not a pixel). After ADR-0044 Phase E, the `f32` /
-// `f64` impls have been removed as well — `LinearSpace` now lives
-// exclusively on actual pixel types (e.g. `MonoF32`, `RgbF32`).
+// Channel primitives do not implement `LinearPixel`, so `LinearSpace`
+// impls on them would be both unreachable (the super-trait bound
+// fails) and semantically wrong (a channel is not a pixel). The
+// `f32` / `f64` impls have likewise been removed — `LinearSpace`
+// lives exclusively on actual pixel types (e.g. `MonoF32`, `RgbF32`).
 
-// ─── LinearChannel (ADR-0045) ────────────────────────────────────────────
+// ─── LinearChannel ───────────────────────────────────────────────────────
 //
-// Mirror of the LinearPixel impls above. After ADR-0045 every channel
-// primitive implements `LinearChannel`; the derive macro probes this
-// trait first when composing a pixel's accumulator from its channel
-// fields. The bodies are byte-identical copies of the LinearPixel
-// versions; the distinction is purely taxonomic (see PHILOSOPHY §2 and
-// ADR-0045 §2).
-//
-// Phase S2 keeps the parallel `LinearPixel` impls in place so the
-// derive macro continues to resolve. Phase S4 deletes them once the
-// derive macro has switched to the `LinearChannel` path.
+// Every channel primitive implements `LinearChannel`; the derive
+// macro probes this trait first when composing a pixel's accumulator
+// from its channel fields. The distinction between this and
+// `LinearPixel` is taxonomic (see Philosophy §2): channels are not
+// pixels.
 
 impl LinearChannel<f32> for u8 {
     type Accumulator = f32;
@@ -890,12 +880,12 @@ impl LinearChannel<f64> for Saturating<u64> {
     }
 }
 
-// ─── BoundedChannel (ADR-0042) ────────────────────────────────────────────
+// ─── BoundedChannel ──────────────────────────────────────────────────────
 //
 // Intrinsic maximum value for every integer channel type the library ships.
 //
 // Deliberately NOT implemented for `f32` / `f64` — floating-point pixels do
-// not have an intrinsic maximum in this library (Philosophy §8, ADR-0042).
+// not have an intrinsic maximum in this library (Philosophy §8).
 // The absence is load-bearing: it is what makes `Invert` refuse to compile
 // for float-channel pixels.
 
@@ -911,7 +901,7 @@ impl BoundedChannel for u32 {
 impl BoundedChannel for u64 {
     const MAX: Self = u64::MAX;
 }
-// Signed-integer `BoundedChannel` impls were removed by ADR-0043:
+// Signed-integer `BoundedChannel` impls are intentionally omitted:
 //
 // 1. "Brightest" is not a signed-integer concept; there is no
 //    well-defined pixel-world meaning for "`i8::MAX = 127` is white" on
@@ -931,7 +921,7 @@ impl<T: BoundedChannel> BoundedChannel for Saturating<T> {
     const MAX: Self = Saturating(T::MAX);
 }
 
-// ─── bool as a pixel (PLAN §1.1) ──────────────────────────────────────────
+// ─── bool as a pixel ─────────────────────────────────────────────────────
 //
 // `bool` already rides the `T: Copy` pathway through `Image<T>`,
 // `ImageView`, `SubView`, tiles, sliding windows, zip, and the parallel
@@ -952,9 +942,9 @@ impl<T: BoundedChannel> BoundedChannel for Saturating<T> {
 //   does not guarantee the representation of `bool` beyond "1 byte with
 //   valid bit patterns `0x00` and `0x01`", which is not the same
 //   invariant as `PlainPixel` carries (no invalid bit patterns, arbitrary
-//   reinterpretation of bytes). See PLAN §10 — a nominal `Binary` pixel
-//   type and `PlainPixel for bool` are explicit non-goals pending
-//   shape-analysis feature pressure.
+//   reinterpretation of bytes). A nominal `Binary` pixel type and
+//   `PlainPixel for bool` are explicit non-goals pending shape-analysis
+//   feature pressure.
 // - `LinearPixel` / `BoundedChannel` have no meaningful semantics on a
 //   two-valued type.
 // - `HomogeneousPixel` is withheld for the same layout reasons as
@@ -970,7 +960,7 @@ impl ZeroablePixel for bool {
 mod tests {
     use super::*;
 
-    // ─── BoundedChannel (ADR-0042) ────────────────────────────────────────
+    // ─── BoundedChannel ──────────────────────────────────────────────────────
     //
     // Verify that every integer channel type the library ships exposes its
     // intrinsic maximum via `BoundedChannel::MAX`, and that `Saturating<T>`
@@ -984,10 +974,10 @@ mod tests {
         assert_eq!(<u64 as BoundedChannel>::MAX, u64::MAX);
     }
 
-    // Signed-integer `BoundedChannel` impls were removed by ADR-0043
-    // (see comment above the `Saturating` impl). No signed-primitives
-    // test remains; the `bounded_channel_inventory` test below asserts
-    // the positive inventory without the signed types.
+    // Signed-integer `BoundedChannel` impls were intentionally not
+    // included (see comment above the `Saturating` impl). No
+    // signed-primitives test remains; the `bounded_channel_inventory`
+    // test below asserts the positive inventory without the signed types.
 
     #[test]
     fn bounded_channel_saturating_wraps() {
@@ -1014,9 +1004,9 @@ mod tests {
     }
 
     // Compile-time assertion: `BoundedChannel` must NOT be implemented for
-    // `f32` / `f64`. This absence is load-bearing per ADR-0042 — it is what
-    // makes `Invert` and `BinaryThreshold` refuse to compile for float
-    // channels (Philosophy §1 "Types are the spec", §8 "Surface information,
+    // `f32` / `f64`. This absence is load-bearing — it is what makes
+    // `Invert` and `BinaryThreshold` refuse to compile for float channels
+    // (Philosophy §1 "Types are the spec", §8 "Surface information,
     // don't decide").
     //
     // We cannot test "does not implement" directly inside a `#[cfg(test)]`
@@ -1041,11 +1031,11 @@ mod tests {
         assert_bounded::<Saturating<u16>>();
         assert_bounded::<Saturating<u32>>();
         assert_bounded::<Saturating<u64>>();
-        // f32 / f64: intentionally omitted (see ADR-0042).
-        // i8 / i16 / i32 / i64: intentionally omitted (see ADR-0043).
+        // f32 / f64: intentionally omitted.
+        // i8 / i16 / i32 / i64: intentionally omitted.
     }
 
-    // ─── LinearPixel::uniform (PLAN §3.4) ─────────────────────────────────
+    // ─── LinearPixel::uniform ─────────────────────────────────────────────────
     //
     // For primitive `LinearPixel<f32>` impls `uniform(scalar)` is the
     // identity on the scalar (for f32-accumulator types) or a widening
@@ -1053,7 +1043,7 @@ mod tests {
 
     #[test]
     fn linear_channel_uniform_f32_accumulator_primitives() {
-        // Post-ADR-0045: channel primitives bind on `LinearChannel`.
+        // Channel primitives bind on `LinearChannel`.
         assert_eq!(<u8 as LinearChannel>::uniform(0.5), 0.5f32);
         assert_eq!(<u16 as LinearChannel>::uniform(0.5), 0.5f32);
         assert_eq!(<i8 as LinearChannel>::uniform(0.25), 0.25f32);
@@ -1083,7 +1073,7 @@ mod tests {
         assert_eq!(<u8 as LinearChannel>::uniform(0.0), 0.0f32);
     }
 
-    // ─── LinearChannel<f64> — f64-scalar paths (PLAN §3.4) ────────────────
+    // ─── LinearChannel<f64> — f64-scalar paths ───────────────────────────
     //
     // Every channel primitive whose `Accumulator = f64` ships a second
     // `LinearChannel<f64>` impl (with the same `Accumulator = f64`) so
@@ -1196,7 +1186,7 @@ mod tests {
         assert_eq!(via_f32, via_f64);
     }
 
-    // ─── LinearChannel inventory (ADR-0045 guardrail) ─────────────────────
+    // ─── LinearChannel inventory guardrail ──────────────────────────────
     //
     // Positive list of every channel primitive that implements
     // `LinearChannel`. Serves as a living inventory (every type that ought
@@ -1234,7 +1224,7 @@ mod tests {
         assert_channel_f64::<Saturating<u64>>();
     }
 
-    // ─── ADR-0044 Phase 5 guardrails ──────────────────────────────────────
+    // ─── Phase 5 guardrails ─────────────────────────────────────────────────
     //
     // Raw `f32` / `f64` are channels, not pixels. The
     // `linear_channel_inventory` test above is the positive half of this
@@ -1269,32 +1259,32 @@ mod tests {
         assert_plain_pixel::<crate::pixel::MonoF64>();
     }
 
-    // ─── ADR-0044 / ADR-0045 / ADR-0046 Phase F.1 positive-list guardrails ──
+    // ─── Positive-list guardrails ─────────────────────────────────────────────
     //
     // The four inventory tests below are the *positive* half of the
-    // post-Phase-E invariant. Each test enumerates every type the library
-    // ships that is supposed to satisfy the corresponding trait. If a new
-    // pixel type is added to the public API without the corresponding
-    // trait derivation/impl, the test stops compiling on the line
-    // listing it. If a regression silently drops one of these impls
-    // (e.g. a PR removes `LinearPixel` from `Mono16`), this test fails
-    // to compile too.
+    // channel-vs-pixel invariant. Each test enumerates every type the
+    // library ships that is supposed to satisfy the corresponding trait.
+    // If a new pixel type is added to the public API without the
+    // corresponding trait derivation/impl, the test stops compiling on
+    // the line listing it. If a regression silently drops one of these
+    // impls (e.g. a PR removes `LinearPixel` from `Mono16`), this test
+    // fails to compile too.
     //
     // The omissions are load-bearing:
     //
     //   * `plain_channel_inventory` includes `f32` / `f64` (they ARE
-    //     channels — ADR-0046).
+    //     channels).
     //   * `plain_pixel_inventory`, `linear_pixel_inventory`, and
     //     `linear_space_inventory` all OMIT raw `f32` / `f64`. That
-    //     absence is the post-ADR-0044 invariant: floats are channels,
+    //     absence is the load-bearing invariant: floats are channels,
     //     not pixels.
     //   * `linear_space_inventory` additionally omits Indexed* and
     //     sRGB* pixels (they are pixels but intentionally not in linear
-    //     space — see ADR-0033 / `pixel/srgb.rs`).
+    //     space — see `pixel/srgb.rs`).
     //
     // Negative coverage (commented `assert_*::<f32>();` lines) lives in
     // the `_excludes_raw_floats` tests above. A `trybuild`-based hard
-    // negative compile harness is deferred (ADR-0044 Phase F.2).
+    // negative compile harness is deferred.
 
     #[test]
     fn plain_channel_inventory() {
@@ -1312,9 +1302,9 @@ mod tests {
         assert_plain_channel::<i32>();
         assert_plain_channel::<i64>();
 
-        // Floating-point primitives — ADR-0046 raison d'être: raw
-        // floats are channels (this list) but NOT pixels (omitted from
-        // `plain_pixel_inventory` below).
+        // Floating-point primitives — raw floats are channels (this
+        // list) but NOT pixels (omitted from `plain_pixel_inventory`
+        // below).
         assert_plain_channel::<f32>();
         assert_plain_channel::<f64>();
 
@@ -1328,9 +1318,8 @@ mod tests {
         assert_plain_channel::<Saturating<i32>>();
         assert_plain_channel::<Saturating<i64>>();
 
-        // `PlainPixel: PlainChannel` (ADR-0046 §Decision). Spot-check
-        // that the supertrait relationship is wired correctly: every
-        // pixel is also a channel.
+        // `PlainPixel: PlainChannel`. Spot-check that the supertrait
+        // relationship is wired correctly: every pixel is also a channel.
         assert_plain_channel::<crate::pixel::Mono8>();
         assert_plain_channel::<crate::pixel::MonoF32>();
         assert_plain_channel::<crate::pixel::Rgb8>();
@@ -1342,8 +1331,7 @@ mod tests {
         fn assert_plain_pixel<T: PlainPixel>() {}
 
         // Channel primitives that double as single-channel pixels.
-        // (These predate ADR-0044 and remain pixels — only `f32` /
-        // `f64` were revoked.)
+        // (Only `f32` / `f64` were revoked.)
         assert_plain_pixel::<u8>();
         assert_plain_pixel::<u16>();
         assert_plain_pixel::<u32>();
@@ -1429,7 +1417,7 @@ mod tests {
         // `LinearSpace` are intentionally not implemented).
         assert_plain_pixel::<crate::pixel::Indexed8>();
 
-        // Intentionally omitted (ADR-0044 Phase E):
+        // Intentionally omitted:
         //   assert_plain_pixel::<f32>();
         //   assert_plain_pixel::<f64>();
         // Raw floats are channels (`plain_channel_inventory`), not
@@ -1441,9 +1429,9 @@ mod tests {
         fn assert_linear_pixel<T: crate::pixel::LinearPixel>() {}
 
         // Channel-primitive single-channel pixels: NOT in this list.
-        // After ADR-0045 Phase S4, channel primitives are channels,
-        // not pixels — `u8`, `Saturating<u8>`, etc. no longer
-        // implement `LinearPixel`. Use `Mono8` / `Mono16` / etc.
+        // Channel primitives are channels, not pixels — `u8`,
+        // `Saturating<u8>`, etc. do not implement `LinearPixel`. Use
+        // `Mono8` / `Mono16` / etc.
 
         // Mono / Mono<BITS> / float-mono.
         assert_linear_pixel::<crate::pixel::Mono8>();
@@ -1505,9 +1493,8 @@ mod tests {
         assert_linear_pixel::<crate::pixel::BgraF64>();
 
         // Intentionally omitted:
-        //   * `f32` / `f64` (ADR-0044 Phase E — channels, not pixels).
-        //   * `u8..u64`, `i8..i64`, `Saturating<_>` (ADR-0045 Phase S4
-        //     — channels, not pixels).
+        //   * `f32` / `f64` (channels, not pixels).
+        //   * `u8..u64`, `i8..i64`, `Saturating<_>` (channels, not pixels).
         //   * `Srgb*` (non-linear space — convert with `SrgbGamma`).
         //   * `Indexed8` (palette index, not a color value).
     }
@@ -1581,8 +1568,8 @@ mod tests {
         assert_linear_space::<crate::pixel::BgraF64>();
 
         // Intentionally omitted:
-        //   * `f32` / `f64` (ADR-0044 Phase E — not pixels).
-        //   * Channel primitives (ADR-0045 Phase S4 — not pixels).
+        //   * `f32` / `f64` (not pixels).
+        //   * Channel primitives (not pixels).
         //   * `Srgb*` (gamma-encoded — convert to linear first).
         //   * `Indexed8` (palette index — interpolation meaningless).
     }

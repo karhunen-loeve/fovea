@@ -8,7 +8,7 @@
 //! box (as inclusive min/max coordinates), and `sum_x` / `sum_y` for
 //! the integer centroid. Higher-order moments, perimeter, holes,
 //! Euler number, orientation, convexity, and intensity measurements
-//! are deferred to follow-up plans (ADR-0047 \u00a78).
+//! are deferred to follow-up work.
 
 use crate::{Coordinate, Rectangle, Size};
 
@@ -133,7 +133,7 @@ pub(super) mod sink {
 
     /// Sealed sink trait \u2014 monomorphisation gate for stats
     /// accumulation. See module docs.
-    pub trait StatsSink {
+    pub(crate) trait StatsSink {
         /// Called once per foreground pixel. `compact_label` is the
         /// component's compact label (`1..=label_count`); `first`
         /// indicates whether this is the first pixel ever seen of
@@ -143,7 +143,7 @@ pub(super) mod sink {
     }
 
     /// Sink that drops every record. Compiles down to no work.
-    pub struct NoStats;
+    pub(crate) struct NoStats;
 
     impl StatsSink for NoStats {
         #[inline(always)]
@@ -152,8 +152,8 @@ pub(super) mod sink {
 
     /// Sink that accumulates per-component stats into a `Vec` indexed
     /// by `compact_label - 1`.
-    pub struct WithStats<'a> {
-        pub out: &'a mut Vec<ComponentStats>,
+    pub(crate) struct WithStats<'a> {
+        pub(crate) out: &'a mut Vec<ComponentStats>,
     }
 
     impl StatsSink for WithStats<'_> {

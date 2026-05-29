@@ -32,7 +32,7 @@
 //! on both sides. The implementation iterates the input row-major (sequential
 //! reads) and writes to scattered output positions. For images up to roughly
 //! 512 × 512 the working set fits in L2 and the naïve loop is fast enough;
-//! a blocked variant is deferred per ADR-0006 ("YAGNI for performance").
+//! a blocked variant is deferred (YAGNI for performance).
 //!
 //! ## Measured throughput
 //!
@@ -253,7 +253,7 @@ where
             *out.pixel_at_mut(y, w - 1 - x) = p;
         }
     }
-    // PERF: blocked variant deferred per ADR-0006 (YAGNI).
+    // PERF: blocked variant deferred (YAGNI).
 }
 
 /// Returns a 90° counter-clockwise rotated copy of `img`.
@@ -402,7 +402,7 @@ where
             *out.pixel_at_mut(dst_y, x) = p;
         }
     }
-    // PERF: blocked variant deferred per ADR-0006 (YAGNI).
+    // PERF: blocked variant deferred (YAGNI).
 }
 
 /// Returns a 270° counter-clockwise (== 90° clockwise) rotated copy of `img`.
@@ -479,7 +479,7 @@ where
             *out.pixel_at_mut(y, x) = p;
         }
     }
-    // PERF: blocked variant deferred per ADR-0006 (YAGNI).
+    // PERF: blocked variant deferred (YAGNI).
 }
 
 /// Returns the matrix transpose of `img`.
@@ -671,7 +671,7 @@ mod tests {
         assert_eq!(collect(&twice), collect(&src));
     }
 
-    // ─── Output-size mismatch panics (Tier 3, ADR-0025) ─────────────────────
+    // ─── Output-size mismatch panics (Tier 3) ──────────────────────
 
     #[test]
     #[should_panic(expected = "flip_h_into")]

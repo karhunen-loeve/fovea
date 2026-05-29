@@ -767,9 +767,9 @@ macro_rules! impl_luminance_sat {
     };
 }
 
-// (ADR-0044 Phase 2) The `impl_luminance_f32!` / `impl_luminance_f64!`
-// macros — which emitted `ConvertPixel<_, f32>` / `ConvertPixel<_, f64>`
-// impls for `Luminance` — have been removed. Float pixel roles are now
+// The `impl_luminance_f32!` / `impl_luminance_f64!` macros — which
+// emitted `ConvertPixel<_, f32>` / `ConvertPixel<_, f64>` impls for
+// `Luminance` — are intentionally not provided. Float pixel roles are
 // served exclusively by the named `MonoF32` / `MonoF64` accumulator
 // types; the corresponding `Luminance → MonoF32/MonoF64` impls are
 // defined further below via `impl_convert_expr!`.
@@ -931,8 +931,8 @@ macro_rules! impl_luminance_monoa {
 impl_convert_expr!(FullRange: Mono8  => Mono16, |src| Mono16::new(fr_u8_to_u16(mono8_val(src))));
 impl_convert_expr!(FullRange: Mono16 => Mono8,  |src| Mono8::new(fr_u16_to_u8(mono16_val(src))));
 
-// ── Mono ↔ f32: removed per ADR-0044 Phase 2. Use the `MonoF32`
-//    siblings defined below.
+// ── Mono ↔ f32: intentionally omitted. Use the `MonoF32` siblings
+//    defined below.
 
 // ── Narrow: Mono ─────────────────────────────────────────────────────────────
 impl_convert_expr!(Narrow: Mono8  => Mono16, |src| Mono16::new(clamp_u8_to_u16(mono8_val(src))));
@@ -969,7 +969,7 @@ impl<const BITS: usize> ConvertPixel<Mono<BITS>, Mono32> for FullRange {
     }
 }
 
-// ADR-0044 Phase 2: `ConvertPixel<Mono<BITS>, f32>` removed. Use
+// `ConvertPixel<Mono<BITS>, f32>` is intentionally not provided. Use
 // `ConvertPixel<Mono<BITS>, MonoF32>` defined below.
 
 impl<const BITS: usize> ConvertPixel<Mono<BITS>, Mono64> for FullRange {
@@ -981,7 +981,7 @@ impl<const BITS: usize> ConvertPixel<Mono<BITS>, Mono64> for FullRange {
     }
 }
 
-// ADR-0044 Phase 2: `ConvertPixel<Mono<BITS>, f64>` removed. Use
+// `ConvertPixel<Mono<BITS>, f64>` is intentionally not provided. Use
 // `ConvertPixel<Mono<BITS>, MonoF64>` defined below.
 
 impl<const BITS: usize> ConvertPixel<Mono<BITS>, Mono8> for Narrow {
@@ -1022,7 +1022,7 @@ impl_convert_expr!(FullRange: Mono32 => Mono8,  |src| Mono8::new(fr_u32_to_u8(mo
 impl_convert_expr!(FullRange: Mono16 => Mono32, |src| Mono32::new(fr_u16_to_u32(mono16_val(src))));
 impl_convert_expr!(FullRange: Mono32 => Mono16, |src| Mono16::new(fr_u32_to_u16(mono32_val(src))));
 
-// ── Mono32 ↔ f32/f64: removed per ADR-0044 Phase 2. Use `MonoF32` /
+// ── Mono32 ↔ f32/f64: intentionally omitted. Use `MonoF32` /
 //    `MonoF64` siblings below.
 
 // ── Mono8/16/32 ↔ Mono64 ───────────────────────────────────────────────────
@@ -1033,13 +1033,13 @@ impl_convert_expr!(FullRange: Mono64 => Mono16, |src| Mono16::new(fr_u64_to_u16(
 impl_convert_expr!(FullRange: Mono32 => Mono64, |src| Mono64::new(fr_u32_to_u64(mono32_val(src))));
 impl_convert_expr!(FullRange: Mono64 => Mono32, |src| Mono32::new(fr_u64_to_u32(mono64_val(src))));
 
-// ── Mono64 ↔ f32/f64: removed per ADR-0044 Phase 2. Use `MonoF32` /
+// ── Mono64 ↔ f32/f64: intentionally omitted. Use `MonoF32` /
 //    `MonoF64` siblings below.
 
-// ── Mono8/16 ↔ f64: removed per ADR-0044 Phase 2. Use `MonoF64`
+// ── Mono8/16 ↔ f64: intentionally omitted. Use `MonoF64`
 //    siblings below.
 
-// ── f32 ↔ f64: removed per ADR-0044 Phase 2. Use the `MonoF32`
+// ── f32 ↔ f64: intentionally omitted. Use the `MonoF32`
 //    ↔ `MonoF64` impls below.
 
 // ── MonoF32 ↔ integer Mono types ────────────────────────────────────────────
@@ -1082,10 +1082,10 @@ impl<const BITS: usize> ConvertPixel<Mono<BITS>, MonoF64> for FullRange {
 impl_convert_expr!(FullRange: MonoF32 => MonoF64, |src| MonoF64::new(src.0 as f64));
 impl_convert_expr!(FullRange: MonoF64 => MonoF32, |src| MonoF32::new(src.0 as f32));
 
-// ── MonoF32/MonoF64 ↔ bare f32/f64 identity conversions: removed per
-//    ADR-0044 Phase 2. Bare floats are no longer pixel types; callers
-//    that hold a raw `f32`/`f64` scalar can wrap via `MonoF32::new` /
-//    `MonoF64::new` directly, or use `From`/`Into`.
+// ── MonoF32/MonoF64 ↔ bare f32/f64 identity conversions: intentionally
+//    omitted. Bare floats are not pixel types; callers that hold a raw
+//    `f32`/`f64` scalar can wrap via `MonoF32::new` / `MonoF64::new`
+//    directly, or use `From`/`Into`.
 
 // ── Narrow: Mono32 / Mono64 ─────────────────────────────────────────────────
 impl_convert_expr!(Narrow: Mono8  => Mono32, |src| Mono32::new(clamp_u8_to_u32(mono8_val(src))));
@@ -1194,7 +1194,7 @@ impl_broadcast!(Mono32 => Rgb32,  mono32_val);
 impl_broadcast!(Mono32 => Bgr32,  mono32_val);
 impl_broadcast!(Mono64 => Rgb64,  mono64_val);
 impl_broadcast!(Mono64 => Bgr64,  mono64_val);
-// ADR-0044 Phase 2: `Broadcast` from bare f32/f64 removed. Use
+// `Broadcast` from bare f32/f64 is intentionally not provided. Use
 // `MonoF32` / `MonoF64` sources below.
 impl_broadcast!(MonoF32 => RgbF32, |s: &MonoF32| s.0);
 impl_broadcast!(MonoF32 => BgrF32, |s: &MonoF32| s.0);
@@ -1210,8 +1210,8 @@ impl_broadcast!(Mono32 => Rgba32,  mono32_val, alpha = u32::MAX);
 impl_broadcast!(Mono32 => Bgra32,  mono32_val, alpha = u32::MAX);
 impl_broadcast!(Mono64 => Rgba64,  mono64_val, alpha = u64::MAX);
 impl_broadcast!(Mono64 => Bgra64,  mono64_val, alpha = u64::MAX);
-// ADR-0044 Phase 2: `Broadcast` from bare f32/f64 to *A removed. Use
-// `MonoF32` / `MonoF64` sources below.
+// `Broadcast` from bare f32/f64 to *A is intentionally not provided.
+// Use `MonoF32` / `MonoF64` sources below.
 impl_broadcast!(MonoF32 => RgbaF32, |s: &MonoF32| s.0, alpha = 1.0);
 impl_broadcast!(MonoF32 => BgraF32, |s: &MonoF32| s.0, alpha = 1.0);
 impl_broadcast!(MonoF64 => RgbaF64, |s: &MonoF64| s.0, alpha = 1.0);
@@ -1331,7 +1331,7 @@ impl ConvertPixel<Mono64, MonoA64> for AddAlpha {
     }
 }
 
-// ADR-0044 Phase 2: `AddAlpha` from bare `f32`/`f64` removed. Use
+// `AddAlpha` from bare `f32`/`f64` is intentionally not provided. Use
 // `ConvertPixel<MonoF32, MonoAF32>` / `ConvertPixel<MonoF64, MonoAF64>`
 // defined immediately below.
 
@@ -1444,8 +1444,8 @@ impl ConvertPixel<RgbaF32, Srgba8> for SrgbGamma {
 
 // ── SrgbMono8 ↔ f32 ────────────────────────────────────────────────────────
 
-// ADR-0044 Phase 2: `SrgbGamma` between `SrgbMono8` and bare `f32`
-// removed. Use `ConvertPixel<SrgbMono8, MonoF32>` /
+// `SrgbGamma` between `SrgbMono8` and bare `f32` is intentionally not
+// provided. Use `ConvertPixel<SrgbMono8, MonoF32>` /
 // `ConvertPixel<MonoF32, SrgbMono8>` defined immediately below.
 
 // ── SrgbMono8 ↔ MonoF32 ────────────────────────────────────────────────────
@@ -1538,8 +1538,8 @@ impl ConvertPixel<RgbaF32, Srgba16> for SrgbGamma {
 
 // ── SrgbMono16 ↔ f32 ───────────────────────────────────────────────────────
 
-// ADR-0044 Phase 2: `SrgbGamma` between `SrgbMono16` and bare `f32`
-// removed. Use `ConvertPixel<SrgbMono16, MonoF32>` /
+// `SrgbGamma` between `SrgbMono16` and bare `f32` is intentionally not
+// provided. Use `ConvertPixel<SrgbMono16, MonoF32>` /
 // `ConvertPixel<MonoF32, SrgbMono16>` defined immediately below.
 
 // ── SrgbMono16 ↔ MonoF32 ───────────────────────────────────────────────────
@@ -1581,7 +1581,7 @@ impl ConvertPixel<MonoAF32, SrgbMonoA16> for SrgbGamma {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Unary pixel strategies — threshold family + Invert (PLAN §3.1, §3.2)
+// Unary pixel strategies — threshold family + Invert
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 // These strategies implement `ConvertPixel<P, P>` (or `ConvertPixel<P, bool>`
@@ -1597,10 +1597,10 @@ impl ConvertPixel<MonoAF32, SrgbMonoA16> for SrgbGamma {
 //   - `BinaryThresholdInv<P>`   : channel `Ord + Zeroable + BoundedChannel`
 //   - `Invert`                  : channel `BoundedChannel + Sub<Output=Self>`
 //
-// Per ADR-0042, `BoundedChannel` is what grants access to the channel's
-// intrinsic maximum; its absence on `f32` / `f64` is load-bearing and is
-// what makes `Invert` / `BinaryThreshold[ Inv]` refuse to compile for float-
-// channel pixels (Philosophy §1, §8).
+// `BoundedChannel` is what grants access to the channel's intrinsic
+// maximum; its absence on `f32` / `f64` is load-bearing and is what
+// makes `Invert` / `BinaryThreshold[ Inv]` refuse to compile for
+// float-channel pixels (Philosophy §1, §8).
 
 /// Binary threshold: output channel is `Channel::MAX` if `value > thresh`,
 /// else `Channel::zero()`.
@@ -1614,7 +1614,7 @@ impl ConvertPixel<MonoAF32, SrgbMonoA16> for SrgbGamma {
 /// Storing the threshold as a full pixel keeps the user in the same
 /// vocabulary they already use, naturally admits per-channel thresholds
 /// on multi-channel pixels, and avoids leaking the `Saturating<_>`
-/// channel wrapper into call sites. See PLAN §3.1.
+/// channel wrapper into call sites.
 ///
 /// # Example
 /// ```
@@ -1859,7 +1859,7 @@ where
 /// Per-channel inversion: `white - value`, where `white` is the
 /// pixel-level saturated channel value ([`WhiteChannel::white_channel`]).
 ///
-/// Bound via [`WhiteChannel`](crate::pixel::WhiteChannel) (ADR-0043), so
+/// Bound via [`WhiteChannel`](crate::pixel::WhiteChannel), so
 /// floating-point pixel families (`MonoF32`, `RgbF32`, …) are
 /// **deliberately excluded**: there is no intrinsic maximum for `f32` /
 /// `f64`, and the library refuses to bake in a `[0, 1]` assumption
@@ -1873,7 +1873,8 @@ where
 /// `Invert` uses the pixel-level saturated value (e.g. `1023` for
 /// `Mono<10>`), not the channel type's storage maximum
 /// (`Saturating<u16>::MAX == 65535`). This preserves the pixel's
-/// invariant — see ADR-0043 for the concrete bug this prevents.
+/// invariant (without it, inverting a `Mono<10>` pixel would corrupt
+/// the high-bit zeroing the type guarantees).
 ///
 /// # Example
 /// ```
@@ -1901,7 +1902,7 @@ where
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Clamp<P> — per-pixel value-range restriction (PLAN §3.3)
+// Clamp<P> — per-pixel value-range restriction
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 // Note: This is NOT the same as the cross-type narrowing strategy previously
@@ -1911,8 +1912,9 @@ where
 //
 // The bounds are stored as full pixels — same vocabulary the user already
 // works in — so uniform-range clamping (`lo: Mono8::new(20)`) and
-// per-channel ranges (`lo: Rgb8::new(16, 16, 16)`) are both natural. See
-// PLAN §3.1's threshold rationale for the parallel design argument.
+// per-channel ranges (`lo: Rgb8::new(16, 16, 16)`) are both natural —
+// the same parallel design argument that motivates `BinaryThreshold`'s
+// pixel-typed `thresh`.
 
 /// Per-pixel value-range restriction: `clamp(channel, lo, hi)` per channel.
 ///
@@ -1983,7 +1985,7 @@ where
     /// Construct a [`Clamp`] strategy after validating that `lo <= hi`
     /// channel-wise.
     ///
-    /// # Panics (Tier 3 — programmer bug, see ADR-0025)
+    /// # Panics (Tier 3 — programmer bug)
     ///
     /// Panics if any channel of `lo` is greater than the corresponding
     /// channel of `hi`. An inverted range collapses every input to `hi`
@@ -2064,7 +2066,7 @@ where
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// BrightnessContrast<S> — affine per-pixel transform (PLAN §3.5)
+// BrightnessContrast<S> — affine per-pixel transform
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 // Implements the classical affine intensity transform
@@ -2073,7 +2075,7 @@ where
 //
 // via the `LinearPixel<S>` pathway: `scale_add` (FMA-optimized per
 // OPT-002) + `uniform` (broadcast brightness across channels per PLAN
-// §3.4) + `FromLinear` (round + clamp per ADR-0020).
+// §3.4) + `FromLinear` (round + clamp).
 //
 // The scalar parameter `S` defaults to `f32`; users of f64-accumulator
 // pipelines (`MonoF64`, `Mono64`, …) write `BrightnessContrast::<f64>`
@@ -2150,7 +2152,7 @@ where
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Lut<V> / ChannelLut — lookup-table conversion strategies (PLAN §3.6)
+// Lut<V> / ChannelLut — lookup-table conversion strategies
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 // Two strategies, two operations:
@@ -2168,9 +2170,8 @@ where
 // pixel type and produces cross-type conversions; `ChannelLut` is tied to
 // u8-channel pixels and is same-type. A single generic design would either
 // conflict on the blanket `ConvertPixel<Mono8, Mono8>` impl or force users
-// to turbofish the output type everywhere. See PLAN §3.6 for the full
-// rationale (and the parallel argument to `BinaryThreshold` vs
-// `BinaryMask`).
+// to turbofish the output type everywhere. (The parallel argument
+// applies to `BinaryThreshold` vs `BinaryMask`.)
 
 /// Lookup-table conversion from `Mono8` to any pixel type `V`.
 ///
@@ -2184,7 +2185,7 @@ where
 /// calibration-curve linearization (`Mono8 → MonoF32`), and intensity
 /// remapping (`Mono8 → Mono8`) all use the same strategy — the only
 /// thing that changes is the output type carried through the type
-/// system. See PLAN §3.6 for the rejection of a same-type-only design.
+/// system.
 ///
 /// # Example
 ///
@@ -2267,8 +2268,7 @@ impl<V: Copy> ConvertPixel<Mono8, V> for Lut<V> {
 /// A `u16 → u16` variant would need a 65 536-entry table — a different
 /// operation that deserves a different name. If that becomes a real
 /// need, it can be added as `ChannelLut16` later without breaking
-/// changes (Philosophy §9 — "Extension by addition"). See PLAN §3.6 for
-/// the rejection of a `ChannelLut<C>` generic design.
+/// changes (Philosophy §9 — "Extension by addition").
 ///
 /// # Example
 ///
@@ -2423,9 +2423,9 @@ impl<P: Copy> ConvertPixel<Indexed8, P> for Depalettize<P> {
 /// # use fovea::pixel::{Mono8, PlainChannel};
 /// # use fovea::transform::{ConvertPixel, PixelMap, convert_image};
 /// let img = Image::fill(2, 2, Mono8::new(200));
-/// // ADR-0046: byte-layout items (`as_bytes`, `SIZE`, …) live on
-/// // `PlainChannel`; `PlainPixel` extends it but the call below only
-/// // needs the channel-role trait in scope.
+/// // Byte-layout items (`as_bytes`, `SIZE`, …) live on `PlainChannel`;
+/// // `PlainPixel` extends it but the call below only needs the
+/// // channel-role trait in scope.
 /// let inverted: Image<Mono8> = convert_image(&img, PixelMap(|src: &Mono8| {
 ///     Mono8::new(255 - src.as_bytes()[0])
 /// }));
@@ -4057,10 +4057,9 @@ mod tests {
         // Simulate the user's example: custom type → MonoF32 via closure.
         // We use Mono16 as a stand-in for "ComplexPixel".
         //
-        // ADR-0045 Phase C: the output type is `MonoF32` (the named
-        // pixel wrapper over `f32`), not raw `f32` — per §C.3, `f32`
-        // flowing through `convert_image` in a pixel-semantic context
-        // is a pixel role and must be named.
+        // The output type is `MonoF32` (the named pixel wrapper over
+        // `f32`), not raw `f32` — `f32` flowing through `convert_image`
+        // in a pixel-semantic context is a pixel role and must be named.
         let img = Image::fill(2, 2, Mono16::new(1000));
         let out: Image<MonoF32> = convert_image(
             &img,
@@ -7763,8 +7762,8 @@ mod tests {
 
     // ── FullRange: MonoF32 ↔ bare f32, MonoF64 ↔ bare f64 ──────────────
     //
-    // These identity conversions were removed in ADR-0044 Phase 2.
-    // Tests deleted accordingly.
+    // These identity conversions are intentionally not provided.
+    // Tests omitted accordingly.
 
     // ── Luminance: RGB/BGR → MonoF32 / MonoF64 ─────────────────────────
 
@@ -8149,7 +8148,7 @@ mod tests {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // Phase 1 — Threshold family + Invert + BinaryMask (PLAN §3.1, §3.2)
+    // Phase 1 — Threshold family + Invert + BinaryMask
     // ═══════════════════════════════════════════════════════════════════════════
 
     use crate::image::BinaryImage;
@@ -8347,7 +8346,7 @@ mod tests {
     }
 
     // Negative test: Invert must NOT compile for float-channel pixel types.
-    // `f32` and `f64` do not implement `BoundedChannel` (ADR-0042), so the
+    // `f32` and `f64` do not implement `BoundedChannel`, so the
     // channel-bound on `Invert`'s impl rejects them at compile time.
     //
     // We cannot express "does not compile" inside a `#[cfg(test)]` block
@@ -8511,7 +8510,7 @@ mod tests {
         }
     }
 
-    // ─── BinaryMask → morphology integration (PLAN §1.1, §8) ──────────────
+    // ─── BinaryMask → morphology integration ──────────────
     //
     // Demonstrates the core value proposition of the `bool`-valued threshold
     // path: `BinaryMask` produces a `BinaryImage`, which feeds `erode` /
@@ -8553,7 +8552,7 @@ mod tests {
         }
     }
 
-    // ─── Phase 1 composability with `.then()` (PLAN §8) ───────────────────
+    // ─── Phase 1 composability with `.then()` ───────────────────
     //
     // PLAN Phase 1 checklist explicitly requires:
     //   "Tests: composability with `.then()` (e.g.
@@ -8638,7 +8637,7 @@ mod tests {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // Phase 2 — Clamp<P> and BrightnessContrast<S> (PLAN §3.3, §3.5)
+    // Phase 2 — Clamp<P> and BrightnessContrast<S>
     // ═══════════════════════════════════════════════════════════════════════════
 
     // ─── Clamp<P> ─────────────────────────────────────────────────────────
@@ -8877,7 +8876,7 @@ mod tests {
 
     #[test]
     fn brightness_contrast_f64_scalar_on_monof64() {
-        // f64-precision scalar path (PLAN §3.4 / §3.5): picks up the
+        // f64-precision scalar path: picks up the
         // LinearPixel<f64> impl on MonoF64 — no f32 → f64 widening.
         let strat = BrightnessContrast::<f64> {
             brightness: 0.01,
@@ -8955,7 +8954,7 @@ mod tests {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // Phase 3 — Lut<V> and ChannelLut (PLAN §3.6)
+    // Phase 3 — Lut<V> and ChannelLut
     // ═══════════════════════════════════════════════════════════════════════════
 
     // ─── Lut<V> — cross-type Mono8 → V ────────────────────────────────────
@@ -9187,9 +9186,9 @@ mod tests {
         assert_eq!(method.convert(&Mono8::new(50)), Mono8::new(0));
     }
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // ADR-0043 regression tests — Mono<BITS> invariant preservation
-    // ═══════════════════════════════════════════════════════════════════════
+    // ══════════════════════════════════════════════════════════════════════════
+    // Mono<BITS> invariant-preservation regression tests
+    // ══════════════════════════════════════════════════════════════════════════
     //
     // The bug these tests guard against:
     //
@@ -9203,7 +9202,7 @@ mod tests {
     //   `Mono<10>` while actually holding `65535` — silently violating the
     //   invariant that every constructor on `Mono<BITS>` enforces.
     //
-    // The fix (ADR-0043): `Invert` / `BinaryThreshold` / `BinaryThresholdInv`
+    // The fix: `Invert` / `BinaryThreshold` / `BinaryThresholdInv`
     // bind on `WhiteChannel` (pixel-level), not `BoundedChannel` (channel-
     // type-level). `Mono<BITS>` overrides `WhiteChannel::white_channel()` to
     // return `Saturating(Self::MAX) == Saturating((1 << BITS) - 1)`, which
@@ -9437,7 +9436,7 @@ mod tests {
     // Negative: float-channel pixels (MonoF32/MonoF64/RgbF32/…) must NOT
     // implement WhiteChannel. That absence is load-bearing — it is what
     // makes `Invert`, `BinaryThreshold`, and `BinaryThresholdInv` refuse
-    // to compile for float pixels (ADR-0043). We cannot express "does not
+    // to compile for float pixels. We cannot express "does not
     // compile" without a compile-fail harness, so the inventory below
     // serves as the living positive-list.
     #[test]
@@ -9450,7 +9449,7 @@ mod tests {
         assert_white_channel::<Mono32>();
         assert_white_channel::<Mono64>();
 
-        // Mono<BITS> — manual override (the whole point of ADR-0043)
+        // Mono<BITS> — manual override (preserves the reduced-range invariant)
         assert_white_channel::<Mono<10>>();
         assert_white_channel::<Mono<12>>();
         assert_white_channel::<Mono<14>>();

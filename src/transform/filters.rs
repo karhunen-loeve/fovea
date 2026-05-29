@@ -10,8 +10,7 @@
 //! e.g. `MonoF32` for `Mono8`) to avoid truncation — the caller can
 //! convert to the desired output type afterwards. Gradient outputs
 //! from edge detectors are conventionally treated as pixel-role
-//! images (spatial grids carrying signed intensity) per ADR-0044's
-//! taxonomy.
+//! images (spatial grids carrying signed intensity).
 //!
 //! Functions that produce blurred / sharpened output preserve the input
 //! pixel type by default (using [`FromLinear`] for the final conversion).
@@ -120,7 +119,7 @@ where
 /// use fovea::pixel::MonoF32;
 /// use fovea::transform::gaussian_blur_3x3;
 ///
-/// // ADR-0044 Phase E: the pixel role for floats is `MonoF32`,
+/// // the pixel role for floats is `MonoF32`,
 /// // not raw `f32`. `MonoF32` is `#[repr(transparent)]` over `f32`.
 /// let src = Image::fill(8, 8, MonoF32::new(1.0));
 /// let result: Image<MonoF32> = gaussian_blur_3x3(&src, &Clamp);
@@ -163,7 +162,7 @@ where
 /// use fovea::pixel::MonoF32;
 /// use fovea::transform::gaussian_blur_5x5;
 ///
-/// // ADR-0044 Phase E: the pixel role for floats is `MonoF32`.
+/// // the pixel role for floats is `MonoF32`.
 /// let src = Image::fill(10, 10, MonoF32::new(1.0));
 /// let result: Image<MonoF32> = gaussian_blur_5x5(&src, &Clamp);
 ///
@@ -745,7 +744,7 @@ mod tests {
     #[test]
     fn sobel_x_uniform_is_zero() {
         let src = Image::fill(8, 8, Mono8::new(50));
-        // ADR-0045 Phase C: `Mono8::Accumulator = MonoF32`.
+        // `Mono8::Accumulator = MonoF32`.
         let result: Image<crate::pixel::MonoF32> = sobel_x(&src, &Clamp);
 
         for y in 0..result.height() {
@@ -1034,7 +1033,7 @@ mod tests {
         let _: Image<MonoF32> = laplacian_8(&src_f32, &Clamp);
         let _: Image<MonoF32> = sharpen(&src_f32, &Clamp);
         let _: Image<MonoF32> = emboss(&src_f32, &Clamp);
-        // ADR-0045 Phase C: `Mono8::Accumulator = MonoF32`, so the
+        // `Mono8::Accumulator = MonoF32`, so the
         // `Mono8` input path produces an `Image<MonoF32>` output.
         let _: Image<crate::pixel::MonoF32> = sobel_x(&src_u8, &Clamp);
         let _: Image<crate::pixel::MonoF32> = sobel_y(&src_u8, &Clamp);

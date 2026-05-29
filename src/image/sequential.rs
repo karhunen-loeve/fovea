@@ -152,8 +152,7 @@ pub(crate) mod private {
 /// blanket [`IntoTilesMut`](crate::image::IntoTilesMut) implementation and
 /// the various `as_bytes` helpers rely on memory-safety invariants (the
 /// returned slice length equals `width * height` of an image with the
-/// reported `size()`) that the compiler cannot enforce. See
-/// ADR-0048 for the full rationale.
+/// reported `size()`) that the compiler cannot enforce.
 pub(crate) mod contiguous_sealed {
     pub trait Sealed {}
 }
@@ -167,9 +166,8 @@ pub(crate) mod contiguous_sealed {
 /// The contract "`as_slice().len() == width * height`" is relied on by
 /// safe code (notably [`IntoTilesMut`](crate::image::IntoTilesMut))
 /// to derive raw pointers and slice ranges; an incorrect external impl
-/// would cause undefined behaviour. See ADR-0048 for details on why this
-/// trait is sealed today and how it may be reopened as an `unsafe trait`
-/// in the future.
+/// would cause undefined behaviour. The trait is sealed today and may
+/// be reopened as an `unsafe trait` in the future.
 ///
 /// # Example
 /// ```
@@ -188,7 +186,7 @@ pub trait ContiguousImage: RasterImage + contiguous_sealed::Sealed {
 /// # Sealed
 ///
 /// This trait is **sealed** — it cannot be implemented outside this crate.
-/// See [`ContiguousImage`] and ADR-0048 for the rationale.
+/// See [`ContiguousImage`] for the rationale.
 ///
 /// # Example
 /// ```
@@ -959,9 +957,8 @@ impl<T: Copy> SubView for ImageRefMut<'_, T> {
 /// ```
 /// # use fovea::image::{ImageView, ImageViewMut, Image};
 /// # use fovea::pixel::MonoF32;
-/// // ADR-0044 / ADR-0045 Phase C: `MonoF32` is the named pixel type
-/// // over `f32` — use it whenever an image holds pixel data rather
-/// // than scalar kernel weights.
+/// // `MonoF32` is the named pixel type over `f32` — use it whenever
+/// // an image holds pixel data rather than scalar kernel weights.
 /// let mut img: Image<MonoF32> = Image::fill(3, 4, MonoF32(17.0));
 ///
 /// assert_eq!(img.width(), 3);

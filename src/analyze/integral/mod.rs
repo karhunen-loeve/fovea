@@ -35,8 +35,8 @@
 //! # Closed accumulator set (0.1)
 //!
 //! The `(source, accumulator)` pairings shipped in this release are a
-//! **closed built-in set**: the [`IntegralPixel`] /
-//! [`IntegralSquaredPixel`] traits are sealed against external impls,
+//! **closed built-in set**: the [`IntegralPixel`](crate::pixel::IntegralPixel) /
+//! [`IntegralSquaredPixel`](crate::pixel::IntegralSquaredPixel) traits are sealed against external impls,
 //! and the pre-flight capacity calculation is hard-wired to the shipped
 //! accumulator types (`Mono32`, `Mono64`, `MonoF64`, and their RGB
 //! analogues). User-defined accumulator pixels are **not** a supported

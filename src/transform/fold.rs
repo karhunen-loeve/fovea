@@ -1,7 +1,7 @@
 use crate::border::{BorderPolicy, compute_interior_region};
 use crate::image::{Image, ImageView, RasterImage, RasterImageMut};
 use crate::pixel::ZeroablePixel;
-// ADR-0044 Phase E: `MonoF32` appears in doctests and the `#[cfg(test)]`
+// `MonoF32` appears in doctests and the `#[cfg(test)]`
 // module as the pixel-role float output type. Scoping the import to
 // `cfg(test)` keeps the non-test build free of the unused-import
 // warning while leaving the doctests' `# use fovea::pixel::MonoF32;`
@@ -114,7 +114,7 @@ pub trait FoldOp<P, W> {
 /// let src = Image::fill(4, 4, 1u8);
 /// let kernel = Neighborhood::<f32, 3, 3>::box_blur_3x3();
 ///
-/// // ADR-0044 Phase E: the closure's output is a pixel, so it must
+/// // the closure's output is a pixel, so it must
 /// // be a pixel type — use `MonoF32` instead of raw `f32`. The
 /// // `f32` weight/accumulator inside the closure stays scalar.
 /// let result: Image<MonoF32> = fold_neighborhood(

@@ -216,9 +216,9 @@ impl<P: HomogeneousPixel> ImagePlanes<P> {
     /// disagree.
     ///
     /// This is the fallible counterpart to [`from_planes`](Self::from_planes).
-    /// Per ADR-0025, plane-size mismatch is caller-supplied data and is
-    /// therefore a Tier-2 condition; prefer this constructor whenever plane
-    /// sizes originate outside the caller (decoders, IO, FFI).
+    /// Plane-size mismatch is caller-supplied data and is therefore a
+    /// Tier-2 condition; prefer this constructor whenever plane sizes
+    /// originate outside the caller (decoders, IO, FFI).
     ///
     /// # Errors
     ///
