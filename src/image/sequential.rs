@@ -1083,7 +1083,7 @@ impl<T> Image<T> {
         //   These are identical since count * T::SIZE == expected.
         // - count * T::SIZE == expected == boxed_bytes.len() (exact fit)
         let data =
-            unsafe { Box::from_raw(std::slice::from_raw_parts_mut(raw_ptr as *mut T, count)) };
+            unsafe { Box::from_raw(std::ptr::slice_from_raw_parts_mut(raw_ptr as *mut T, count)) };
         Ok(Self { size, data })
     }
 
@@ -1969,8 +1969,8 @@ mod tests {
         assert_eq!(img.height(), 64);
         assert_eq!(img.size(), Size::new(64, 64));
         assert_eq!(img[(0, 0)], 0);
-        assert_eq!(img[(63, 63)], ((63 + 63) % 256) as u8);
-        assert_eq!(img[(32, 16)], ((32 + 16) % 256) as u8);
+        assert_eq!(img[(63, 63)], (63 + 63) as u8);
+        assert_eq!(img[(32, 16)], (32 + 16) as u8);
         assert_eq!(img.get(64, 0), None); // out of bounds
         assert_eq!(img.as_slice().len(), 64 * 64);
     }
@@ -1980,7 +1980,7 @@ mod tests {
         let img: ImageArray<u8, 32, 64> = ImageArray::generate(|x, y| ((x * 2 + y) % 256) as u8);
         assert_eq!(img.width(), 32);
         assert_eq!(img.height(), 64);
-        assert_eq!(img[(31, 63)], ((31 * 2 + 63) % 256) as u8);
+        assert_eq!(img[(31, 63)], (31 * 2 + 63) as u8);
     }
 
     #[test]
@@ -2009,7 +2009,7 @@ mod tests {
         assert_eq!(img20[(19, 19)], 38);
 
         let img50: ImageArray<u8, 50, 50> = ImageArray::generate(|x, y| ((x + y) % 256) as u8);
-        assert_eq!(img50[(49, 49)], ((49 + 49) % 256) as u8);
+        assert_eq!(img50[(49, 49)], (49 + 49) as u8);
     }
 
     #[test]

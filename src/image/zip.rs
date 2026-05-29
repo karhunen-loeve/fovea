@@ -238,7 +238,7 @@ mod tests {
         assert_eq!(pairs.len(), 9);
 
         // Verify first pixel: roi_a starts at (1,1), roi_b starts at (2,2)
-        assert_eq!(pairs[0].0, (1 + 1 * 6) as u8); // img_a[1,1] = 7
+        assert_eq!(pairs[0].0, (1 + 6) as u8); // img_a[1,1] = 7
         assert_eq!(pairs[0].1, ((2 + 2) * 2) as u8); // img_b[2,2] = 8
     }
 
@@ -362,9 +362,9 @@ mod tests {
 
         let pairs: Vec<_> = zip_pixels(&a, &b).unwrap().collect();
         assert_eq!(pairs.len(), 5);
-        for i in 0..5 {
-            assert_eq!(pairs[i].0, i as u8);
-            assert_eq!(pairs[i].1, (i * 2) as u8);
+        for (i, pair) in pairs.iter().enumerate().take(5) {
+            assert_eq!(pair.0, i as u8);
+            assert_eq!(pair.1, (i * 2) as u8);
         }
     }
 
@@ -375,9 +375,9 @@ mod tests {
 
         let pairs: Vec<_> = zip_pixels(&a, &b).unwrap().collect();
         assert_eq!(pairs.len(), 5);
-        for i in 0..5 {
-            assert_eq!(pairs[i].0, i as u8);
-            assert_eq!(pairs[i].1, (i * 3) as u8);
+        for (i, pair) in pairs.iter().enumerate().take(5) {
+            assert_eq!(pair.0, i as u8);
+            assert_eq!(pair.1, (i * 3) as u8);
         }
     }
 

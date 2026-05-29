@@ -232,7 +232,7 @@ mod tests {
     #[test]
     fn test_size_clone() {
         let size1 = Size::new(50, 60);
-        let size2 = size1.clone();
+        let size2 = size1;
         assert_eq!(size1, size2);
     }
 
@@ -317,7 +317,7 @@ mod tests {
     #[test]
     fn test_rectangle_clone() {
         let rect1 = Rectangle::new((5, 10), (50, 60));
-        let rect2 = rect1.clone();
+        let rect2 = rect1;
         assert_eq!(rect1, rect2);
     }
 
@@ -388,7 +388,7 @@ mod tests {
     #[test]
     fn test_stride_clone() {
         let s1 = Stride::new(8, 9);
-        let s2 = s1.clone();
+        let s2 = s1;
         assert_eq!(s1, s2);
     }
 

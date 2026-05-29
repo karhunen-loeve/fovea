@@ -1165,14 +1165,14 @@ mod tests {
 
     #[test]
     fn clamp_with_f32_pixel() {
-        let img = Image::generate(3, 3, |x, y| (x as f32 + y as f32 * 3.0));
+        let img = Image::generate(3, 3, |x, y| x as f32 + y as f32 * 3.0 );
         assert_eq!(Clamp.pixel_at(&img, -1, 0), img.pixel_at(0, 0));
         assert_eq!(Clamp.pixel_at(&img, 3, 2), img.pixel_at(2, 2));
     }
 
     #[test]
     fn constant_with_f32_pixel() {
-        let img = Image::generate(3, 3, |x, y| (x as f32 + y as f32 * 3.0));
+        let img = Image::generate(3, 3, |x, y| x as f32 + y as f32 * 3.0 );
         let policy = Constant(0.0f32);
         assert_eq!(policy.pixel_at(&img, -1, 0), 0.0);
         assert_eq!(policy.pixel_at(&img, 1, 1), 4.0);
@@ -1250,35 +1250,35 @@ mod tests {
     fn policies_are_copy_clone_debug() {
         let s = Skip;
         let s2 = s; // Copy
-        let s3 = s.clone();
+        let s3 = s;
         assert_eq!(s, s2);
         assert_eq!(s, s3);
         let _ = format!("{:?}", s);
 
         let c = Clamp;
         let c2 = c;
-        let c3 = c.clone();
+        let c3 = c;
         assert_eq!(c, c2);
         assert_eq!(c, c3);
         let _ = format!("{:?}", c);
 
         let m = Mirror;
         let m2 = m;
-        let m3 = m.clone();
+        let m3 = m;
         assert_eq!(m, m2);
         assert_eq!(m, m3);
         let _ = format!("{:?}", m);
 
         let w = Wrap;
         let w2 = w;
-        let w3 = w.clone();
+        let w3 = w;
         assert_eq!(w, w2);
         assert_eq!(w, w3);
         let _ = format!("{:?}", w);
 
         let k = Constant(42u8);
         let k2 = k;
-        let k3 = k.clone();
+        let k3 = k;
         assert_eq!(k, k2);
         assert_eq!(k, k3);
         let _ = format!("{:?}", k);

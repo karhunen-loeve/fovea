@@ -252,7 +252,6 @@ impl<S, V, const N: usize> HistogramOutput<S, V> for [Histogram<S, V>; N] {
 /// # Examples
 ///
 /// See the module-level documentation for end-to-end examples.
-#[must_use]
 pub fn histogram<P, S, O>(image: &impl RasterImage<Pixel = P>, strategy: &S) -> Result<O, Error>
 where
     P: HomogeneousPixel,

@@ -1581,7 +1581,7 @@ mod tests {
 
     #[test]
     fn f32_image_identity() {
-        let src = Image::generate(4, 4, |x, y| (x as f32 + y as f32 * 0.1));
+        let src = Image::generate(4, 4, |x, y| x as f32 + y as f32 * 0.1 );
         let kernel = Neighborhood::<f32, 3, 3>::new([0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0]);
 
         let result = fold_neighborhood(&src, kernel.weights(), kernel.anchor(), &Clamp, sum_fold());

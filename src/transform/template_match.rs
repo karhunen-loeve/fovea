@@ -169,7 +169,6 @@ where
 /// assert_eq!(result.width(), 8);
 /// assert_eq!(result.height(), 8);
 /// ```
-#[must_use]
 pub fn match_template<I, T, S, M>(image: &I, template: &T, method: M) -> Result<Image<S>, Error>
 where
     I: ImageView,
@@ -1059,7 +1058,7 @@ mod tests {
             for x in 0..result.width() {
                 let score = result.pixel_at(x, y).0;
                 assert!(
-                    score >= -1.0 - 1e-6 && score <= 1.0 + 1e-6,
+                    (-1.0 - 1e-6..=1.0 + 1e-6).contains(&score),
                     "NCC score {} at ({}, {}) is out of [-1, 1] range",
                     score,
                     x,

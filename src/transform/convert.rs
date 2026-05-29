@@ -6606,8 +6606,8 @@ mod tests {
     #[test]
     fn depalettize_from_slice_full_256() {
         let mut entries = [Rgb8::new(0, 0, 0); 256];
-        for i in 0..256 {
-            entries[i] = Rgb8::new(i as u8, 0, 0);
+        for (i, entry) in entries.iter_mut().enumerate() {
+            *entry = Rgb8::new(i as u8, 0, 0);
         }
         let strategy = Depalettize::from_slice(&entries);
         for i in 0..256u16 {
@@ -6637,8 +6637,8 @@ mod tests {
     fn depalettize_all_indices_valid() {
         // Every u8 index maps to a valid entry — no bounds check needed
         let mut palette = [Mono8::new(0); 256];
-        for i in 0..256 {
-            palette[i] = Mono8::new(i as u8);
+        for (i, entry) in palette.iter_mut().enumerate() {
+            *entry = Mono8::new(i as u8);
         }
         let strategy = Depalettize::new(palette);
         for i in 0..=255u8 {
@@ -6649,10 +6649,11 @@ mod tests {
     #[test]
     fn depalettize_rgba8_with_alpha() {
         // Simulates PNG PLTE + tRNS: palette entries carry alpha
-        let mut entries = Vec::with_capacity(3);
-        entries.push(Rgba8::new(255, 0, 0, 255)); // opaque red
-        entries.push(Rgba8::new(0, 255, 0, 128)); // semi-transparent green
-        entries.push(Rgba8::new(0, 0, 255, 0)); // fully transparent blue
+        let entries = vec![
+            Rgba8::new(255, 0, 0, 255), // opaque red
+            Rgba8::new(0, 255, 0, 128), // semi-transparent green
+            Rgba8::new(0, 0, 255, 0),   // fully transparent blue
+        ];
         let strategy = Depalettize::<Rgba8>::from_slice(&entries);
         assert_eq!(strategy.convert(&Indexed8(0)), Rgba8::new(255, 0, 0, 255));
         assert_eq!(strategy.convert(&Indexed8(1)), Rgba8::new(0, 255, 0, 128));
@@ -8756,7 +8757,7 @@ mod tests {
         for y in 0..4 {
             for x in 0..4 {
                 let v = (x * 30 + y * 20) as u8;
-                let expected = v.max(30).min(70);
+                let expected = v.clamp(30, 70);
                 assert_eq!(out.pixel_at(x, y), Mono8::new(expected));
             }
         }

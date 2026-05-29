@@ -190,7 +190,6 @@ where
 /// let out = result.unwrap();
 /// assert_eq!(out.pixel_at(0, 0), Mono8::new(255)); // saturated
 /// ```
-#[must_use]
 pub fn combine_images<IA, IB, M>(a: &IA, b: &IB, method: M) -> Result<Image<M::Output>, Error>
 where
     IA: RasterImage,
@@ -274,7 +273,6 @@ where
 /// let out = result.unwrap();
 /// assert_eq!(out.pixel_at(0, 0), Mono32::new(200));
 /// ```
-#[must_use]
 pub fn combine_images_fn<IA, IB, Out, F>(a: &IA, b: &IB, f: F) -> Result<Image<Out>, Error>
 where
     IA: RasterImage,
@@ -664,7 +662,6 @@ where
 /// let c = Image::fill(4, 4, Mono8::new(0));
 /// assert!(add(&a, &c).is_err());
 /// ```
-#[must_use]
 pub fn add<IA, IB>(a: &IA, b: &IB) -> Result<Image<IA::Pixel>, Error>
 where
     IA: RasterImage,
@@ -697,7 +694,6 @@ where
 /// let saturated = subtract(&b, &c).unwrap();
 /// assert_eq!(saturated.pixel_at(0, 0), Mono8::new(0));
 /// ```
-#[must_use]
 pub fn subtract<IA, IB>(a: &IA, b: &IB) -> Result<Image<IA::Pixel>, Error>
 where
     IA: RasterImage,
@@ -730,7 +726,6 @@ where
 /// let swapped = abs_diff(&b, &a).unwrap();
 /// assert_eq!(result.pixel_at(0, 0), swapped.pixel_at(0, 0));
 /// ```
-#[must_use]
 pub fn abs_diff<IA, IB>(a: &IA, b: &IB) -> Result<Image<IA::Pixel>, Error>
 where
     IA: RasterImage,
@@ -760,7 +755,6 @@ where
 /// let result = image_min(&a, &b).unwrap();
 /// assert_eq!(result.pixel_at(0, 0), Mono8::new(100));
 /// ```
-#[must_use]
 pub fn image_min<IA, IB>(a: &IA, b: &IB) -> Result<Image<IA::Pixel>, Error>
 where
     IA: RasterImage,
@@ -789,7 +783,6 @@ where
 /// let result = image_max(&a, &b).unwrap();
 /// assert_eq!(result.pixel_at(0, 0), Mono8::new(200));
 /// ```
-#[must_use]
 pub fn image_max<IA, IB>(a: &IA, b: &IB) -> Result<Image<IA::Pixel>, Error>
 where
     IA: RasterImage,
