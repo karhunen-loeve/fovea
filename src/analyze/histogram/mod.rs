@@ -240,7 +240,7 @@ impl<S, V, const N: usize> HistogramOutput<S, V> for [Histogram<S, V>; N] {
 /// # Errors
 ///
 /// Returns [`Error::InvalidBinningStrategy`] if `strategy.validate()`
-/// rejects the strategy's own configuration (Tier 2 per ADR-0025).
+/// rejects the strategy's own configuration (Tier 2).
 /// Validation runs once before any per-pixel work.
 ///
 /// # Panics

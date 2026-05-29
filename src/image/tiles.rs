@@ -416,8 +416,7 @@ impl<'a, T> ExactSizeIterator for EnumeratePositions<'a, T> where T: SubView {}
 /// Uses a raw pointer (`*mut T`) internally so that multiple disjoint
 /// `ImageRefMut` tiles can coexist simultaneously. This is safe
 /// because the grid-based tiling with monotonic advancement guarantees
-/// that no two tiles share a pixel. See ADR-0021 for the full safety
-/// argument.
+/// that no two tiles share a pixel.
 ///
 /// # Construction
 ///
@@ -475,7 +474,7 @@ impl<'a, T> TileIterMut<'a, T> {
         );
         // Real (non-debug) assertion: the blanket `IntoTilesMut` impl is
         // reachable through `ContiguousImageMut`, whose `as_slice()` length
-        // contract is sealed today (ADR-0048) but still depends on the
+        // contract is sealed today but still depends on the
         // implementor reporting a consistent `size()`. Failing this check
         // in safe code must never silently produce out-of-bounds tiles.
         let expected = image_size
@@ -566,7 +565,7 @@ mod sealed {
 ///
 /// This trait is **sealed** — it cannot be implemented outside this crate. A
 /// user-provided implementation that yields overlapping tiles would cause
-/// undefined behaviour. See ADR-0021 for the full rationale.
+/// undefined behaviour.
 ///
 /// # Example
 ///

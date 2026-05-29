@@ -162,9 +162,9 @@ pub unsafe trait PlainPixel: PlainChannel {
     /// The total number of channels in the pixel.
     const DIM: usize = Self::CHANNELS.len();
     // `SIZE`, `ALIGN`, `_ASSERT_SIZE`, `as_bytes`, and `from_bytes`
-    // are inherited from `PlainChannel` (ADR-0046) — call sites
-    // resolve them through `<T as PlainChannel>::...` or bring
-    // `PlainChannel` into scope alongside `PlainPixel`.
+    // are inherited from `PlainChannel` — call sites resolve them
+    // through `<T as PlainChannel>::...` or bring `PlainChannel` into
+    // scope alongside `PlainPixel`.
 
     /// Compile-time assertion: size must equal sum of channel sizes.
     const _ASSERT_CHANNELS: () = assert!(
@@ -263,7 +263,7 @@ pub trait ZeroablePixel: Sized + Copy {
 }
 
 // ──────────────────────────────────────────────────────────────────────────
-// Label pixel role (ADR-0047)
+// Label pixel role
 // ──────────────────────────────────────────────────────────────────────────
 
 /// A pixel type whose values name connected-component labels.
@@ -329,7 +329,7 @@ pub trait LabelPixel: Copy + Eq + Ord + core::hash::Hash + ZeroablePixel {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Integral-image source/accumulator gating (ADR-0032)
+// Integral-image source/accumulator gating
 // ─────────────────────────────────────────────────────────────────────────────
 //
 // These traits gate the *valid combinations* of source pixel `Self` and
@@ -340,7 +340,7 @@ pub trait LabelPixel: Copy + Eq + Ord + core::hash::Hash + ZeroablePixel {
 // The pre-flight overflow check in `analyze::integral::preflight` reads
 // `max_integral_value()` / `max_integral_squared_value()` to decide whether
 // the chosen accumulator can hold the worst-case sum for the given image
-// dimensions (ADR-0032 §3). The check is `O(1)`; the inner loop has zero
+// dimensions. The check is `O(1)`; the inner loop has zero
 // per-pixel overhead.
 
 /// Connects a pixel type to a valid integral-image accumulator pixel.
@@ -451,11 +451,9 @@ pub trait IntegralSquaredPixel<A: Copy>: Copy {
 ///
 /// # Rationale
 ///
-/// See ADR-0042 for the full rationale — briefly, the alternative of
-/// macro-enumerating every concrete pixel type (to scatter `MAX`
-/// constants inline in per-type impls) would close the operation off to
-/// user pixel types and duplicate a property the type system can carry
-/// in a single place.
+/// Centralising the bound on a trait keeps the operation open to
+/// user pixel types and avoids duplicating a `MAX` constant in
+/// per-type impls.
 pub trait BoundedChannel: Copy {
     /// The largest value representable by this channel type.
     const MAX: Self;
@@ -497,8 +495,10 @@ pub trait BoundedChannel: Copy {
 ///
 /// # Rationale
 ///
-/// See ADR-0043 for the full rationale and the concrete `Mono<BITS>`
-/// invariant bug that motivated this trait.
+/// Separating the channel-storage maximum from the pixel-level
+/// "white" lets reduced-range pixels (`Mono<BITS>`) preserve their
+/// invariant when strategies like `Invert` write a saturated value
+/// back through `from_channels`.
 pub trait WhiteChannel: HomogeneousPixel {
     /// The value the pixel treats as "fully saturated" on every
     /// channel slot.
@@ -584,7 +584,6 @@ pub trait LinearPixel<S = f32>: Sized + Copy {
     ///
     /// Channel-level arithmetic is expressed by [`LinearChannel`]. A
     /// pixel's accumulator is a pixel; a channel's accumulator is a scalar.
-    /// See ADR-0045 for the channel/pixel split.
     ///
     /// For single-channel pixels (`Mono8`, `MonoF32`, …) this is the
     /// scalar itself (cast to the accumulator's numeric type).
@@ -597,11 +596,10 @@ pub trait LinearPixel<S = f32>: Sized + Copy {
     ///
     /// ```
     /// # use fovea::pixel::{LinearPixel, MonoF32};
-    /// // ADR-0044 Phase E: `f32` is no longer a pixel; the pixel-role
-    /// // float type is `MonoF32`. `MonoF32::uniform` returns the
-    /// // accumulator (`MonoF32`) with the scalar broadcast across
-    /// // every channel — for this single-channel pixel, that's just
-    /// // `MonoF32(0.5)`.
+    /// // `f32` is not a pixel; the pixel-role float type is `MonoF32`.
+    /// // `MonoF32::uniform` returns the accumulator (`MonoF32`) with
+    /// // the scalar broadcast across every channel — for this
+    /// // single-channel pixel, that's just `MonoF32(0.5)`.
     /// let x = <MonoF32 as LinearPixel>::uniform(0.5);
     /// assert_eq!(x, MonoF32(0.5));
     /// ```
@@ -620,8 +618,6 @@ pub trait LinearPixel<S = f32>: Sized + Copy {
 /// `i8`…`i64`), their `Saturating<_>` wrappers, and the float
 /// primitives (`f32`, `f64`). Pixel-named types (`Mono8`, `Rgb8`,
 /// `MonoF32`, …) implement [`LinearPixel`], not `LinearChannel`.
-///
-/// See ADR-0045 for the channel/pixel trait split rationale.
 ///
 /// # Example
 ///

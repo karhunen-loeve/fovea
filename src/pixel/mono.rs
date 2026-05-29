@@ -229,9 +229,9 @@ impl<const BITS: usize> std::ops::DivAssign<&u16> for Mono<BITS> {
     WhiteChannel,
 )]
 #[repr(transparent)]
-// ADR-0045 Phase B: accumulator promoted from raw `f32` to the named
-// pixel type `MonoF32`. The derive macro wraps via `Into::into` at
-// the single-field boundary; `MonoF32` is `#[repr(transparent)]` over
+// Accumulator promoted from raw `f32` to the named pixel type
+// `MonoF32`. The derive macro wraps via `Into::into` at the
+// single-field boundary; `MonoF32` is `#[repr(transparent)]` over
 // `f32`, so the numeric body and bit pattern are unchanged.
 #[linear(accumulator = MonoF32)]
 pub struct Mono8(Saturating<u8>);
@@ -290,7 +290,7 @@ impl Mul<f32> for &Mono8 {
     LinearPixel,
     WhiteChannel,
 )]
-// ADR-0045 Phase B: accumulator → `MonoF32` (see `Mono8` above).
+// Accumulator → `MonoF32` (see `Mono8` above).
 #[linear(accumulator = MonoF32)]
 pub struct Mono16(Saturating<u16>);
 impl Mono16 {
@@ -334,7 +334,7 @@ impl From<u16> for Mono16 {
     LinearPixel,
     WhiteChannel,
 )]
-// ADR-0045 Phase B: accumulator → `MonoF64` (see `Mono8` above).
+// Accumulator → `MonoF64` (see `Mono8` above).
 #[linear(accumulator = MonoF64)]
 pub struct Mono32(Saturating<u32>);
 impl Mono32 {
@@ -362,20 +362,19 @@ impl From<u32> for Mono32 {
 }
 
 // f64-scalar LinearPixel impl for Mono32 — preserves precision for f64
-// pipelines (PLAN §3.4 scalar-precision note). The derive above already
+// pipelines. The derive above already
 // emits `impl LinearPixel<f32> for Mono32` with `Accumulator = MonoF64`;
 // this adds a parallel `LinearPixel<f64>` impl (same accumulator) so
 // strategies parameterized by scalar type (e.g. `BrightnessContrast<f64>`)
 // can pick up the matching impl via trait resolution without an
 // `f32 → f64` widening in the hot loop.
 //
-// ADR-0045 Phase S4: the underlying `Saturating<u32>` is a channel
-// (implements `LinearChannel<f64>`, not `LinearPixel<f64>`). Delegate
-// through the channel trait.
+// The underlying `Saturating<u32>` is a channel (implements
+// `LinearChannel<f64>`, not `LinearPixel<f64>`). Delegate through the
+// channel trait.
 //
-// ADR-0045 Phase B: accumulator promoted from raw `f64` to `MonoF64`.
-// The `Saturating<u32>` channel's accumulator is still `f64`; the
-// pixel-level accumulator wraps it via `MonoF64(..)`.
+// The `Saturating<u32>` channel's accumulator is `f64`; the pixel-level
+// accumulator wraps it via `MonoF64(..)`.
 impl LinearPixel<f64> for Mono32 {
     type Accumulator = MonoF64;
     #[inline(always)]
@@ -419,7 +418,7 @@ impl LinearPixel<f64> for Mono32 {
     LinearPixel,
     WhiteChannel,
 )]
-// ADR-0045 Phase B: accumulator → `MonoF64` (see `Mono32` above).
+// Accumulator → `MonoF64` (see `Mono32` above).
 #[linear(accumulator = MonoF64)]
 pub struct Mono64(Saturating<u64>);
 impl Mono64 {
@@ -447,9 +446,8 @@ impl From<u64> for Mono64 {
 }
 
 // f64-scalar LinearPixel impl for Mono64 — preserves precision for f64
-// pipelines (PLAN §3.4). See the Mono32 counterpart above for rationale.
-// ADR-0045 Phase S4: delegate through `LinearChannel<f64>`.
-// ADR-0045 Phase B: accumulator → `MonoF64`.
+// pipelines. See the Mono32 counterpart above for rationale.
+// Delegates through `LinearChannel<f64>`; accumulator is `MonoF64`.
 impl LinearPixel<f64> for Mono64 {
     type Accumulator = MonoF64;
     #[inline(always)]
@@ -479,8 +477,8 @@ impl LinearPixel<f64> for Mono64 {
 /// Grayscale pixel with 32-bit floating point depth.
 ///
 /// Bare `f32` is a [`PlainChannel`](crate::pixel::PlainChannel) but **not** a
-/// [`PlainPixel`](crate::pixel::PlainPixel) (ADR-0046 — channels are not
-/// pixels). `MonoF32` is the actual pixel type: it carries the semantic
+/// [`PlainPixel`](crate::pixel::PlainPixel) (channels are not pixels).
+/// `MonoF32` is the actual pixel type: it carries the semantic
 /// meaning "this is a pixel intensity value" per Philosophy §1 and
 /// participates in the pixel-typed APIs.
 ///
@@ -496,9 +494,9 @@ impl LinearPixel<f64> for Mono64 {
 #[derive(
     Clone, Copy, Debug, PartialEq, PartialOrd, PlainPixel, HomogeneousPixel, ZeroablePixel,
 )]
-// ADR-0044 + ADR-0046: the inner `f32` is a `PlainChannel` /
-// `LinearChannel` but not a `ZeroablePixel` (that role is
-// pixel-only). Use `Default` for field zero initialisation.
+// The inner `f32` is a `PlainChannel` / `LinearChannel` but not a
+// `ZeroablePixel` (that role is pixel-only). Use `Default` for field
+// zero initialisation.
 pub struct MonoF32(#[zero(default)] pub f32);
 impl MonoF32 {
     #[inline]
@@ -515,10 +513,10 @@ impl MonoF32 {
     /// Returns a new `MonoF32` with the absolute value of the underlying
     /// `f32` intensity.
     ///
-    /// Ergonomic helper for test asserts and per-pixel arithmetic under
-    /// ADR-0045 Phase B / ADR-0044 Phase C, where pixel-role `f32` values
-    /// have been promoted to `MonoF32`. Mirrors `f32::abs` at the pixel
-    /// layer and avoids repeated `.0` extraction at comparison boundaries.
+    /// Ergonomic helper for test asserts and per-pixel arithmetic where
+    /// pixel-role `f32` values are represented as `MonoF32`. Mirrors
+    /// `f32::abs` at the pixel layer and avoids repeated `.0` extraction
+    /// at comparison boundaries.
     #[inline]
     pub fn abs(self) -> MonoF32 {
         MonoF32(self.0.abs())
@@ -540,7 +538,7 @@ impl From<f32> for MonoF32 {
 // Used by scan-based strategies (`AutoContrast::scan`) whose pixel bound
 // is `V::Pixel: Into<f64>`. The inner `f32 -> f64` cast is lossless and
 // standard; providing it here keeps `MonoF32` a drop-in replacement for
-// raw-`f32` pixel callsites after ADR-0044 Phase E.
+// raw-`f32` pixel callsites where `f32` is no longer a pixel.
 impl From<MonoF32> for f64 {
     #[inline]
     fn from(p: MonoF32) -> Self {
@@ -557,8 +555,8 @@ impl Hash for MonoF32 {
 /// Grayscale pixel with 64-bit floating point depth.
 ///
 /// Bare `f64` is a [`PlainChannel`](crate::pixel::PlainChannel) but **not** a
-/// [`PlainPixel`](crate::pixel::PlainPixel) (ADR-0046 — channels are not
-/// pixels). `MonoF64` is the actual pixel type: it carries the semantic
+/// [`PlainPixel`](crate::pixel::PlainPixel) (channels are not pixels).
+/// `MonoF64` is the actual pixel type: it carries the semantic
 /// meaning "this is a pixel intensity value" per Philosophy §1 and
 /// participates in the pixel-typed APIs.
 ///
@@ -574,7 +572,7 @@ impl Hash for MonoF32 {
 #[derive(
     Clone, Copy, Debug, PartialEq, PartialOrd, PlainPixel, HomogeneousPixel, ZeroablePixel,
 )]
-// ADR-0044 + ADR-0046: inner `f64` is a channel, not a pixel.
+// Inner `f64` is a channel, not a pixel.
 pub struct MonoF64(#[zero(default)] pub f64);
 impl MonoF64 {
     #[inline]
@@ -618,9 +616,9 @@ impl Hash for MonoF64 {
 // PlainPixel / ZeroablePixel / LinearPixel / HomogeneousPixel for Mono<BITS>
 // ---------------------------------------------------------------------------
 
-// ADR-0046: `PlainPixel` extends `PlainChannel`, so the generic
-// hand-written impl for `Mono<BITS>` needs a matching
-// `PlainChannel` impl. Body is empty — defaults suffice.
+// `PlainPixel` extends `PlainChannel`, so the generic hand-written
+// impl for `Mono<BITS>` needs a matching `PlainChannel` impl. Body
+// is empty — defaults suffice.
 //
 // SAFETY: `Mono<BITS>` is `#[repr(transparent)]` over
 // `Saturating<u16>`; layout, round-trip, and bit-pattern
@@ -634,11 +632,11 @@ impl<const BITS: usize> ZeroablePixel for Mono<BITS> {
         Saturating(0).into()
     }
 }
-// ADR-0045 Phase B: accumulator promoted from raw `f32` to `MonoF32`.
-// The underlying `Saturating<u16>` channel keeps `LinearChannel::
-// Accumulator = f32`; the pixel-level accumulator wraps via
-// `MonoF32(..)`. Numerical identity preserved because `MonoF32` is
-// `#[repr(transparent)]` over `f32`.
+// Accumulator promoted from raw `f32` to `MonoF32`. The underlying
+// `Saturating<u16>` channel keeps `LinearChannel::Accumulator = f32`;
+// the pixel-level accumulator wraps via `MonoF32(..)`. Numerical
+// identity preserved because `MonoF32` is `#[repr(transparent)]` over
+// `f32`.
 impl<const BITS: usize> LinearPixel for Mono<BITS> {
     type Accumulator = MonoF32;
     #[inline(always)]
@@ -670,9 +668,9 @@ impl<const BITS: usize> FromLinear<f32> for Mono<BITS> {
         Mono::new(acc.round().clamp(0.0, Mono::<BITS>::MAX as f32) as u16)
     }
 }
-// ADR-0045 Phase A: named-float-accumulator sibling. Delegates to
-// the bare-float body; `MonoF32` is `#[repr(transparent)] over f32`,
-// so the `.0` extraction is zero-cost.
+// Named-float-accumulator sibling. Delegates to the bare-float body;
+// `MonoF32` is `#[repr(transparent)]` over `f32`, so the `.0`
+// extraction is zero-cost.
 impl<const BITS: usize> FromLinear<MonoF32> for Mono<BITS> {
     #[inline(always)]
     fn from_linear(acc: MonoF32) -> Self {
@@ -684,17 +682,17 @@ unsafe impl<const BITS: usize> HomogeneousPixel for Mono<BITS> {
     type Channels = [Saturating<u16>; 1];
 }
 
-// Manual `WhiteChannel` impl for `Mono<BITS>` (ADR-0043).
+// Manual `WhiteChannel` impl for `Mono<BITS>`.
 //
 // `Mono<BITS>` uses `Saturating<u16>` as its channel type but carries the
 // stronger invariant that the raw value fits in `BITS` bits. The
 // `BoundedChannel::MAX` of `Saturating<u16>` is `65535`, which would
 // violate `Mono<10>`'s `value <= 1023` invariant when written back via
-// `HomogeneousPixel::from_channels` (a layout-only primitive — see
-// ADR-0015). Returning `Saturating(Self::MAX)` here gives strategies
-// like `Invert` and `BinaryThreshold` the pixel-level "white" value
-// (`(1 << BITS) - 1`), preserving the invariant that every
-// constructor on `Mono<BITS>` enforces.
+// `HomogeneousPixel::from_channels` (a layout-only primitive that does
+// not validate pixel invariants). Returning `Saturating(Self::MAX)`
+// here gives strategies like `Invert` and `BinaryThreshold` the
+// pixel-level "white" value (`(1 << BITS) - 1`), preserving the
+// invariant that every constructor on `Mono<BITS>` enforces.
 impl<const BITS: usize> WhiteChannel for Mono<BITS> {
     #[inline(always)]
     fn white_channel() -> Saturating<u16> {
@@ -813,7 +811,7 @@ impl LinearPixel for MonoF64 {
 }
 
 // f64-scalar LinearPixel impl for MonoF64 — preserves precision for f64
-// pipelines (PLAN §3.4 scalar-precision note). Both the f32-scalar impl
+// pipelines. Both the f32-scalar impl
 // above and this impl share `Accumulator = Self`; the trait's scalar
 // parameter is what distinguishes them.
 impl LinearPixel<f64> for MonoF64 {
@@ -846,22 +844,21 @@ impl LinearPixel<f64> for MonoF64 {
 impl<const BITS: usize> LinearSpace for Mono<BITS> {}
 
 // ---------------------------------------------------------------------------
-// IntegralPixel / IntegralSquaredPixel impls (ADR-0032)
+// IntegralPixel / IntegralSquaredPixel impls
 // ---------------------------------------------------------------------------
 //
 // Each `impl IntegralPixel<A> for Src` connects a *source* pixel `Src` to a
 // permitted accumulator pixel `A` for the summed-area-table engine in
 // `crate::analyze::integral`. Combinations are deliberately closed and
-// small (no macros) per the plan; the trait's correctness contract is
-// the tightness of `max_integral_value()` (ADR-0032 §2 / Philosophy §11).
+// small (no macros); the trait's correctness contract is the tightness of
+// `max_integral_value()` (Philosophy §11).
 //
 // Source coverage (this file): `Mono8`, `Mono16`, `Mono32`, `MonoF32`,
 // `MonoF64`. RGB sources live in `rgb.rs`. `Mono<BITS>`,
-// `MonoA*`, `Srgb*`, and `Indexed8` are intentionally omitted — see
-// ADR-0032 §2 / `INTEGRAL_IMAGE_PLAN.md` for the rationale (reduced-range
-// summing is not a well-defined operation without an explicit strategy,
-// alpha + sRGB-gamma summing is meaningless, and palette indices do not
-// add).
+// `MonoA*`, `Srgb*`, and `Indexed8` are intentionally omitted
+// (reduced-range summing is not a well-defined operation without an
+// explicit strategy, alpha + sRGB-gamma summing is meaningless, and
+// palette indices do not add).
 //
 // Float impls assume the conventional `[0.0, 1.0]` range and document
 // the assumption at the trait level (Philosophy §8 — surface, don't decide).
@@ -899,7 +896,7 @@ impl IntegralPixel<MonoF64> for Mono8 {
 }
 
 // Squared: 255² = 65_025 — too wide for u32 over realistic images, so the
-// only impls are Mono64 / MonoF64 (ADR-0032 §8 table).
+// only impls are Mono64 / MonoF64.
 impl IntegralSquaredPixel<Mono64> for Mono8 {
     #[inline]
     fn to_integral_squared(self) -> Mono64 {
@@ -950,7 +947,7 @@ impl IntegralPixel<MonoF64> for Mono16 {
 
 // Squared: 65535² ≈ 4.3 × 10⁹ already saturates u32 at one pixel.
 // Mono64 fits any reasonable image. Float-accumulator impl is `MonoF64`
-// only — ADR-0032 §8 explicitly rules out non-f64 squared accumulators.
+// only — non-f64 squared accumulators are intentionally not offered.
 impl IntegralSquaredPixel<MonoF64> for Mono16 {
     #[inline]
     fn to_integral_squared(self) -> MonoF64 {
@@ -1003,7 +1000,7 @@ impl IntegralSquaredPixel<MonoF64> for Mono32 {
 }
 
 // ── MonoF32 / MonoF64 (float, conventional [0, 1] range) ──────────────────
-// Per ADR-0032 §7: f32 accumulators are never offered — only `MonoF64`.
+// f32 accumulators are never offered — only `MonoF64`.
 // The `[0, 1]` convention is documented on the trait; this library does
 // not silently rescale data outside that range (Philosophy §8).
 impl IntegralPixel<MonoF64> for MonoF32 {
@@ -1137,8 +1134,8 @@ mod integral_tests {
 // derive macro (`fovea-derive/src/linear_pixel.rs`). These tests
 // pin the per-channel saturating behaviour the summed-area-table
 // engine in `crate::analyze::integral` relies on — specifically the
-// `(a - c) - (d - b)` evaluation order argument in ADR-0032 §5 and
-// the no-overflow guarantee the pre-flight check (ADR-0032 §3) gives
+// `(a - c) - (d - b)` evaluation order used by the summed-area-table
+// recurrence and the no-overflow guarantee the pre-flight check gives
 // the inner-loop recurrence.
 #[cfg(test)]
 mod accumulator_arith_tests {

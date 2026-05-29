@@ -4,14 +4,11 @@
 //!
 //! - [`otsu_threshold`] — pure algorithm on a 256-bin
 //!   [`Histogram<NaturalBins, V>`](super::Histogram); returns
-//!   `Option<u8>` (Tier 1 per ADR-0025: `None` for degenerate inputs).
+//!   `Option<u8>` (Tier 1: `None` for degenerate inputs).
 //! - [`otsu_binary_mask`] — convenience that runs the histogram engine,
 //!   picks the threshold, and applies
 //!   [`BinaryMask`](crate::transform::BinaryMask) to produce a
 //!   [`BinaryImage`].
-//!
-//! See `HISTOGRAM_CONSUMERS_PLAN.md` and ADR-0040 for the design
-//! rationale.
 
 use crate::Error;
 use crate::analyze::histogram::strategy::BinningStrategy;
@@ -22,7 +19,7 @@ use crate::transform::{BinaryMask, convert_image};
 
 /// Compute Otsu's optimal threshold from a 256-bin histogram.
 ///
-/// Returns `None` (Tier 1 per ADR-0025) for degenerate histograms
+/// Returns `None` (Tier 1) for degenerate histograms
 /// where no meaningful split exists — either there are no in-range
 /// pixels at all, or every pixel falls in a single bin. Otherwise
 /// returns `Some(t)` where pixels with channel value `> t` belong to
@@ -135,7 +132,7 @@ where
 ///
 /// # Panics
 ///
-/// Panics if `P::CHANNEL_COUNT != 1` (Tier 3 per ADR-0025; callers
+/// Panics if `P::CHANNEL_COUNT != 1` (Tier 3 — programmer bug; callers
 /// with multi-channel images must convert to single channel first).
 ///
 /// # Examples

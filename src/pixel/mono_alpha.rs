@@ -1,6 +1,6 @@
 //! Grayscale-with-alpha (MonoA) pixel types.
 //!
-//! Two-channel pixels: value (v) + alpha (a). See ADR-0009 for rationale.
+//! Two-channel pixels: value (v) + alpha (a).
 
 use fovea_derive::{HomogeneousPixel, LinearPixel, PlainPixel, WhiteChannel, ZeroablePixel};
 
@@ -15,8 +15,7 @@ use super::{canonicalize_f32, canonicalize_f64};
 // MonoA (Grayscale-with-Alpha) pixel types
 //
 // Two-channel pixels: value (v) + alpha (a).  Same derive pattern as Rgba.
-// See ADR-0009 for rationale.
-// ═══════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════════════
 
 /// Grayscale-with-alpha pixel, 8-bit depth per channel.
 #[repr(C)]
@@ -141,7 +140,7 @@ impl MonoA64 {
 )]
 #[linear(accumulator = Self)]
 pub struct MonoAF32 {
-    // ADR-0044 + ADR-0046: inner `f32` is a channel, not a pixel.
+    // Inner `f32` is a channel, not a pixel.
     #[zero(default)]
     pub v: f32,
     #[zero(default)]
@@ -167,7 +166,7 @@ impl Hash for MonoAF32 {
 )]
 #[linear(accumulator = Self)]
 pub struct MonoAF64 {
-    // ADR-0044 + ADR-0046: inner `f64` is a channel, not a pixel.
+    // Inner `f64` is a channel, not a pixel.
     #[zero(default)]
     pub v: f64,
     #[zero(default)]

@@ -81,7 +81,7 @@ pub trait MatchMethod<I: ImageView, T: ImageView, O: ImageViewMut> {
 /// Panics if the template has zero width or height (Tier-3 programmer
 /// bug).
 #[inline]
-pub fn match_template_preflight<I, T>(image: &I, template: &T) -> Result<(), Error>
+pub(super) fn match_template_preflight<I, T>(image: &I, template: &T) -> Result<(), Error>
 where
     I: ImageView,
     T: ImageView,

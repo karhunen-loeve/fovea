@@ -4,7 +4,7 @@
 //! See [`Connectivity4`] and [`Connectivity8`]. The trait is sealed;
 //! only the two shipped marker types may implement it. Adding new
 //! connectivities (e.g. 6-connected on a hex grid, knight's-move)
-//! requires a follow-up ADR \u2014 see ADR-0047 \u00a77.
+//! is intentionally out of scope.
 
 mod sealed {
     pub trait Sealed {}

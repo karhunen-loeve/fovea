@@ -2,20 +2,16 @@
 //!
 //! This module implements the [`BinningStrategy`] trait, the [`BinIndex`]
 //! classification enum, and the three concrete strategies — [`NaturalBins`],
-//! [`LinearBins`], and [`CustomBins`] — described in ADR-0040 and in
-//! `HISTOGRAM_PLAN.md` §3–§5.
+//! [`LinearBins`], and [`CustomBins`].
 //!
 //! ## Pixel-model context
 //!
 //! Strategies bind on channel values, never on pixels. The trait bound on
 //! `V` is just `Copy`; pixel-role traits (`PlainPixel`, `LinearPixel`,
-//! `LinearSpace`) are deliberately *not* required. After ADR-0044 / 0046,
-//! `f32` / `f64` are valid channels (e.g. for `MonoF32`, `RgbF32`) but not
-//! pixels — and `BinningStrategy<f32>` / `BinningStrategy<f64>` impls
-//! exist for exactly that reason.
-//!
-//! See ADR-0040 §1 for the trait shape and ADR-0040 §2 for each concrete
-//! strategy's intended semantics.
+//! `LinearSpace`) are deliberately *not* required. `f32` / `f64` are
+//! valid channels (e.g. for `MonoF32`, `RgbF32`) but not pixels — and
+//! `BinningStrategy<f32>` / `BinningStrategy<f64>` impls exist for
+//! exactly that reason.
 
 use std::num::Saturating;
 
@@ -93,8 +89,8 @@ pub enum BinIndex {
 /// return [`Error::InvalidBinningStrategy`] on bad input. The `histogram()`
 /// engine calls `validate()` exactly once before any per-pixel work.
 ///
-/// See ADR-0025 for the three-tier error convention this trait participates
-/// in (`validate` is Tier 2; `bin_range` out-of-range is Tier 3).
+/// The trait participates in the crate's three-tier error convention
+/// (`validate` is Tier 2; `bin_range` out-of-range is Tier 3).
 pub trait BinningStrategy<V: Copy> {
     /// The numeric type used to report bin edges via
     /// [`bin_range`](BinningStrategy::bin_range).
@@ -116,8 +112,7 @@ pub trait BinningStrategy<V: Copy> {
     ///
     /// # Panics
     ///
-    /// Panics if `index >= self.bin_count()` (Tier 3 — programmer bug,
-    /// per ADR-0025).
+    /// Panics if `index >= self.bin_count()` (Tier 3 — programmer bug).
     fn bin_range(&self, index: usize) -> (Self::Range, Self::Range);
 
     /// Validates the strategy's configuration.

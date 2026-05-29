@@ -5,7 +5,7 @@
 //! carrying strategies (`LinearBins`, `CustomBins`) the strategy *is*
 //! the histogram's interpretive contract, and queries such as
 //! `count_for(value)` or `bin_range(i)` are only meaningful relative
-//! to it. See ADR-0040 §3 for the rationale.
+//! to it.
 //!
 //! The second type parameter `V` is a phantom witness for the channel
 //! value type the histogram was built from. It is never stored: it
@@ -13,7 +13,8 @@
 //! `Histogram<NaturalBins, u8>` (built from `Indexed8`) from
 //! `Histogram<NaturalBins, Saturating<u8>>` (built from `Mono8` /
 //! `Rgb8` / …). Without `V`, the two would be the same type and
-//! `bin_range(i)` would be ambiguous after ADR-0046.
+//! `bin_range(i)` would be ambiguous when channel primitives and
+//! pixel types share the same underlying storage.
 //!
 
 use core::marker::PhantomData;
@@ -30,7 +31,9 @@ use super::strategy::{BinIndex, BinningStrategy};
 /// # Type parameters
 ///
 /// - `S` — the [`BinningStrategy`] used to classify values into bins.
-///   The strategy instance is stored by value: see ADR-0040 §3.
+///   The strategy instance is stored by value (queries such as
+///   `bin_range(i)` are only meaningful against the strategy that
+///   produced the histogram).
 /// - `V` — the channel value type. A phantom witness; never stored.
 ///   Distinguishes histograms built from `u8` (e.g. `Indexed8`) from
 ///   those built from `Saturating<u8>` (e.g. `Mono8`, `Rgb8`).
@@ -145,7 +148,7 @@ impl<S, V> Histogram<S, V> {
     /// # Panics
     ///
     /// Panics if `index >= self.bins().len()` (Tier 3 — programmer
-    /// bug, per ADR-0025).
+    /// bug).
     #[inline]
     pub fn count_at_bin(&self, index: usize) -> u64 {
         assert!(
@@ -192,7 +195,7 @@ where
     /// Count for the bin that `value` maps to.
     ///
     /// Returns `Some(count)` only when the value lies in an in-range
-    /// bin (Tier 1 absence per ADR-0025). Returns `None` for `NaN`,
+    /// bin (Tier 1 absence). Returns `None` for `NaN`,
     /// underflow, and overflow — callers that need the precise
     /// category read [`nan_count`](Self::nan_count),
     /// [`underflow_count`](Self::underflow_count), or
@@ -215,7 +218,7 @@ where
     /// # Panics
     ///
     /// Panics if `index >= self.bins().len()` (Tier 3 — programmer
-    /// bug, per ADR-0025).
+    /// bug).
     #[inline]
     pub fn bin_range(&self, index: usize) -> (S::Range, S::Range) {
         self.strategy.bin_range(index)
@@ -411,8 +414,8 @@ mod tests {
         // This test exists to *document* a compile-time invariant: the
         // two histograms below have different types even though they
         // share the same strategy `S = NaturalBins`. If that ever
-        // stops being true, the assertion in the doc above is wrong
-        // and ADR-0040 §3 needs revisiting.
+        // stops being true the strategy-vs-value phantom-witness
+        // design needs revisiting.
         let h_idx: Histogram<NaturalBins, u8> = Histogram::new(NaturalBins, vec![0; 256], 0, 0, 0);
         let h_mono: Histogram<NaturalBins, Saturating<u8>> =
             Histogram::new(NaturalBins, vec![0; 256], 0, 0, 0);

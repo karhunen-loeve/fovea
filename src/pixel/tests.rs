@@ -157,9 +157,9 @@ test_pixel_size!(test_size_u32, u32);
 test_pixel_size!(test_size_i32, i32);
 test_pixel_size!(test_size_u64, u64);
 test_pixel_size!(test_size_i64, i64);
-// `test_size_f32` / `test_size_f64` removed (ADR-0044 Phase E):
-// `f32` / `f64` are no longer pixels. The equivalent coverage now
-// lives on `MonoF32` / `MonoF64` via the `family_tests.rs` battery.
+// `test_size_f32` / `test_size_f64` intentionally omitted: `f32` /
+// `f64` are not pixels. The equivalent coverage now lives on
+// `MonoF32` / `MonoF64` via the `family_tests.rs` battery.
 test_pixel_size!(test_size_mono8, Mono8);
 test_pixel_size!(test_size_mono10, Mono10);
 test_pixel_size!(test_size_mono12, Mono12);
@@ -391,7 +391,7 @@ fn test_primitive_zero() {
     assert_eq!(i32::zero(), 0i32);
     assert_eq!(u64::zero(), 0u64);
     assert_eq!(i64::zero(), 0i64);
-    // ADR-0044 Phase E: `f32` / `f64` are no longer `ZeroablePixel`.
+    // `f32` / `f64` are not `ZeroablePixel`.
 }
 
 #[test]
@@ -736,9 +736,9 @@ fn test_bgraf64_new() {
 #[test]
 fn test_linear_pixel_u8() {
     let pixel = 100u8;
-    // Post-ADR-0045: `u8` is a channel, not a pixel; the scale impl
-    // lives on `LinearChannel<f32>`. The test name is kept for
-    // historical continuity.
+    // `u8` is a channel, not a pixel; the scale impl lives on
+    // `LinearChannel<f32>`. The test name is kept for historical
+    // continuity.
     let scaled = <u8 as LinearChannel<f32>>::scale(&pixel, 0.5);
     assert_eq!(scaled, 50.0f32);
 
@@ -756,8 +756,8 @@ fn test_linear_pixel_u16() {
 #[test]
 fn test_linear_pixel_u32() {
     let pixel = 100000u32;
-    // Post-ADR-0045: `u32` is a channel with both `LinearChannel<f32>`
-    // and `LinearChannel<f64>` impls (PLAN §3.4). Pin to f32 here; the
+    // `u32` is a channel with both `LinearChannel<f32>` and
+    // `LinearChannel<f64>` impls. Pin to f32 here; the
     // f64-scalar path has its own tests below.
     let scaled = <u32 as LinearChannel<f32>>::scale(&pixel, 0.1);
     assert!((scaled - 10000.0f64).abs() < 1.0);
@@ -798,9 +798,9 @@ fn test_linear_pixel_i64() {
     assert!((scaled - 1000.0f64).abs() < 1.0);
 }
 
-// ADR-0044 Phase E: `f32` / `f64` no longer implement `LinearPixel`.
-// The former `test_linear_pixel_f32` / `test_linear_pixel_f64` pixel-role
-// tests have been removed; the arithmetic is covered via
+// `f32` / `f64` do not implement `LinearPixel`. The former
+// `test_linear_pixel_f32` / `test_linear_pixel_f64` pixel-role tests
+// are intentionally omitted; the arithmetic is covered via
 // `LinearChannel` (see `test_linear_channel_f32` and friends).
 
 #[test]
@@ -870,7 +870,7 @@ fn test_linear_pixel_mono16() {
 fn test_linear_pixel_mono32() {
     let pixel = Mono32::new(100000);
     // Mono32 now has both `LinearPixel<f32>` and `LinearPixel<f64>` impls
-    // (PLAN §3.4). Pin the scalar to f32 to preserve this test's original
+    //. Pin the scalar to f32 to preserve this test's original
     // intent; the f64-scalar path has dedicated coverage elsewhere.
     let scaled = <Mono32 as LinearPixel<f32>>::scale(&pixel, 0.1);
     assert!((scaled - MonoF64(10000.0)).abs().0 < 1.0);
@@ -940,15 +940,14 @@ fn test_linear_pixel_rgbaf32() {
     assert_eq!(scaled.a, 1.6);
 }
 
-// `test_blend_u8` removed (ADR-0045 Phase S4): `u8` is a channel, not
-// a pixel, so it no longer implements `LinearPixel` / `LinearSpace`
-// and cannot be blended directly. Use `Mono8` for the pixel role
-// (see `test_blend_mono8` below or the Mono family blend coverage).
+// `test_blend_u8` intentionally omitted: `u8` is a channel, not a
+// pixel, so it does not implement `LinearPixel` / `LinearSpace` and
+// cannot be blended directly. Use `Mono8` for the pixel role (see
+// `test_blend_mono8` below or the Mono family blend coverage).
 
-// `test_blend_f32` removed (ADR-0044 Phase E): `f32` is no longer a
-// pixel and no longer implements `LinearPixel` / `LinearSpace`. The
-// equivalent coverage now lives on `MonoF32` (see the Mono family
-// blend tests below).
+// `test_blend_f32` intentionally omitted: `f32` is not a pixel and
+// does not implement `LinearPixel` / `LinearSpace`. The equivalent
+// coverage lives on `MonoF32` (see the Mono family blend tests below).
 
 #[test]
 fn test_blend_mono10() {
@@ -1259,11 +1258,11 @@ fn test_align_rgba16() {
     assert_eq!(Rgba16::ALIGN, 2);
 }
 
-// `test_align_f32` / `test_align_f64` removed (ADR-0044 Phase E):
-// `f32` / `f64` no longer implement `PlainPixel`. They still carry
-// byte-layout via `PlainChannel` (ADR-0046) — see the
-// `plain_channel_inventory` test. Pixel-role alignment coverage
-// for floats lives on `MonoF32` / `MonoF64`.
+// `test_align_f32` / `test_align_f64` intentionally omitted: `f32` /
+// `f64` do not implement `PlainPixel`. They still carry byte-layout
+// via `PlainChannel` — see the `plain_channel_inventory` test.
+// Pixel-role alignment coverage for floats lives on `MonoF32` /
+// `MonoF64`.
 
 // ==================== Channel sum validation tests ====================
 // These tests verify that SIZE == sum(CHANNELS) for various pixel types.
@@ -1334,8 +1333,8 @@ fn test_uniform_channel_count_primitives() {
     assert_eq!(<i16 as HomogeneousPixel>::CHANNEL_COUNT, 1);
     assert_eq!(<i32 as HomogeneousPixel>::CHANNEL_COUNT, 1);
     assert_eq!(<i64 as HomogeneousPixel>::CHANNEL_COUNT, 1);
-    // `f32` / `f64` no longer implement `HomogeneousPixel` (ADR-0044
-    // Phase E). Equivalent coverage lives on `MonoF32` / `MonoF64`.
+    // `f32` / `f64` do not implement `HomogeneousPixel`. Equivalent
+    // coverage lives on `MonoF32` / `MonoF64`.
 }
 
 #[test]
@@ -1414,9 +1413,8 @@ fn test_uniform_size_assert_all() {
     let _ = <i16 as HomogeneousPixel>::_SIZE_ASSERT;
     let _ = <i32 as HomogeneousPixel>::_SIZE_ASSERT;
     let _ = <i64 as HomogeneousPixel>::_SIZE_ASSERT;
-    // `f32` / `f64` no longer implement `HomogeneousPixel` (ADR-0044
-    // Phase E); their size assertion role migrated to
-    // `MonoF32` / `MonoF64`.
+    // `f32` / `f64` do not implement `HomogeneousPixel`; their size
+    // assertion role lives on `MonoF32` / `MonoF64`.
     // Mono
     let _ = <Mono8 as HomogeneousPixel>::_SIZE_ASSERT;
     let _ = <Mono16 as HomogeneousPixel>::_SIZE_ASSERT;
@@ -1561,10 +1559,10 @@ fn test_uniform_primitive_u8_channel() {
     assert_eq!(u8::from_channels(&[42]), 42u8);
 }
 
-// `test_uniform_primitive_f32_channel` / `..._f64_...` removed
-// (ADR-0044 Phase E): raw floats are channels, not pixels, so they
-// no longer implement `HomogeneousPixel`. Equivalent coverage lives
-// on `MonoF32` / `MonoF64` via `family_tests.rs`.
+// `test_uniform_primitive_f32_channel` / `..._f64_...` intentionally
+// omitted: raw floats are channels, not pixels, so they do not
+// implement `HomogeneousPixel`. Equivalent coverage lives on
+// `MonoF32` / `MonoF64` via `family_tests.rs`.
 
 // --- to_channels round-trips ---
 
@@ -3752,12 +3750,11 @@ fn test_from_linear_u64() {
     assert_eq!(u64::from_linear(-1.0f64), 0u64);
 }
 
-// `test_from_linear_i8` / `_i16` / `_i32` / `_i64` removed
-// (ADR-0045 Phase S4.2): the signed-integer `FromLinear<f32|f64>`
-// impls were speculative (no library-shipping pixel uses them,
-// parallel to ADR-0043's signed-`BoundedChannel` removal) and have
-// been deleted alongside the `LinearPixel` impls on signed
-// primitives.
+// `test_from_linear_i8` / `_i16` / `_i32` / `_i64` intentionally
+// omitted: the signed-integer `FromLinear<f32|f64>` impls were
+// speculative (no library-shipping pixel uses them, parallel to the
+// signed-`BoundedChannel` removal) and are not provided alongside
+// the `LinearPixel` impls on signed primitives.
 
 #[test]
 fn test_from_linear_saturating_u8() {
@@ -3821,17 +3818,17 @@ fn test_from_linear_mono12() {
 // `test_blend_u16` / `test_blend_u32` / `test_blend_u64` /
 // `test_blend_i8` / `test_blend_i16` / `test_blend_i32` /
 // `test_blend_i64` / `test_blend_saturating_u32` /
-// `test_blend_saturating_u64` removed (ADR-0045 Phase S4).
+// `test_blend_saturating_u64` intentionally omitted.
 //
-// Channel primitives no longer implement `LinearPixel` / `LinearSpace`
-// and can therefore no longer be passed to `blend`. The corresponding
+// Channel primitives do not implement `LinearPixel` / `LinearSpace`
+// and can therefore not be passed to `blend`. The corresponding
 // pixel-role coverage lives in `test_blend_mono8` / `test_blend_mono16`
 // / `test_blend_mono32` / `test_blend_mono64` and the `Rgb*` / `MonoA*`
-// blend tests. `f64` is kept below until ADR-0044 Phase E lands.
+// blend tests.
 
-// `test_blend_f64` removed (ADR-0044 Phase E): `f64` is no longer a
-// pixel; pixel-role blend coverage lives in the `Mono*` / `Rgb*` /
-// `MonoA*` blend tests.
+// `test_blend_f64` intentionally omitted: `f64` is not a pixel;
+// pixel-role blend coverage lives in the `Mono*` / `Rgb*` / `MonoA*`
+// blend tests.
 
 #[test]
 fn test_blend_mono10_pixel() {
@@ -3864,8 +3861,8 @@ fn test_zero_saturating_u64() {
     assert_eq!(Saturating::<u64>::zero(), Saturating(0u64));
 }
 
-// `test_zero_f32` / `test_zero_f64` removed (ADR-0044 Phase E):
-// `f32` / `f64` are no longer `ZeroablePixel`.
+// `test_zero_f32` / `test_zero_f64` intentionally omitted: `f32` /
+// `f64` are not `ZeroablePixel`.
 
 #[test]
 fn test_zero_mono10() {
@@ -3891,7 +3888,7 @@ fn test_linear_pixel_saturating_u32_scale() {
 #[test]
 fn test_linear_pixel_saturating_u64_scale() {
     let pixel = Saturating(1000000u64);
-    // Post-ADR-0045: channel primitives bind on `LinearChannel`.
+    // Channel primitives bind on `LinearChannel`.
     let scaled = <Saturating<u64> as LinearChannel<f32>>::scale(&pixel, 0.1);
     assert!((scaled - 100000.0f64).abs() < 1.0);
 }
@@ -3970,10 +3967,9 @@ fn test_uniform_i64_channel_access() {
     assert_eq!(i64::from_channels(&[99i64]), 99i64);
 }
 
-// `test_uniform_f32_channel_access_scalar` / `..._f64_...` removed
-// (ADR-0044 Phase E): raw floats no longer implement
-// `HomogeneousPixel`. Mono-pixel equivalents are covered in
-// `family_tests.rs` for `MonoF32` / `MonoF64`.
+// `test_uniform_f32_channel_access_scalar` / `..._f64_...` intentionally
+// omitted: raw floats do not implement `HomogeneousPixel`. Mono-pixel
+// equivalents are covered in `family_tests.rs` for `MonoF32` / `MonoF64`.
 
 // ─── PlainPixel CHANNELS / SIZE for primitives ──────────────────────
 
@@ -4003,11 +3999,10 @@ fn test_plain_pixel_size_saturating() {
 
 #[test]
 fn test_linear_space_marker_primitives() {
-    // Post-ADR-0044 Phase E + ADR-0045 Phase S4: `LinearSpace` is
-    // pixel-only. Neither channel primitives (u8..u64, i8..i64,
-    // `Saturating<_>`) nor raw floats (`f32`, `f64`) implement
-    // `LinearPixel` / `LinearSpace` — use `MonoF32` / `MonoF64` for
-    // the pixel role.
+    // `LinearSpace` is pixel-only. Neither channel primitives
+    // (u8..u64, i8..i64, `Saturating<_>`) nor raw floats (`f32`, `f64`)
+    // implement `LinearPixel` / `LinearSpace` — use `MonoF32` /
+    // `MonoF64` for the pixel role.
     fn assert_linear_space<T: LinearSpace>() {}
     assert_linear_space::<Mono<10>>();
     assert_linear_space::<MonoF32>();
@@ -4545,7 +4540,7 @@ fn test_rgba16_as_bytes_le_be_roundtrip() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// Hash / Ord / PartialOrd tests  (B10 — ADR-0026)
+// Hash / Ord / PartialOrd tests
 // ═══════════════════════════════════════════════════════════════════════
 
 /// Helper: hash a value and return the u64 result.
@@ -5197,7 +5192,7 @@ fn test_all_single_channel_float_are_partial_ord() {
     assert_partial_ord::<MonoF64>();
 }
 
-// ─── LinearPixel::uniform on composite / derived pixel types (PLAN §3.4) ───
+// ─── LinearPixel::uniform on composite / derived pixel types ───
 //
 // The derive macro emits `uniform(scalar) -> Accumulator` by delegating to
 // each field's `LinearPixel::uniform`. These tests verify that the
@@ -5213,9 +5208,8 @@ fn test_all_single_channel_float_are_partial_ord() {
 fn test_uniform_mono8_equals_scalar() {
     use crate::pixel::LinearPixel;
     // Mono8 is a single-field tuple struct over Saturating<u8>, whose
-    // accumulator is now `MonoF32` (post-ADR-0045 Phase B). The derive
-    // collapses the tuple to a direct return of the field's uniform,
-    // wrapped in `MonoF32`.
+    // accumulator is `MonoF32`. The derive collapses the tuple to a
+    // direct return of the field's uniform, wrapped in `MonoF32`.
     assert_eq!(<Mono8 as LinearPixel>::uniform(0.5), MonoF32(0.5));
     assert_eq!(<Mono8 as LinearPixel>::uniform(0.0), MonoF32(0.0));
     assert_eq!(<Mono8 as LinearPixel>::uniform(255.0), MonoF32(255.0));
@@ -5312,7 +5306,7 @@ fn test_uniform_rgbaf32_identity() {
 fn test_uniform_then_add_is_scale_add_brightness_model() {
     use crate::pixel::LinearPixel;
     // This is the exact composition that `BrightnessContrast` will use
-    // (PLAN §3.5): `scale_add(pixel, contrast, uniform(brightness))`.
+    //: `scale_add(pixel, contrast, uniform(brightness))`.
     // Verify the arithmetic identity on a concrete sample.
     let pixel = Rgb8::new(100, 50, 200);
     let brightness = 10.0f32;
@@ -5325,7 +5319,7 @@ fn test_uniform_then_add_is_scale_add_brightness_model() {
     assert!((result.b - (200.0 * 2.0 + 10.0)).abs() < 1e-4);
 }
 
-// ─── LinearPixel<f64> on f64-accumulator pixel types (PLAN §3.4) ────────────
+// ─── LinearPixel<f64> on f64-accumulator pixel types ────────────
 //
 // `Mono32`, `Mono64`, and `MonoF64` have `Accumulator = f64` (or `Self`
 // for `MonoF64`) and carry a dedicated `LinearPixel<f64>` impl alongside
@@ -5404,13 +5398,13 @@ fn test_f64_scalar_matches_f32_scalar_for_exact_values() {
     assert_eq!(via_f32, via_f64);
 }
 
-// ─── ADR-0045 Phase A — named-float-accumulator FromLinear siblings ──────
+// ─── Named-float-accumulator FromLinear siblings ───────────────────────
 //
-// Every pixel that has `FromLinear<f32|f64>` must, post-Phase-A, also
-// have a `FromLinear<MonoF32|MonoF64>` sibling whose output agrees
-// bit-for-bit with the bare-float body. The siblings exist so that
-// Phase B can flip `Mono8` / `Mono16` / … accumulators from raw `f32`
-// to `MonoF32` without breaking any downstream `FromLinear` bound.
+// Every pixel that has `FromLinear<f32|f64>` also has a
+// `FromLinear<MonoF32|MonoF64>` sibling whose output agrees bit-for-bit
+// with the bare-float body. The siblings exist so that the named
+// accumulator types (e.g. `Mono8::Accumulator = MonoF32`) compose
+// cleanly with any downstream `FromLinear` bound.
 
 #[test]
 fn test_from_linear_monof32_matches_f32_u8() {

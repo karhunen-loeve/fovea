@@ -2,10 +2,9 @@ use std::borrow::Cow;
 
 use crate::pixel::{MAX_PIXEL_SIZE, PlainChannel, PlainPixel};
 
-// ADR-0046: byte-level helpers that only require the byte-layout
-// role are bounded on `PlainChannel`. Endian / channel-walking
-// helpers still require `PlainPixel` because they consult
-// `CHANNELS`.
+// Byte-level helpers that only require the byte-layout role are
+// bounded on `PlainChannel`. Endian / channel-walking helpers still
+// require `PlainPixel` because they consult `CHANNELS`.
 pub(crate) unsafe fn as_bytes<P: PlainChannel>(data: &[P]) -> &[u8] {
     let byte_size = std::mem::size_of_val(data);
     let ptr = data.as_ptr() as *const u8;

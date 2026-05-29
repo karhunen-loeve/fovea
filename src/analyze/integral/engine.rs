@@ -1,20 +1,18 @@
 //! Summed-area-table engines — `integral_image` and friends.
 //!
-//! The four public functions in this module implement ADR-0032 §3, §8,
-//! §9. They are split into a `_into` form that writes into a
+//! Four public functions in two pairs: a `_into` form that writes into a
 //! caller-supplied [`IntegralImage<A>`] and an allocating form that
 //! returns a fresh one.
 //!
 //! # Why `RasterImage`, not `ContiguousImage`
 //!
-//! Per ADR-0028, `RasterImage` is the narrowest trait that exposes a
-//! row slice. The hot loop here reads every source pixel exactly once
-//! via `image.row(y)`, which `RasterImage` provides for owned images,
+//! `RasterImage` is the narrowest trait that exposes a row slice. The
+//! hot loop here reads every source pixel exactly once via
+//! `image.row(y)`, which `RasterImage` provides for owned images,
 //! `ImageRef` / `ImageRefMut`, `ImageArray`, *and* strided ROIs from
 //! `SubView::roi`. Tightening the bound to `ContiguousImage` would lock
-//! out strided ROIs, which the plan's Step 8.9 explicitly requires to
-//! work; relaxing it to `ImageView` would force a per-pixel `pixel_at`
-//! and lose the row-slice fast path.
+//! out strided ROIs, which must work; relaxing it to `ImageView` would
+//! force a per-pixel `pixel_at` and lose the row-slice fast path.
 //!
 //! # Why the inner loop has no overflow check
 //!
@@ -22,12 +20,11 @@
 //! correctness gate: it guarantees that `W × H × max_integral_value()`
 //! fits in the accumulator. Any intermediate sum the recurrence
 //! produces is `≤` that bound, so no `Add` reaches saturation. The
-//! evaluation order is chosen so no `Sub` underflows either. See
-//! ADR-0032 §§3, 5.
+//! evaluation order is chosen so no `Sub` underflows either.
 //!
 //! # The recurrence
 //!
-//! Standard summed-area-table recurrence (ADR-0032 §3):
+//! Standard summed-area-table recurrence:
 //!
 //! ```text
 //! I[x, y] = src(x-1, y-1) + I[x-1, y] + I[x, y-1] − I[x-1, y-1]
@@ -45,13 +42,13 @@
 //!
 //! The four public functions in this module have `IntegralCapacity` /
 //! `IntegralSquaredCapacity` bounds. Those traits are deliberately
-//! `pub(super)` per the plan's Step 6 ("private to the module so it
-//! does not pollute the public trait hierarchy") and Philosophy §3
-//! ("bind on the tightest trait that admits the operation, and
-//! nothing more"). Promoting them to `pub` would invite user impls
-//! that bypass the pre-flight overflow gate — defeating ADR-0032 §3's
-//! whole point. The `private_bounds` lint flags this exposure; the
-//! allow is by design and applies to all four entry points.
+//! `pub(super)` (private to the module so they do not pollute the
+//! public trait hierarchy; Philosophy §3 — bind on the tightest trait
+//! that admits the operation, and nothing more). Promoting them to
+//! `pub` would invite user impls that bypass the pre-flight overflow
+//! gate — defeating its whole point. The `private_bounds` lint flags
+//! this exposure; the allow is by design and applies to all four entry
+//! points.
 
 use std::ops::{Add, Sub};
 
@@ -66,14 +63,14 @@ use super::preflight::{self, IntegralCapacity, IntegralSquaredCapacity};
 /// `A`, allocating a fresh [`IntegralImage<A>`].
 ///
 /// `A` is named explicitly by the caller (turbofish) — there is no
-/// default (ADR-0032 §1).
+/// default.
 ///
-/// # Errors — Tier 2 (ADR-0025)
+/// # Errors — Tier 2
 ///
 /// Returns [`Error::AccumulatorOverflow`] if the pre-flight check
-/// (ADR-0032 §3) determines that `A` is too narrow for an image of
-/// these dimensions. The diagnostic data tells the caller exactly how
-/// much capacity is needed and how much is available.
+/// determines that `A` is too narrow for an image of these dimensions.
+/// The diagnostic data tells the caller exactly how much capacity is
+/// needed and how much is available.
 ///
 /// # Examples
 ///
@@ -106,12 +103,12 @@ where
 /// `out`. `out` must have been constructed with the same source size as
 /// `image`.
 ///
-/// # Errors — Tier 2 (ADR-0025)
+/// # Errors — Tier 2
 ///
 /// Returns [`Error::AccumulatorOverflow`] if the pre-flight check
 /// fails.
 ///
-/// # Panics — Tier 3 (ADR-0025)
+/// # Panics — Tier 3
 ///
 /// Panics if `out.source_size() != image.size()`. The output buffer's
 /// dimensions are a caller-controlled precondition; a mismatch is a
@@ -144,9 +141,9 @@ where
 /// Used for variance computation and normalised cross-correlation. The
 /// per-pixel range is the *square* of the source range (Mono8 → 65 025
 /// per pixel rather than 255), so the valid accumulators differ from
-/// the non-squared variant — see ADR-0032 §8.
+/// the non-squared variant.
 ///
-/// # Errors — Tier 2 (ADR-0025)
+/// # Errors — Tier 2
 ///
 /// Returns [`Error::AccumulatorOverflow`] on pre-flight failure.
 #[allow(private_bounds)] // see module docs
@@ -165,11 +162,11 @@ where
 /// Compute the squared summed-area table of `image` into a
 /// caller-supplied `out`.
 ///
-/// # Errors — Tier 2 (ADR-0025)
+/// # Errors — Tier 2
 ///
 /// Returns [`Error::AccumulatorOverflow`] on pre-flight failure.
 ///
-/// # Panics — Tier 3 (ADR-0025)
+/// # Panics — Tier 3
 ///
 /// Panics if `out.source_size() != image.size()`.
 #[allow(private_bounds)] // see module docs
@@ -221,8 +218,7 @@ where
     //
     // Inner loop: I[x, y] = src(x-1, y-1) + I[x-1, y] + I[x, y-1] - I[x-1, y-1].
     // Evaluation order `s + ((left + up) - ul)` keeps every
-    // intermediate non-negative under Saturating arithmetic
-    // (ADR-0032 §5).
+    // intermediate non-negative under Saturating arithmetic.
     for y in 1..=h {
         let src_row = image.row(y - 1);
         for x in 1..=w {

@@ -2,13 +2,13 @@
 
 [![Crates.io](https://img.shields.io/crates/v/fovea.svg)](https://crates.io/crates/fovea)
 [![Documentation](https://docs.rs/fovea/badge.svg)](https://docs.rs/fovea)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/karhunen-loeve/fovea/blob/main/LICENSE)
 
 `fovea` is a high-precision, type-safe computer vision library for Rust, built around explicit pixel layout, colour-space correctness, and compile-time guarantees.
 
 ```toml
 [dependencies]
-fovea = "0.1.0"
+fovea = "0.1.1"
 ```
 
 ## Quick start
@@ -68,4 +68,4 @@ These numbered principles are the public digest for `§N` references in the fove
 
 ## License
 
-Licensed under the [MIT License](LICENSE).
+Licensed under the [MIT License](https://github.com/karhunen-loeve/fovea/blob/main/LICENSE).

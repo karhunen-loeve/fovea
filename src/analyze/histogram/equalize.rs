@@ -8,9 +8,6 @@
 //!   image, returning a new owned image.
 //! - [`equalize_image_into`] — `_into` companion that writes into a
 //!   caller-supplied output.
-//!
-//! See `HISTOGRAM_CONSUMERS_PLAN.md` and ADR-0040 for the design
-//! rationale.
 
 use std::num::Saturating;
 
@@ -97,7 +94,7 @@ where
 ///
 /// The `Channel = Saturating<u8>` bound deliberately rejects
 /// [`Indexed8`](crate::pixel::Indexed8): equalising palette indices is
-/// meaningless (ADR-0010, Philosophy §1). It also rejects 16-bit and
+/// meaningless (Philosophy §1). It also rejects 16-bit and
 /// float channel types — a wider equalization can be added later
 /// without breaking changes (Philosophy §10 — extension by addition).
 ///
@@ -136,7 +133,7 @@ where
 ///
 /// # Panics
 ///
-/// Panics if `image.size() != out.size()` (Tier 3 per ADR-0025).
+/// Panics if `image.size() != out.size()` (Tier 3).
 pub fn equalize_image_into<I, O, P>(image: &I, out: &mut O) -> Result<(), Error>
 where
     I: RasterImage<Pixel = P>,

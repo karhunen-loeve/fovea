@@ -83,7 +83,7 @@ where
 /// # use fovea::image::Image;
 /// # use fovea::pixel::MonoF32;
 /// # use fovea::transform::{resize_into, NearestNeighbor, Bilinear};
-/// // ADR-0044 Phase E: the pixel role for floats is `MonoF32`,
+/// // the pixel role for floats is `MonoF32`,
 /// // not raw `f32`. `MonoF32` is `#[repr(transparent)]` over `f32`.
 /// let img: Image<MonoF32> = Image::fill(300, 400, MonoF32::new(3.0)); // Input image
 /// let mut out: Image<MonoF32> = Image::zero(100, 100); // Pre-allocated output image

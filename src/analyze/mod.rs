@@ -12,7 +12,7 @@
 //! - [`integral`](crate::analyze::integral) — summed-area tables for `O(1)` rectangular region
 //!   sums (and sums of squares) with an explicit, type-checked
 //!   accumulator pixel.
-//! - [`components`] — connected-component labeling on binary images,
+//! - [`components`](crate::analyze::components) — connected-component labeling on binary images,
 //!   with optional per-component stats (area, bounding box, centroid).
 
 pub mod components;
