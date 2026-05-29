@@ -1054,7 +1054,7 @@ impl<T> Image<T> {
         // Compile-time guarantees:
         // - T must have alignment 1 (otherwise zero-copy transmute UB).
         // - T::SIZE must match `size_of::<T>()` and ALIGN match
-        //   `align_of::<T>()` (PHILOSOPHY.md §5: layout is a contract).
+        //   `align_of::<T>()` (design principle §5: layout is a contract).
         //   This guards against a bad `unsafe impl PlainChannel` that
         //   would otherwise let us reinterpret bytes against an
         //   incorrect element size.

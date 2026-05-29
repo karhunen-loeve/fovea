@@ -103,8 +103,7 @@ pub trait RasterImage: ImageView {
     ///
     /// # Panics
     ///
-    /// Panics if `y >= self.height()` (Tier 3 — programmer bug per
-    /// [ADR-0025](https://github.com/karhunen-loeve/fovea/blob/main/docs/adr/0025-error-handling-conventions.md)).
+    /// Panics if `y >= self.height()` (Tier 3 — programmer bug).
     fn row(&self, y: usize) -> &[Self::Pixel];
 }
 

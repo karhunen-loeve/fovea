@@ -3,6 +3,7 @@ name = "fovea"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
+readme = "README.md"
 description = "A high-precision, type-safe computer vision library guaranteeing absolute image correctness at compile time"
 repository = "https://github.com/karhunen-loeve/fovea"
 

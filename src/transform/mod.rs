@@ -16,8 +16,8 @@
 //! Because the operation is purely a coordinate permutation, the pixel
 //! bound is only [`Copy`] — every pixel type the library defines is
 //! supported (including [`crate::pixel::Srgb8`] and
-//! [`crate::pixel::Indexed8`]). See [ADR-0022] for why these are
-//! physical operations rather than view wrappers.
+//! [`crate::pixel::Indexed8`]). These are physical operations rather
+//! than view wrappers, so the result is a normal image.
 //!
 //! ## Level 1 — Unary pixel transforms (`ConvertPixel` / `PixelMap`)
 //!
@@ -70,8 +70,6 @@
 //! Both engines use an interior/boundary split: the interior pixels are
 //! processed with fast direct indexing; only the thin boundary strip goes
 //! through the [`crate::border::BorderPolicy`] accessor.
-//!
-//! [ADR-0022]: https://github.com/karhunen-loeve/fovea/blob/main/docs/adr/0022-flipped-view-and-lazy-evaluation.md
 
 mod combine;
 mod convert;

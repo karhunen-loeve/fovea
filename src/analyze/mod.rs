@@ -14,13 +14,6 @@
 //!   accumulator pixel.
 //! - [`components`] — connected-component labeling on binary images,
 //!   with optional per-component stats (area, bounding box, centroid).
-//!
-//! See [ADR-0040](../../docs/adr/0040-histogram-design.md) and the
-//! `HISTOGRAM_PLAN.md` document for the design behind the histogram
-//! sub-module, [ADR-0032](../../docs/adr/0032-integral-image-design.md)
-//! / `INTEGRAL_IMAGE_PLAN.md` for the integral-image design, and
-//! [ADR-0047](../../docs/adr/0047-connected-components-design.md) for
-//! connected components.
 
 pub mod components;
 pub mod histogram;

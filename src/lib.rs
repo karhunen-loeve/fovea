@@ -1,7 +1,5 @@
-//! # fovea
-//!
-//! A type-safe computer vision library for Rust.
-//!
+#![doc = include_str!("../README.md")]
+
 //! ## Modules
 //!
 //! - [`image`] — Image types, views, kernels, and containers
@@ -24,13 +22,6 @@
 //!    input pixels: [`transform::fold_neighborhood`] for weighted aggregation
 //!    (convolution, separable filters) and [`transform::map_neighborhood`] for
 //!    non-linear operations (erosion, dilation, median).
-//!
-//! ## Design Philosophy
-//!
-//! See [PHILOSOPHY.md](https://github.com/karhunen-loeve/fovea/blob/main/PHILOSOPHY.md)
-//! for the design principles behind this crate, and the
-//! [Architecture Decision Records](https://github.com/karhunen-loeve/fovea/blob/main/docs/adr/)
-//! for detailed rationale behind specific design choices.
 
 extern crate self as fovea;
 

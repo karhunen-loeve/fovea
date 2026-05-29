@@ -1,8 +1,8 @@
 //! Axis-aligned geometric transforms — physical (allocating) flips and
 //! rotations.
 //!
-//! See [ADR-0022](https://github.com/karhunen-loeve/fovea/blob/main/docs/adr/0022-flipped-view-and-lazy-evaluation.md)
-//! for why these are physical operations rather than view wrappers.
+//! These are physical operations rather than view wrappers: each function
+//! returns a normal image or writes into a caller-supplied output image.
 //!
 //! ## Functions
 //!
@@ -53,11 +53,10 @@
 //! auto-vectorised reverse-copies. `rotate_90` / `rotate_270` /
 //! `transpose` collapse once the output working set exceeds L2 because
 //! every store hits a different cache line. The textbook fix is the
-//! blocked variant deferred per ADR-0006 — see
-//! [`benches/geometry.rs`](../../../benches/geometry.rs) for a
-//! per-implementation breakdown including an `transpose_row_cached`
-//! alternative that buys roughly 2× below DRAM size but does not solve
-//! the cliff at ≥16 MiB.
+//! blocked variant is deferred until there is a clear API need. The benchmark
+//! suite contains a per-implementation breakdown including an
+//! `transpose_row_cached` alternative that buys roughly 2× below DRAM size
+//! but does not solve the cliff at ≥16 MiB.
 
 use crate::Size;
 use crate::image::{Image, RasterImage, RasterImageMut};
@@ -72,8 +71,7 @@ use crate::pixel::ZeroablePixel;
 ///
 /// # Panics
 ///
-/// Panics if `out.size() != img.size()` (Tier 3 — programmer bug per
-/// [ADR-0025](https://github.com/karhunen-loeve/fovea/blob/main/docs/adr/0025-error-handling-conventions.md)).
+/// Panics if `out.size() != img.size()` (Tier 3 — programmer bug).
 ///
 /// # Example
 ///

@@ -8,15 +8,14 @@
 //! filters, adaptive thresholding, Haar-feature evaluation, and the
 //! `sum / sum-of-squares` half of normalised cross-correlation.
 //!
-//! This module is the implementation of
-//! [ADR-0032](https://github.com/karhunen-loeve/fovea/blob/main/docs/adr/0032-integral-image-design.md);
-//! the file/PR breakdown lives in the project's `INTEGRAL_IMAGE_PLAN.md`.
+//! This module implements summed-area table construction with explicit
+//! accumulator pixel types and pre-flight overflow checks.
 //!
 //! # Surface
 //!
 //! - [`IntegralImage<A>`] — the output type. `A` is the **accumulator
-//!   pixel** (named explicitly by the caller, ADR-0032 §1). It is *not*
-//!   an [`ImageView`](crate::image::ImageView) — see ADR-0032 §4 — so
+//!   pixel**, named explicitly by the caller. It is *not*
+//!   an [`ImageView`](crate::image::ImageView), so
 //!   regular image consumers cannot accidentally accept it.
 //! - [`integral_image`] / [`integral_image_into`] — compute the
 //!   summed-area table of a source image, with an `O(1)` pre-flight
@@ -48,8 +47,8 @@
 //! please open an issue describing the camera bit depth / image size /
 //! pipeline so we can add it as a first-class built-in pair. Opening
 //! this up to user-defined accumulators would require a stable trait
-//! contract for the worst-case capacity calculation (ADR-0032 §3), and
-//! we'd rather settle that design once we have several real use cases
+//! contract for the worst-case capacity calculation, and we'd rather settle
+//! that design once we have several real use cases
 //! than commit to it speculatively.
 //!
 //! # Example
@@ -63,7 +62,7 @@
 //! // 4×4 image filled with the value 10.
 //! let img: Image<Mono8> = Image::fill(4, 4, Mono8::new(10));
 //!
-//! // Accumulator pixel chosen explicitly via turbofish (ADR-0032 §1).
+//! // Accumulator pixel chosen explicitly via turbofish.
 //! let sat: IntegralImage<Mono32> = integral_image::<_, Mono32>(&img)?;
 //!
 //! // Sum over a 2×3 rectangle: 2 × 3 × 10 = 60.
