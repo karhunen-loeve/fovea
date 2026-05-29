@@ -208,7 +208,7 @@ where
     const INVERTIBLE: bool = false;
 
     #[inline(always)]
-    fn init(&self, _center: P) -> () {}
+    fn init(&self, _center: P) {}
 
     #[inline(always)]
     fn accumulate(&self, _acc: &mut (), _item: MapItem<P>) {}

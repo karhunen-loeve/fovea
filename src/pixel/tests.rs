@@ -72,7 +72,7 @@ fn test_mono_mul_overflow_mono_times_mono() {
     assert_eq!(c.value(), 4095); // clamped to MAX
 
     // Same via reference
-    let d = &a * &b;
+    let d = a * b;
     assert_eq!(d.value(), 4095);
 }
 
@@ -479,7 +479,7 @@ fn test_bgra_float_new() {
 fn test_mono_add_ref() {
     let a = Mono::<10>::new(400);
     let b = Mono::<10>::new(300);
-    let c = &a + &b;
+    let c = a + b;
     assert_eq!(c.value(), 700);
 }
 
@@ -487,7 +487,7 @@ fn test_mono_add_ref() {
 fn test_mono_sub_ref() {
     let a = Mono::<10>::new(800);
     let b = Mono::<10>::new(300);
-    let c = &a - &b;
+    let c = a - b;
     assert_eq!(c.value(), 500);
 }
 
@@ -495,7 +495,7 @@ fn test_mono_sub_ref() {
 fn test_mono_mul_ref() {
     let a = Mono::<10>::new(10);
     let b = Mono::<10>::new(20);
-    let c = &a * &b;
+    let c = a * b;
     assert_eq!(c.value(), 200);
 }
 
@@ -503,7 +503,7 @@ fn test_mono_mul_ref() {
 fn test_mono_div_ref() {
     let a = Mono::<10>::new(100);
     let b = Mono::<10>::new(5);
-    let c = &a / &b;
+    let c = a / b;
     assert_eq!(c.value(), 20);
 }
 
@@ -1403,57 +1403,58 @@ fn test_uniform_channel_count_bgra_family() {
 // --- Size assertions (force const evaluation) ---
 
 #[test]
+#[allow(path_statements, clippy::no_effect)]
 fn test_uniform_size_assert_all() {
     // Primitives
-    let _ = <u8 as HomogeneousPixel>::_SIZE_ASSERT;
-    let _ = <u16 as HomogeneousPixel>::_SIZE_ASSERT;
-    let _ = <u32 as HomogeneousPixel>::_SIZE_ASSERT;
-    let _ = <u64 as HomogeneousPixel>::_SIZE_ASSERT;
-    let _ = <i8 as HomogeneousPixel>::_SIZE_ASSERT;
-    let _ = <i16 as HomogeneousPixel>::_SIZE_ASSERT;
-    let _ = <i32 as HomogeneousPixel>::_SIZE_ASSERT;
-    let _ = <i64 as HomogeneousPixel>::_SIZE_ASSERT;
+    <u8 as HomogeneousPixel>::_SIZE_ASSERT;
+    <u16 as HomogeneousPixel>::_SIZE_ASSERT;
+    <u32 as HomogeneousPixel>::_SIZE_ASSERT;
+    <u64 as HomogeneousPixel>::_SIZE_ASSERT;
+    <i8 as HomogeneousPixel>::_SIZE_ASSERT;
+    <i16 as HomogeneousPixel>::_SIZE_ASSERT;
+    <i32 as HomogeneousPixel>::_SIZE_ASSERT;
+    <i64 as HomogeneousPixel>::_SIZE_ASSERT;
     // `f32` / `f64` do not implement `HomogeneousPixel`; their size
     // assertion role lives on `MonoF32` / `MonoF64`.
     // Mono
-    let _ = <Mono8 as HomogeneousPixel>::_SIZE_ASSERT;
-    let _ = <Mono16 as HomogeneousPixel>::_SIZE_ASSERT;
-    let _ = <Mono32 as HomogeneousPixel>::_SIZE_ASSERT;
-    let _ = <Mono64 as HomogeneousPixel>::_SIZE_ASSERT;
-    let _ = <Mono10 as HomogeneousPixel>::_SIZE_ASSERT;
-    let _ = <Mono12 as HomogeneousPixel>::_SIZE_ASSERT;
+    <Mono8 as HomogeneousPixel>::_SIZE_ASSERT;
+    <Mono16 as HomogeneousPixel>::_SIZE_ASSERT;
+    <Mono32 as HomogeneousPixel>::_SIZE_ASSERT;
+    <Mono64 as HomogeneousPixel>::_SIZE_ASSERT;
+    <Mono10 as HomogeneousPixel>::_SIZE_ASSERT;
+    <Mono12 as HomogeneousPixel>::_SIZE_ASSERT;
     // Rgb
-    let _ = <Rgb8 as HomogeneousPixel>::_SIZE_ASSERT;
-    let _ = <Rgb16 as HomogeneousPixel>::_SIZE_ASSERT;
-    let _ = <Rgb32 as HomogeneousPixel>::_SIZE_ASSERT;
-    let _ = <Rgb64 as HomogeneousPixel>::_SIZE_ASSERT;
-    let _ = <RgbF32 as HomogeneousPixel>::_SIZE_ASSERT;
-    let _ = <RgbF64 as HomogeneousPixel>::_SIZE_ASSERT;
-    let _ = <Rgb10 as HomogeneousPixel>::_SIZE_ASSERT;
+    <Rgb8 as HomogeneousPixel>::_SIZE_ASSERT;
+    <Rgb16 as HomogeneousPixel>::_SIZE_ASSERT;
+    <Rgb32 as HomogeneousPixel>::_SIZE_ASSERT;
+    <Rgb64 as HomogeneousPixel>::_SIZE_ASSERT;
+    <RgbF32 as HomogeneousPixel>::_SIZE_ASSERT;
+    <RgbF64 as HomogeneousPixel>::_SIZE_ASSERT;
+    <Rgb10 as HomogeneousPixel>::_SIZE_ASSERT;
     // Rgba
-    let _ = <Rgba8 as HomogeneousPixel>::_SIZE_ASSERT;
-    let _ = <Rgba16 as HomogeneousPixel>::_SIZE_ASSERT;
-    let _ = <Rgba32 as HomogeneousPixel>::_SIZE_ASSERT;
-    let _ = <Rgba64 as HomogeneousPixel>::_SIZE_ASSERT;
-    let _ = <RgbaF32 as HomogeneousPixel>::_SIZE_ASSERT;
-    let _ = <RgbaF64 as HomogeneousPixel>::_SIZE_ASSERT;
-    let _ = <Rgba10 as HomogeneousPixel>::_SIZE_ASSERT;
+    <Rgba8 as HomogeneousPixel>::_SIZE_ASSERT;
+    <Rgba16 as HomogeneousPixel>::_SIZE_ASSERT;
+    <Rgba32 as HomogeneousPixel>::_SIZE_ASSERT;
+    <Rgba64 as HomogeneousPixel>::_SIZE_ASSERT;
+    <RgbaF32 as HomogeneousPixel>::_SIZE_ASSERT;
+    <RgbaF64 as HomogeneousPixel>::_SIZE_ASSERT;
+    <Rgba10 as HomogeneousPixel>::_SIZE_ASSERT;
     // Bgr
-    let _ = <Bgr8 as HomogeneousPixel>::_SIZE_ASSERT;
-    let _ = <Bgr16 as HomogeneousPixel>::_SIZE_ASSERT;
-    let _ = <Bgr32 as HomogeneousPixel>::_SIZE_ASSERT;
-    let _ = <Bgr64 as HomogeneousPixel>::_SIZE_ASSERT;
-    let _ = <BgrF32 as HomogeneousPixel>::_SIZE_ASSERT;
-    let _ = <BgrF64 as HomogeneousPixel>::_SIZE_ASSERT;
-    let _ = <Bgr10 as HomogeneousPixel>::_SIZE_ASSERT;
+    <Bgr8 as HomogeneousPixel>::_SIZE_ASSERT;
+    <Bgr16 as HomogeneousPixel>::_SIZE_ASSERT;
+    <Bgr32 as HomogeneousPixel>::_SIZE_ASSERT;
+    <Bgr64 as HomogeneousPixel>::_SIZE_ASSERT;
+    <BgrF32 as HomogeneousPixel>::_SIZE_ASSERT;
+    <BgrF64 as HomogeneousPixel>::_SIZE_ASSERT;
+    <Bgr10 as HomogeneousPixel>::_SIZE_ASSERT;
     // Bgra
-    let _ = <Bgra8 as HomogeneousPixel>::_SIZE_ASSERT;
-    let _ = <Bgra16 as HomogeneousPixel>::_SIZE_ASSERT;
-    let _ = <Bgra32 as HomogeneousPixel>::_SIZE_ASSERT;
-    let _ = <Bgra64 as HomogeneousPixel>::_SIZE_ASSERT;
-    let _ = <BgraF32 as HomogeneousPixel>::_SIZE_ASSERT;
-    let _ = <BgraF64 as HomogeneousPixel>::_SIZE_ASSERT;
-    let _ = <Bgra10 as HomogeneousPixel>::_SIZE_ASSERT;
+    <Bgra8 as HomogeneousPixel>::_SIZE_ASSERT;
+    <Bgra16 as HomogeneousPixel>::_SIZE_ASSERT;
+    <Bgra32 as HomogeneousPixel>::_SIZE_ASSERT;
+    <Bgra64 as HomogeneousPixel>::_SIZE_ASSERT;
+    <BgraF32 as HomogeneousPixel>::_SIZE_ASSERT;
+    <BgraF64 as HomogeneousPixel>::_SIZE_ASSERT;
+    <Bgra10 as HomogeneousPixel>::_SIZE_ASSERT;
 }
 
 // --- channel() / to_channels() / from_channels() round-trips ---
@@ -2479,7 +2480,7 @@ fn test_blend_monoaf32() {
 fn test_monoa8_copy_clone_eq() {
     let p = MonoA8::new(42, 128);
     let q = p; // Copy
-    let r = p.clone(); // Clone
+    let r = p; // Clone
     assert_eq!(p, q);
     assert_eq!(p, r);
 }
@@ -2501,7 +2502,7 @@ fn test_monoa8_debug() {
 fn test_monoaf32_copy_clone_eq() {
     let p = MonoAF32::new(0.5, 1.0);
     let q = p;
-    let r = p.clone();
+    let r = p;
     assert_eq!(p, q);
     assert_eq!(p, r);
 }
@@ -2639,7 +2640,7 @@ fn test_indexed8_from_channels_wrong_count() {
 fn test_indexed8_copy_clone_eq() {
     let p = Indexed8(42);
     let q = p; // Copy
-    let r = p.clone(); // Clone
+    let r = p; // Clone
     assert_eq!(p, q);
     assert_eq!(p, r);
 }
@@ -2815,7 +2816,7 @@ fn test_srgb_mono8_from_channels_wrong_count() {
 fn test_srgb_mono8_copy_clone_eq() {
     let a = SrgbMono8::new(42);
     let b = a;
-    let c = a.clone();
+    let c = a;
     assert_eq!(a, b);
     assert_eq!(a, c);
 }
@@ -2979,7 +2980,7 @@ fn test_srgb_mono_a8_from_channels_wrong_count() {
 fn test_srgb_mono_a8_copy_clone_eq() {
     let a = SrgbMonoA8::new(42, 99);
     let b = a;
-    let c = a.clone();
+    let c = a;
     assert_eq!(a, b);
     assert_eq!(a, c);
 }
@@ -3155,7 +3156,7 @@ fn test_srgb16_from_channels_wrong_count() {
 fn test_srgb16_copy_clone_eq() {
     let a = Srgb16::new(100, 200, 300);
     let b = a;
-    let c = a.clone();
+    let c = a;
     assert_eq!(a, b);
     assert_eq!(a, c);
 }
@@ -3348,7 +3349,7 @@ fn test_srgba16_from_channels_wrong_count() {
 fn test_srgba16_copy_clone_eq() {
     let a = Srgba16::new(10, 20, 30, 40);
     let b = a;
-    let c = a.clone();
+    let c = a;
     assert_eq!(a, b);
     assert_eq!(a, c);
 }
@@ -3507,7 +3508,7 @@ fn test_srgb_mono16_from_channels_wrong_count() {
 fn test_srgb_mono16_copy_clone_eq() {
     let a = SrgbMono16::new(42);
     let b = a;
-    let c = a.clone();
+    let c = a;
     assert_eq!(a, b);
     assert_eq!(a, c);
 }
@@ -3674,7 +3675,7 @@ fn test_srgb_mono_a16_from_channels_wrong_count() {
 fn test_srgb_mono_a16_copy_clone_eq() {
     let a = SrgbMonoA16::new(42, 99);
     let b = a;
-    let c = a.clone();
+    let c = a;
     assert_eq!(a, b);
     assert_eq!(a, c);
 }
@@ -4062,7 +4063,7 @@ fn test_monof32_as_bytes_roundtrip() {
 fn test_monof32_copy_clone_eq() {
     let a = MonoF32::new(0.5);
     let b = a;
-    let c = a.clone();
+    let c = a;
     assert_eq!(a, b);
     assert_eq!(a, c);
 }
@@ -4225,7 +4226,7 @@ fn test_monof64_as_bytes_roundtrip() {
 fn test_monof64_copy_clone_eq() {
     let a = MonoF64::new(0.5);
     let b = a;
-    let c = a.clone();
+    let c = a;
     assert_eq!(a, b);
     assert_eq!(a, c);
 }
@@ -4667,8 +4668,8 @@ fn test_hash_monof64_nan_consistent() {
 
 #[test]
 fn test_hash_monof64_equal() {
-    let a = MonoF64::new(3.14);
-    let b = MonoF64::new(3.14);
+    let a = MonoF64::new(2.71);
+    let b = MonoF64::new(2.71);
     assert_eq!(hash_of(&a), hash_of(&b));
 }
 
@@ -5085,7 +5086,7 @@ fn test_canonicalize_f64_nan() {
 
 #[test]
 fn test_canonicalize_f64_normal() {
-    assert_eq!(canonicalize_f64(3.14), 3.14f64.to_bits());
+    assert_eq!(canonicalize_f64(2.71), 2.71f64.to_bits());
 }
 
 // -- Exhaustive: Hash consistency across all float pixel types ------

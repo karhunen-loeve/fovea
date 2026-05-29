@@ -87,7 +87,6 @@ use super::preflight::{self, IntegralCapacity, IntegralSquaredCapacity};
 /// # Ok::<(), fovea::Error>(())
 /// ```
 #[allow(private_bounds)] // see module docs
-#[must_use]
 pub fn integral_image<I, A>(image: &I) -> Result<IntegralImage<A>, Error>
 where
     I: RasterImage,
@@ -147,7 +146,6 @@ where
 ///
 /// Returns [`Error::AccumulatorOverflow`] on pre-flight failure.
 #[allow(private_bounds)] // see module docs
-#[must_use]
 pub fn integral_squared_image<I, A>(image: &I) -> Result<IntegralImage<A>, Error>
 where
     I: RasterImage,

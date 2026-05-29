@@ -97,7 +97,7 @@ impl UnionFind {
     /// Test-only accessor that exposes the raw parent of `x` (no
     /// `find`, no compression). Used to verify path compression.
     #[cfg(test)]
-    pub fn raw_parent(&self, x: u64) -> u64 {
+    pub(super) fn raw_parent(&self, x: u64) -> u64 {
         self.parent[x as usize]
     }
 }

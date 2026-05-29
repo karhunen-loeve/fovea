@@ -1,3 +1,5 @@
+#![allow(path_statements, clippy::no_effect)]
+
 use fovea::pixel::{HomogeneousPixel, PlainChannel, PlainPixel};
 use fovea::{HomogeneousPixel as HomogeneousPixelDerive, PlainPixel as PlainPixelDerive};
 use std::num::Saturating;
@@ -114,37 +116,37 @@ fn channel_count_transparent_tuple() {
 #[test]
 fn size_assert_rgb() {
     // Force the const to be evaluated.
-    let _ = <TestRgb as HomogeneousPixel>::_SIZE_ASSERT;
+    <TestRgb as HomogeneousPixel>::_SIZE_ASSERT;
     assert_eq!(TestRgb::SIZE, std::mem::size_of::<Saturating<u8>>() * 3);
 }
 
 #[test]
 fn size_assert_rgba() {
-    let _ = <TestRgba as HomogeneousPixel>::_SIZE_ASSERT;
+    <TestRgba as HomogeneousPixel>::_SIZE_ASSERT;
     assert_eq!(TestRgba::SIZE, std::mem::size_of::<Saturating<u8>>() * 4);
 }
 
 #[test]
 fn size_assert_mono16() {
-    let _ = <TestMono16 as HomogeneousPixel>::_SIZE_ASSERT;
+    <TestMono16 as HomogeneousPixel>::_SIZE_ASSERT;
     assert_eq!(TestMono16::SIZE, std::mem::size_of::<u16>());
 }
 
 #[test]
 fn size_assert_rgb16() {
-    let _ = <TestRgb16 as HomogeneousPixel>::_SIZE_ASSERT;
+    <TestRgb16 as HomogeneousPixel>::_SIZE_ASSERT;
     assert_eq!(TestRgb16::SIZE, std::mem::size_of::<Saturating<u16>>() * 3);
 }
 
 #[test]
 fn size_assert_transparent_named() {
-    let _ = <TestWrappedU8 as HomogeneousPixel>::_SIZE_ASSERT;
+    <TestWrappedU8 as HomogeneousPixel>::_SIZE_ASSERT;
     assert_eq!(TestWrappedU8::SIZE, std::mem::size_of::<Saturating<u8>>());
 }
 
 #[test]
 fn size_assert_transparent_tuple() {
-    let _ = <TestWrappedU16 as HomogeneousPixel>::_SIZE_ASSERT;
+    <TestWrappedU16 as HomogeneousPixel>::_SIZE_ASSERT;
     assert_eq!(TestWrappedU16::SIZE, std::mem::size_of::<u16>());
 }
 
