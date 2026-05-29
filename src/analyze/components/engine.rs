@@ -1,9 +1,7 @@
 //! Two-pass union-find connected-components engine.
 //!
-//! Implements [ADR-0047] \u00a72\u20133. See the module-level docs for the
-//! public surface and the worked 4\u00d74 example.
-//!
-//! [ADR-0047]: https://github.com/karhunen-loeve/fovea/blob/main/docs/adr/0047-connected-components-design.md
+//! Implements the two-pass union-find engine. See the module-level docs
+//! for the public surface and the worked 4×4 example.
 
 use crate::Error;
 use crate::image::{Image, ImageView, ImageViewMut, RasterImage};
@@ -16,18 +14,16 @@ use super::stats::sink::{NoStats, StatsSink, WithStats};
 use super::union_find::UnionFind;
 
 /// Compute the connected-component labeling of `image`, allocating a
-/// fresh [`Labeling<L>`] (ADR-0047 \u00a72).
+/// fresh [`Labeling<L>`].
 ///
 /// The label pixel type `L` and connectivity strategy `C` are named
 /// explicitly by the caller (turbofish), e.g.
 /// `connected_components::<Label32, Connectivity8>(&binary)`.
 ///
-/// # Errors \u2014 Tier 2 ([ADR-0025])
+/// # Errors — Tier 2
 ///
 /// Returns [`Error::LabelOverflow`] if the input contains more
 /// connected components than `L::MAX_LABEL` can encode.
-///
-/// [ADR-0025]: https://github.com/karhunen-loeve/fovea/blob/main/docs/adr/0025-error-handling-conventions.md
 ///
 /// # Examples
 ///
@@ -56,19 +52,16 @@ where
 }
 
 /// Compute the connected-component labeling of `image`, writing the
-/// label image into `out` and returning `label_count` (ADR-0047 \u00a72).
+/// label image into `out` and returning `label_count`.
 ///
 /// # Panics
 ///
-/// Panics if `out.size() != image.size()` (Tier 3 \u2014 programmer bug
-/// per [ADR-0025]).
+/// Panics if `out.size() != image.size()` (Tier 3 — programmer bug).
 ///
 /// # Errors \u2014 Tier 2
 ///
 /// Returns [`Error::LabelOverflow`] if the input contains more
 /// connected components than `L::MAX_LABEL` can encode.
-///
-/// [ADR-0025]: https://github.com/karhunen-loeve/fovea/blob/main/docs/adr/0025-error-handling-conventions.md
 pub fn connected_components_into<L, C>(
     image: &impl RasterImage<Pixel = bool>,
     out: &mut Image<L>,
@@ -92,8 +85,8 @@ where
 /// [`ComponentStats`] per foreground component (area, bounding box,
 /// centroid sums).
 ///
-/// Stats are accumulated inline during pass 2; see ADR-0047 \u00a78 for the
-/// rationale and scope decision (option 3B).
+/// Stats are accumulated inline during pass 2 so the image is not
+/// rescanned after labeling.
 ///
 /// # Errors \u2014 Tier 2
 ///
@@ -149,7 +142,7 @@ where
 /// [`Connectivity8`](super::Connectivity8)). The pass-1 inner buffer
 /// `others: [u64; MAX_NEIGHBOURS]` hardcodes this constant. Adding a
 /// connectivity with more predecessors requires lifting this and is
-/// flagged in ADR-0047 \u00a77.
+/// flagged for follow-up design.
 const MAX_NEIGHBOURS: usize = 4;
 
 fn run<L, C, I, S>(image: &I, out: &mut Image<L>, sink: &mut S) -> Result<u64, Error>

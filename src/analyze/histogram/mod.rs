@@ -1,8 +1,7 @@
 //! Per-channel value histograms.
 //!
-//! This module turns [ADR-0040](../../../docs/adr/0040-histogram-design.md)
-//! into a concrete API. The design is staged across milestones tracked in
-//! `HISTOGRAM_PLAN.md`.
+//! This module provides the concrete histogram API for per-channel image
+//! analysis.
 //!
 //! # Surface
 //!
@@ -23,8 +22,8 @@
 //! # Pixel-model context
 //!
 //! Histograms operate on [`HomogeneousPixel::Channel`] values, not on
-//! pixels. After ADR-0044 / ADR-0045 / ADR-0046, that distinction matters:
-//! `f32` and `f64` are valid channel types (e.g. for `MonoF32`, `RgbF32`)
+//! pixels. That distinction matters: `f32` and `f64` are valid channel
+//! types (e.g. for `MonoF32`, `RgbF32`)
 //! but are not pixel types. Integer storage channels are typically
 //! `Saturating<T>`, not bare `T`. The strategy trait binds on the channel
 //! value directly, with no `LinearPixel` / `LinearSpace` requirement —
@@ -100,7 +99,7 @@
 //! Operations built on top of the histogram engine live alongside it:
 //!
 //! - [`otsu_threshold`] / [`otsu_binary_mask`] — Otsu's automatic
-//!   threshold from a 256-bin histogram. See `HISTOGRAM_CONSUMERS_PLAN.md`.
+//!   threshold from a 256-bin histogram.
 //! - [`equalization_lut`] / [`equalize_image`] /
 //!   [`equalize_image_into`] — per-channel histogram equalization.
 
@@ -129,7 +128,7 @@ use crate::pixel::HomogeneousPixel;
 /// `histogram()` is generic over the output type; the same call site can
 /// produce a single histogram, a `Vec`, or a fixed-size array depending
 /// on what the caller asks for. This keeps multi-channel and
-/// single-channel use cases on the same entry point — see ADR-0040 §4.
+/// single-channel use cases on the same entry point.
 ///
 /// # Implementations
 ///
@@ -143,8 +142,8 @@ use crate::pixel::HomogeneousPixel;
 ///
 /// The pixel type's channel count is a compile-time property of `P`. If
 /// the caller asks for `[Histogram<_, _>; 4]` from an `Rgb8` image, that
-/// mismatch is a programmer bug, not data-dependent failure — exactly
-/// the case ADR-0025 reserves for `panic!`.
+/// mismatch is a programmer bug, not data-dependent failure, so it uses
+/// `panic!` rather than `Result`.
 pub trait HistogramOutput<S, V>: Sized {
     /// Builds the output shape by invoking `compute(channel_index)`
     /// once per channel.

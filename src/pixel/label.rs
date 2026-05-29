@@ -4,10 +4,8 @@
 //! trait. Label pixels name *which* connected blob a foreground pixel
 //! belongs to; they are deliberately not intensities and not arithmetic.
 //!
-//! See [ADR-0047] and the consumer module
-//! [`crate::analyze::components`].
-//!
-//! [ADR-0047]: https://github.com/karhunen-loeve/fovea/blob/main/docs/adr/0047-connected-components-design.md
+//! See the consumer module [`crate::analyze::components`] for the
+//! connected-components API that produces these labels.
 
 use std::num::Saturating;
 

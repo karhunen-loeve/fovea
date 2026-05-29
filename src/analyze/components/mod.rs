@@ -15,10 +15,8 @@
 //!   inline during pass 2 (area, bounding box, sums of `x` / `y` for
 //!   centroid; aspect ratio is a derived helper).
 //!
-//! See [ADR-0047] and `CONNECTED_COMPONENTS_PLAN.md` for the design.
-//!
-//! [ADR-0047]: https://github.com/karhunen-loeve/fovea/blob/main/docs/adr/0047-connected-components-design.md
-//!
+//! The implementation uses a conventional two-pass union-find labeling
+//! design with explicit connectivity and label-pixel types.
 //! # Example
 //!
 //! ```

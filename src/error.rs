@@ -5,10 +5,9 @@ use core::fmt;
 ///
 /// This type represents data-dependent failures — situations where the
 /// operation is well-formed but the supplied data doesn't meet the
-/// requirements. See [ADR-0025] for the three-tier error handling
-/// convention used throughout this crate.
-///
-/// [ADR-0025]: https://github.com/…/docs/adr/0025-error-handling-conventions.md
+/// requirements. The crate uses a three-tier error handling convention:
+/// `Option` for absence, `Result<T, Error>` for data-dependent failure,
+/// and `panic!` for programmer bugs.
 ///
 /// # Tier summary
 ///
@@ -102,7 +101,7 @@ pub enum Error {
     /// [`integral_squared_image`](crate::analyze::integral::integral_squared_image),
     /// and
     /// [`integral_squared_image_into`](crate::analyze::integral::integral_squared_image_into)
-    /// when the O(1) pre-flight overflow check fails (ADR-0032 §3, §6).
+    /// when the O(1) pre-flight overflow check fails.
     ///
     /// `required_capacity` is the theoretical worst-case sum given the
     /// source image dimensions and pixel type. `accumulator_capacity` is
@@ -128,8 +127,7 @@ pub enum Error {
     /// and
     /// [`connected_components_into`](crate::analyze::components::connected_components_into)
     /// when pass 1 would allocate the `(label_capacity + 1)`-th
-    /// provisional label (ADR-0047 §6). This is a Tier 2 / data-dependent
-    /// error per [ADR-0025](https://github.com/karhunen-loeve/fovea/blob/main/docs/adr/0025-error-handling-conventions.md):
+    /// provisional label. This is a Tier 2 / data-dependent error:
     /// a pre-flight check is impossible without running the labeling pass.
     ///
     /// `label_capacity` is `L::MAX_LABEL` for the chosen label type — the

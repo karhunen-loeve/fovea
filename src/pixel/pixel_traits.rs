@@ -49,17 +49,16 @@ const fn sum_channels(channels: &[usize]) -> usize {
 /// the pixel-role items (`CHANNELS`, `DIM`, `cast_slice`, endian
 /// helpers) that only make sense for a semantic pixel unit.
 ///
-/// Role split (ADR-0046, structural companion to ADR-0045):
+/// Role split:
 ///
 /// - **Channel role** (`PlainChannel`): a scalar component with a
 ///   stable byte layout. Implemented by primitives `u{8,16,32,64}`,
 ///   `i{8,16,32,64}`, and — crucially — `f32` / `f64`. Raw floats
-///   are first-class channels but never first-class pixels
-///   (ADR-0044).
+///   are first-class channels but never first-class pixels.
 /// - **Pixel role** (`PlainPixel`): a semantic pixel unit. Extends
 ///   `PlainChannel` because byte layout is role-blind — a pixel's
 ///   bytes are pixel bytes whether you query them as the pixel or
-///   as a one-element channel stream. See `PHILOSOPHY.md` §9.
+///   as a one-element channel stream (design principle §9).
 ///
 /// # Safety
 ///
@@ -126,8 +125,8 @@ pub unsafe trait PlainChannel: Sized + Copy {
 /// extends the byte-layout channel contract with the pixel-level
 /// items (`CHANNELS`, `DIM`, endian helpers, `cast_slice`) that
 /// only make sense for a semantic pixel unit. The supertrait
-/// relation is correct because byte layout is role-blind — see
-/// `PHILOSOPHY.md` §9 and ADR-0046.
+/// relation is correct because byte layout is role-blind (design
+/// principle §9).
 ///
 /// # Safety
 ///
@@ -362,9 +361,9 @@ pub trait LabelPixel: Copy + Eq + Ord + core::hash::Hash + ZeroablePixel {
 /// Implementors must therefore guarantee that `max_integral_value()` is a
 /// **tight upper bound** on every value `to_integral()` can produce.
 ///
-/// Philosophy §11 — "if it can be written without unsafe, it must be."
-/// ADR-0032 §2 originally specified an `unsafe` trait; the implementation
-/// is safe because the contract is a numerical bound, not a layout claim.
+/// Design principle §11: if it can be written without unsafe, it must be.
+/// This trait is safe because the contract is a numerical bound, not a
+/// layout claim.
 ///
 /// # Float convention
 ///
@@ -374,11 +373,10 @@ pub trait LabelPixel: Copy + Eq + Ord + core::hash::Hash + ZeroablePixel {
 /// Callers whose float data lies outside `[0, 1]` must either rescale
 /// before calling the integral-image engine, or implement the trait on a
 /// newtype that documents its own range. The library reports the
-/// convention; it does not silently rescale (Philosophy §8).
+/// convention; it does not silently rescale (design principle §8).
 ///
 /// # See also
 ///
-/// - [ADR-0032](https://github.com/karhunen-loeve/fovea/blob/main/docs/adr/0032-integral-image-design.md)
 /// - [`IntegralSquaredPixel`] — parallel trait for sum-of-squares.
 pub trait IntegralPixel<A: Copy>: Copy {
     /// Convert a single source pixel to the accumulator representation.
