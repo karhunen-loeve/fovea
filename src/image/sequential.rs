@@ -1621,7 +1621,7 @@ mod tests {
     fn test_tiles_iter() {
         let img: ImageArray<u8, 4, 4> = ImageArray::generate(|x, y| (x + y * 4) as u8 + 1);
         let img = &img;
-        let mut iter = img.into_tiles(Size::new(2, 2));
+        let mut iter = img.tiles(Size::new(2, 2));
 
         let roi = iter.next().unwrap();
         assert_eq!(roi.size(), Size::new(2, 2));
@@ -2707,7 +2707,7 @@ mod tests {
     fn test_imagearray_tiling_exercises_image_ref() {
         let img: ImageArray<Mono8, 4, 4> =
             ImageArray::generate(|x, y| Mono8::new((x + y * 4) as u8));
-        let tiles: Vec<_> = img.into_tiles(Size::new(2, 2)).collect();
+        let tiles: Vec<_> = img.tiles(Size::new(2, 2)).collect();
         assert_eq!(tiles.len(), 4);
         // Each tile is an ImageRef — exercise all ImageView methods
         let t = &tiles[0];
@@ -2724,7 +2724,7 @@ mod tests {
     fn test_imagearray_tiling_partial_exercises_image_ref() {
         let img: ImageArray<Mono8, 5, 3> =
             ImageArray::generate(|x, y| Mono8::new((x + y * 5) as u8));
-        let tiles: Vec<_> = img.into_tiles(Size::new(3, 2)).collect();
+        let tiles: Vec<_> = img.tiles(Size::new(3, 2)).collect();
         assert_eq!(tiles.len(), 4); // 2 cols × 2 rows
         // Partial tile at (3,0) → 2×2
         assert_eq!(tiles[1].size(), Size::new(2, 2));

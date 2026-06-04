@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Breaking:** Renamed `SubView::into_tiles` to `SubView::tiles`. The
+  method borrows `&self` and returns a borrowing iterator, so the
+  `into_*` prefix (which by convention signals a consuming `self`-by-value
+  conversion) was misleading and inconsistent with the sibling
+  `SubView::sliding_windows`. There is no deprecated alias; update call
+  sites from `img.into_tiles(size)` to `img.tiles(size)`.
+
 ## [0.1.1] — 2026-05-29
 
 First real public release. `0.1.0` was a name-reservation placeholder
