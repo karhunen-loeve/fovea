@@ -26,14 +26,14 @@ fn main() {
 
     // ── Tile iteration ────────────────────────────────────────────────
     //
-    // `into_tiles` splits the image into a grid of non-overlapping tiles.
+    // `tiles` splits the image into a grid of non-overlapping tiles.
     // Edge tiles are automatically clamped when dimensions aren't exact
     // multiples of the tile size.
     //
     // 12×8 with 4×4 tiles → 3 columns × 2 rows = 6 tiles, all full-size.
 
     let tile_size = Size::new(4, 4);
-    let tiles: Vec<_> = img.into_tiles(tile_size).collect();
+    let tiles: Vec<_> = img.tiles(tile_size).collect();
 
     println!(
         "\nTile grid: {} tiles (target {}×{})",
@@ -87,7 +87,7 @@ fn main() {
     //   total:   3 × 2 = 6 tiles
 
     let big_tile = Size::new(5, 5);
-    let partial_tiles: Vec<_> = img.into_tiles(big_tile).collect();
+    let partial_tiles: Vec<_> = img.tiles(big_tile).collect();
 
     println!("\nPartial-edge tiles ({}×{}):", big_tile.width, big_tile.height);
     for (i, tile) in partial_tiles.iter().enumerate() {

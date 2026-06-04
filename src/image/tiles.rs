@@ -29,11 +29,11 @@ pub trait SubView: ImageView {
     /// use fovea::image::{Image, ImageView, SubView};
     ///
     /// let img = Image::generate(6, 4, |x, y| (x + y * 6) as u8);
-    /// let tiles: Vec<_> = img.into_tiles(Size::new(3, 2)).collect();
+    /// let tiles: Vec<_> = img.tiles(Size::new(3, 2)).collect();
     /// assert_eq!(tiles.len(), 4);
     /// assert_eq!(tiles[0].size(), Size::new(3, 2));
     /// ```
-    fn into_tiles(&self, size: Size) -> TileIter<'_, Self>
+    fn tiles(&self, size: Size) -> TileIter<'_, Self>
     where
         Self: Sized,
     {
@@ -911,7 +911,7 @@ mod tests {
     #[test]
     fn test_tiles_iter_basic() {
         let img: Image<u8> = Image::generate(4, 4, |x, y| (x + y * 4) as u8 + 1);
-        let tiles: Vec<_> = img.into_tiles(Size::new(2, 2)).collect();
+        let tiles: Vec<_> = img.tiles(Size::new(2, 2)).collect();
         // 4x4 image with 2x2 tiles = 4 tiles (2x2 grid of tiles)
         assert_eq!(tiles.len(), 4);
         // First tile should have correct data
@@ -923,7 +923,7 @@ mod tests {
     fn test_tiles_iter_partial_edges() {
         // 10x10 image with 3x3 tiles should produce partial tiles at edges
         let img: Image<u8> = Image::generate(10, 10, |x, y| (x + y * 10) as u8);
-        let tiles: Vec<_> = img.into_tiles(Size::new(3, 3)).collect();
+        let tiles: Vec<_> = img.tiles(Size::new(3, 3)).collect();
 
         // Should have 4x4 = 16 tiles (at x: 0,3,6,9 and y: 0,3,6,9)
         assert_eq!(tiles.len(), 16);
@@ -945,7 +945,7 @@ mod tests {
     fn test_tiles_iter_partial_edges_data() {
         // Verify the data in partial tiles is correct
         let img: Image<u8> = Image::generate(5, 5, |x, y| (x + y * 5) as u8);
-        let tiles: Vec<_> = img.into_tiles(Size::new(3, 3)).collect();
+        let tiles: Vec<_> = img.tiles(Size::new(3, 3)).collect();
 
         // Should have 2x2 = 4 tiles
         assert_eq!(tiles.len(), 4);
@@ -968,7 +968,7 @@ mod tests {
     #[test]
     fn test_tiles_iter_larger_than_image() {
         let img: Image<u8> = Image::generate(2, 2, |x, y| (x + y * 2) as u8);
-        let tiles: Vec<_> = img.into_tiles(Size::new(5, 5)).collect();
+        let tiles: Vec<_> = img.tiles(Size::new(5, 5)).collect();
         // Tile is larger than image, should get 1 tile clamped to image size (2x2)
         assert_eq!(tiles.len(), 1);
         assert_eq!(tiles[0].size(), Size::new(2, 2));
@@ -977,7 +977,7 @@ mod tests {
     #[test]
     fn test_tiles_iter_with_imagearray() {
         let img: ImageArray<u8, 8, 8> = ImageArray::generate(|x, y| (x + y * 8) as u8);
-        let tiles: Vec<_> = img.into_tiles(Size::new(4, 4)).collect();
+        let tiles: Vec<_> = img.tiles(Size::new(4, 4)).collect();
         // 8x8 image with 4x4 tiles = 4 tiles
         assert_eq!(tiles.len(), 4);
         assert_eq!(tiles[0].size(), Size::new(4, 4));
@@ -986,7 +986,7 @@ mod tests {
     #[test]
     fn test_tiles_iter_imagearray_partial() {
         let img: ImageArray<u8, 7, 7> = ImageArray::generate(|x, y| (x + y * 7) as u8);
-        let tiles: Vec<_> = img.into_tiles(Size::new(3, 3)).collect();
+        let tiles: Vec<_> = img.tiles(Size::new(3, 3)).collect();
         // 7x7 image with 3x3 tiles: positions 0,3,6 in both dimensions = 9 tiles
         assert_eq!(tiles.len(), 9);
 
@@ -1020,7 +1020,7 @@ mod tests {
     #[test]
     fn test_tiles_iter_exhaustion() {
         let img: Image<u8> = Image::generate(4, 4, |x, y| (x + y * 4) as u8);
-        let mut iter = img.into_tiles(Size::new(2, 2));
+        let mut iter = img.tiles(Size::new(2, 2));
 
         // Consume all tiles (should be exactly 4)
         let mut count = 0;
@@ -1038,7 +1038,7 @@ mod tests {
     fn test_tiles_single_pixel() {
         // Edge case: 1x1 tiles
         let img: Image<u8> = Image::generate(3, 3, |x, y| (x + y * 3) as u8);
-        let tiles: Vec<_> = img.into_tiles(Size::new(1, 1)).collect();
+        let tiles: Vec<_> = img.tiles(Size::new(1, 1)).collect();
         // Should get 9 tiles (3x3 grid of single pixels)
         assert_eq!(tiles.len(), 9);
         for tile in &tiles {
@@ -1050,7 +1050,7 @@ mod tests {
     fn test_tiles_single_row() {
         // Edge case: tiles that span full height
         let img: Image<u8> = Image::generate(7, 4, |x, y| (x + y * 7) as u8);
-        let tiles: Vec<_> = img.into_tiles(Size::new(3, 4)).collect();
+        let tiles: Vec<_> = img.tiles(Size::new(3, 4)).collect();
         // 7-wide with 3-wide tiles: positions 0, 3, 6 = 3 tiles
         assert_eq!(tiles.len(), 3);
         assert_eq!(tiles[0].size(), Size::new(3, 4));
@@ -1062,7 +1062,7 @@ mod tests {
     fn test_tiles_single_column() {
         // Edge case: tiles that span full width
         let img: Image<u8> = Image::generate(4, 7, |x, y| (x + y * 4) as u8);
-        let tiles: Vec<_> = img.into_tiles(Size::new(4, 3)).collect();
+        let tiles: Vec<_> = img.tiles(Size::new(4, 3)).collect();
         // 7-tall with 3-tall tiles: positions 0, 3, 6 = 3 tiles
         assert_eq!(tiles.len(), 3);
         assert_eq!(tiles[0].size(), Size::new(4, 3));
@@ -1080,7 +1080,7 @@ mod tests {
         use crate::pixel::Mono8;
         let img: ImageArray<Mono8, 6, 4> =
             ImageArray::generate(|x, y| Mono8::new((x + y * 6) as u8));
-        let tiles: Vec<_> = img.into_tiles(Size::new(3, 2)).collect();
+        let tiles: Vec<_> = img.tiles(Size::new(3, 2)).collect();
         assert_eq!(tiles.len(), 4);
         // Top-left tile
         assert_eq!(tiles[0].size(), Size::new(3, 2));
@@ -1231,7 +1231,7 @@ mod tests {
         let mut img: Image<u8> = Image::generate(7, 5, |x, y| (x + y * 7) as u8);
         let tile_size = Size::new(3, 2);
 
-        let immut_sizes: Vec<Size> = img.into_tiles(tile_size).map(|t| t.size()).collect();
+        let immut_sizes: Vec<Size> = img.tiles(tile_size).map(|t| t.size()).collect();
         let mut_sizes: Vec<Size> = tiles_mut(&mut img, tile_size).map(|t| t.size()).collect();
 
         assert_eq!(immut_sizes, mut_sizes);
@@ -1403,9 +1403,9 @@ mod tests {
         let mut img: Image<u8> = Image::generate(7, 5, |x, y| (x + y * 7) as u8);
         let tile_size = Size::new(3, 2);
 
-        let immut_sizes: Vec<Size> = img.into_tiles(tile_size).map(|t| t.size()).collect();
+        let immut_sizes: Vec<Size> = img.tiles(tile_size).map(|t| t.size()).collect();
         let immut_values: Vec<Vec<u8>> = img
-            .into_tiles(tile_size)
+            .tiles(tile_size)
             .map(|t| {
                 let mut vals = Vec::new();
                 for y in 0..t.height() {
@@ -1480,7 +1480,7 @@ mod tests {
         let tile_size = Size::new(3, 2);
 
         // Verify sizes match immutable
-        let immut_sizes: Vec<Size> = img.into_tiles(tile_size).map(|t| t.size()).collect();
+        let immut_sizes: Vec<Size> = img.tiles(tile_size).map(|t| t.size()).collect();
 
         let tiles: Vec<_> = (&mut img).into_tiles_mut(tile_size).collect();
         let mut_sizes: Vec<Size> = tiles.iter().map(|t| t.size()).collect();
@@ -1630,9 +1630,9 @@ mod tests {
 
     #[test]
     fn test_subview_into_tiles_called_on_owned_image() {
-        // into_tiles takes &self, so calling on an owned Image auto-borrows
+        // tiles takes &self, so calling on an owned Image auto-borrows
         let img: Image<u8> = Image::generate(6, 4, |x, y| (x + y * 6) as u8);
-        let tiles: Vec<_> = img.into_tiles(Size::new(3, 2)).collect();
+        let tiles: Vec<_> = img.tiles(Size::new(3, 2)).collect();
         assert_eq!(tiles.len(), 4);
         assert_eq!(tiles[0].size(), Size::new(3, 2));
         assert_eq!(tiles[0].get(0, 0), Some(0));
@@ -1646,7 +1646,7 @@ mod tests {
         // Explicitly calling on a reference — same result
         let img: Image<u8> = Image::generate(6, 4, |x, y| (x + y * 6) as u8);
         let img_ref = &img;
-        let tiles: Vec<_> = img_ref.into_tiles(Size::new(3, 2)).collect();
+        let tiles: Vec<_> = img_ref.tiles(Size::new(3, 2)).collect();
         assert_eq!(tiles.len(), 4);
         assert_eq!(tiles[0].size(), Size::new(3, 2));
         assert_eq!(tiles[0].get(0, 0), Some(0));
@@ -1654,10 +1654,10 @@ mod tests {
 
     #[test]
     fn test_subview_into_tiles_does_not_consume() {
-        // into_tiles borrows, so the image is still usable afterwards
+        // tiles borrows, so the image is still usable afterwards
         let img: Image<u8> = Image::generate(4, 4, |x, y| (x + y * 4) as u8);
-        let tiles1: Vec<_> = img.into_tiles(Size::new(2, 2)).collect();
-        let tiles2: Vec<_> = img.into_tiles(Size::new(2, 2)).collect();
+        let tiles1: Vec<_> = img.tiles(Size::new(2, 2)).collect();
+        let tiles2: Vec<_> = img.tiles(Size::new(2, 2)).collect();
         // Both iterations yield identical results
         assert_eq!(tiles1.len(), tiles2.len());
         for (a, b) in tiles1.iter().zip(tiles2.iter()) {
@@ -1672,7 +1672,7 @@ mod tests {
     fn test_subview_into_tiles_imagearray() {
         // Works on ImageArray without any trait import beyond SubView
         let img: ImageArray<u8, 8, 6> = ImageArray::generate(|x, y| (x + y * 8) as u8);
-        let tiles: Vec<_> = img.into_tiles(Size::new(4, 3)).collect();
+        let tiles: Vec<_> = img.tiles(Size::new(4, 3)).collect();
         assert_eq!(tiles.len(), 4);
         assert_eq!(tiles[0].size(), Size::new(4, 3));
         assert_eq!(tiles[1].size(), Size::new(4, 3));
@@ -1689,7 +1689,7 @@ mod tests {
     fn test_subview_into_tiles_partial_edges() {
         // Non-divisible dimensions produce partial edge tiles
         let img: Image<u8> = Image::generate(5, 5, |x, y| (x + y * 5) as u8);
-        let tiles: Vec<_> = img.into_tiles(Size::new(3, 3)).collect();
+        let tiles: Vec<_> = img.tiles(Size::new(3, 3)).collect();
         assert_eq!(tiles.len(), 4);
         assert_eq!(tiles[0].size(), Size::new(3, 3)); // (0,0)
         assert_eq!(tiles[1].size(), Size::new(2, 3)); // (3,0) partial width
@@ -1699,10 +1699,10 @@ mod tests {
 
     #[test]
     fn test_subview_into_tiles_multiple_borrows_simultaneously() {
-        // Multiple tile iterators can coexist since into_tiles only borrows
+        // Multiple tile iterators can coexist since tiles only borrows
         let img: Image<u8> = Image::generate(4, 4, |x, y| (x + y * 4) as u8);
-        let tiles_2x2: Vec<_> = img.into_tiles(Size::new(2, 2)).collect();
-        let tiles_4x4: Vec<_> = img.into_tiles(Size::new(4, 4)).collect();
+        let tiles_2x2: Vec<_> = img.tiles(Size::new(2, 2)).collect();
+        let tiles_4x4: Vec<_> = img.tiles(Size::new(4, 4)).collect();
         assert_eq!(tiles_2x2.len(), 4);
         assert_eq!(tiles_4x4.len(), 1);
         // Both views see the same underlying data
@@ -1716,9 +1716,9 @@ mod tests {
         let mut img: Image<u8> = Image::generate(7, 5, |x, y| (x + y * 7) as u8);
         let tile_size = Size::new(3, 2);
 
-        let immut_sizes: Vec<Size> = img.into_tiles(tile_size).map(|t| t.size()).collect();
+        let immut_sizes: Vec<Size> = img.tiles(tile_size).map(|t| t.size()).collect();
         let immut_values: Vec<Vec<u8>> = img
-            .into_tiles(tile_size)
+            .tiles(tile_size)
             .map(|t| {
                 let mut vals = Vec::new();
                 for y in 0..t.height() {
@@ -1755,14 +1755,14 @@ mod tests {
     #[should_panic(expected = "tile size must be non-zero")]
     fn tile_iter_rejects_zero_width() {
         let img = Image::<u8>::zero(4, 4);
-        let _ = img.into_tiles(Size::new(0, 2)).count();
+        let _ = img.tiles(Size::new(0, 2)).count();
     }
 
     #[test]
     #[should_panic(expected = "tile size must be non-zero")]
     fn tile_iter_rejects_zero_height() {
         let img = Image::<u8>::zero(4, 4);
-        let _ = img.into_tiles(Size::new(2, 0)).count();
+        let _ = img.tiles(Size::new(2, 0)).count();
     }
 
     #[test]
