@@ -1,3 +1,23 @@
+//! Pixel types and the traits that make image operations type-safe.
+//!
+//! Start with concrete pixels such as [`Srgb8`], [`RgbF32`], [`Mono16`], or
+//! `Mono<12>`. Reach for traits when you are writing generic algorithms:
+//!
+//! | Trait | What it promises | Typical use |
+//! |---|---|---|
+//! | [`PlainPixel`] | stable byte layout, no padding, no invalid bit patterns | raw camera bytes, FFI, GPU upload |
+//! | [`HomogeneousPixel`] | every channel has the same channel type | histograms and per-channel transforms |
+//! | [`LinearPixel`] | arithmetic support for interpolation/blending | filters, resize, combine operations |
+//! | [`LinearSpace`] | the values are in a linear space | prevents gamma-incorrect blending |
+//! | [`ZeroablePixel`] | an all-zero pixel exists | image allocation and output buffers |
+//!
+//! The most important distinction is semantic, not structural: [`Srgb8`] is
+//! gamma-encoded display/file data, while [`Rgb8`] is linear-light RGB. They may
+//! occupy similar bytes, but they are not the same pixel type.
+//!
+//! Do not use this module to choose storage access. For ownership, borrowing,
+//! rows, slices, ROIs, and tiles, use [`crate::image`].
+
 mod indexed;
 mod label;
 mod mono;

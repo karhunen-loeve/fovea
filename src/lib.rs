@@ -4,28 +4,16 @@
 #![warn(unreachable_pub)]
 #![deny(rustdoc::broken_intra_doc_links)]
 
-//! ## Modules
+//! ## docs.rs guide pages
 //!
-//! - [`image`] — Image types, views, kernels, and containers
-//! - [`pixel`] — Pixel type definitions and traits
-//! - [`transform`] — Image transformations (convolution, morphology, combine, etc.)
-//! - [`analyze`] — Image analysis (histograms, integral images / summed-area tables)
-//! - [`border`] — Border policies for neighborhood operations
+//! The crate root above is the quick evaluation path. For task-oriented docs,
+//! use the documentation-only [`guide`] module on docs.rs:
 //!
-//! ## Transform overview
-//!
-//! The [`transform`] module organises operations into three levels:
-//!
-//! 1. **Unary pixel transforms** — apply a function to every pixel independently
-//!    ([`transform::convert_image`], strategies like [`transform::Luminance`],
-//!    [`transform::SrgbGamma`], [`transform::Narrow`]).
-//! 2. **Binary pixel transforms** — combine two same-sized images pixel-wise
-//!    ([`transform::combine_images`], strategies like [`transform::PixelAdd`],
-//!    [`transform::AbsDiff`], [`transform::Blend`]).
-//! 3. **Neighbourhood transforms** — compute each output pixel from a window of
-//!    input pixels: [`transform::fold_neighborhood`] for weighted aggregation
-//!    (convolution, separable filters) and [`transform::map_neighborhood`] for
-//!    non-linear operations (erosion, dilation, median).
+//! - [`guide`] — first working examples and the core pipeline shape
+//! - [`guide::faq`] — common questions about images, pixels, conversions, ROIs, and large images
+//! - [`guide::pixel_types`] — how to choose the right pixel type
+//! - [`guide::camera_buffers`] — raw bytes, camera SDK buffers, and byte layout
+//! - [`guide::large_images`] — slices, rows, tiles, sliding windows, and parallel runtimes
 
 extern crate self as fovea;
 
@@ -47,6 +35,12 @@ mod internal;
 pub mod image;
 
 /// Border policies for out-of-bounds pixel access in neighborhood operations.
+///
+/// Start with [`Clamp`](border::Clamp) for ordinary image filtering,
+/// [`Skip`](border::Skip) for valid-only convolution, and
+/// [`Constant`](border::Constant) when the outside of the image should have a
+/// known value. These policies are used by neighborhood transforms such as
+/// convolution, filters, and morphology.
 pub mod border {
     pub use crate::image::border::*;
 }
@@ -67,6 +61,9 @@ pub mod transform;
 /// Distinguished from [`transform`] by output: analysis operations produce
 /// data *about* an image (counts, scalars, descriptors), not new images.
 pub mod analyze;
+
+#[cfg(doc)]
+pub mod guide;
 
 // ── Core vocabulary types (module-agnostic, kept at root) ────────────────────
 pub use common::{Coordinate, Rectangle, Size, Stride};

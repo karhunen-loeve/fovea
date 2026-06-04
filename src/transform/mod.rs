@@ -1,4 +1,20 @@
-//! Image transformation primitives.
+//! Image-producing operations: conversion, resize, geometry, filters, morphology, and template matching.
+//!
+//! Start with [`convert_image`] when the pixel type changes, [`resize`] when
+//! dimensions change, [`combine_images`] when two same-sized images become one,
+//! and the filter/convolution APIs when each output pixel depends on a
+//! neighborhood.
+//!
+//! ## Common choices
+//!
+//! | Task | Start with | Important constraint |
+//! |---|---|---|
+//! | Convert sRGB to linear light | [`convert_image`] + [`SrgbGamma`] | The strategy names the transfer function. |
+//! | Resize by copying samples | [`resize`] + [`NearestNeighbor`] | Works for gamma-encoded pixels because no blending occurs. |
+//! | Resize smoothly | [`resize`] + [`Bilinear`] | Requires [`crate::pixel::LinearSpace`]. Linearize sRGB first. |
+//! | Combine two images pixel-wise | [`combine_images`] | Inputs must have the same size. |
+//! | Apply a convolution/filter | [`convolve`] or named filters | Choose an explicit border policy. |
+//! | Erode/dilate/median | [`map_neighborhood`] or morphology helpers | Use masks for active neighborhood positions. |
 //!
 //! This module organises transforms into four conceptual levels,
 //! presented in increasing scope (a single coordinate → the whole image).
