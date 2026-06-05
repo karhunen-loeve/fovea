@@ -8,7 +8,8 @@ use fovea_derive::{HomogeneousPixel, LinearPixel, PlainPixel, WhiteChannel, Zero
 
 use crate::pixel::{
     FromLinear, HomogeneousPixel, IntegralPixel, IntegralSquaredPixel, LinearChannel, LinearPixel,
-    LinearSpace, PlainChannel, PlainPixel, WhiteChannel, ZeroablePixel,
+    LinearSpace, OriginInvariantPixel, PlainChannel, PlainPixel, WhiteChannel, ZeroablePixel,
+    impl_origin_invariant_pixel,
 };
 use std::{
     hash::{Hash, Hasher},
@@ -842,6 +843,18 @@ impl LinearPixel<f64> for MonoF64 {
 }
 
 impl<const BITS: usize> LinearSpace for Mono<BITS> {}
+
+// ---------------------------------------------------------------------------
+// OriginInvariantPixel impls
+// ---------------------------------------------------------------------------
+//
+// A monochrome intensity is the same measurement wherever the pixel sits, so
+// an origin-translated crop never changes its meaning — these types support
+// ordinary `roi`, tiling, and sliding windows. The raw `u8`/`u16`/`f32`
+// channels they wrap are deliberately *not* origin-invariant: they are
+// channels, not pixels (Philosophy §9).
+impl_origin_invariant_pixel!(Mono8, Mono16, Mono32, Mono64, MonoF32, MonoF64);
+impl<const BITS: usize> OriginInvariantPixel for Mono<BITS> {}
 
 // ---------------------------------------------------------------------------
 // IntegralPixel / IntegralSquaredPixel impls

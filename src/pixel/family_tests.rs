@@ -479,3 +479,34 @@ test_pixel_family!(srgb_mono_a16, SrgbMonoA16, name: "SrgbMonoA16",
 test_pixel_family!(indexed8, Indexed8, name: "Indexed8",
     sample: Indexed8(42), different: Indexed8(100),
     channels: [42u8], other_ch: 99u8, align: 1);
+
+// ── OriginInvariantPixel coverage (ADR-0051) ──────────────────────────────────
+//
+// Compile-time proof that every shipped pixel family implements the
+// `OriginInvariantPixel` marker, keeping ordinary `SubView` ROI / tiling /
+// sliding windows available for them. If a family ever loses its impl — or a
+// new family forgets to add one — this fails to compile.
+//
+// `bool` is included because `BinaryImage = Image<bool>` relies on the marker
+// for ROI. Raw channel primitives (`u8`, `u16`, `f32`, …) are deliberately
+// absent — they are channels, not pixels (Philosophy §9) — and a
+// coordinate-dependent Bayer CFA pixel would be absent too (ADR-0037).
+#[test]
+fn origin_invariant_marker_covers_all_families() {
+    fn assert_marker<P: OriginInvariantPixel>() {}
+
+    macro_rules! assert_all {
+        ($($t:ty),+ $(,)?) => {{ $( assert_marker::<$t>(); )+ }};
+    }
+
+    assert_all!(
+        Mono8, Mono16, Mono32, Mono64, MonoF32, MonoF64, Mono10, Mono12, Mono14,
+        MonoA8, MonoA16, MonoA32, MonoA64, MonoAF32, MonoAF64,
+        Rgb8, Rgb16, Rgb32, Rgb64, RgbF32, RgbF64, Rgb10, Rgb12, Rgb14,
+        Rgba8, Rgba16, Rgba32, Rgba64, RgbaF32, RgbaF64, Rgba10, Rgba12, Rgba14,
+        Bgr8, Bgr16, Bgr32, Bgr64, BgrF32, BgrF64, Bgr10, Bgr12, Bgr14,
+        Bgra8, Bgra16, Bgra32, Bgra64, BgraF32, BgraF64, Bgra10, Bgra12, Bgra14,
+        Srgb8, Srgba8, SrgbMono8, SrgbMonoA8, Srgb16, Srgba16, SrgbMono16, SrgbMonoA16,
+        Indexed8, Label32, bool,
+    );
+}

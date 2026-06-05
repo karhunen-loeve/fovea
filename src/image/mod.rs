@@ -54,14 +54,16 @@ pub use zip::{ZipPixelsIter, zip_pixels};
 
 // ─── Binary image vocabulary ────────────────────────────────────
 //
-// Binary images are images whose pixel type is `bool`. The `bool` type
-// already rides the `T: Copy` pathway through `Image<T>`, `ImageView`,
-// `ImageRef`, `SubView`, tiles, sliding windows, zip, and the parallel
-// iteration machinery — all of which work today with no changes. `bool` is
-// also the pixel type that `map_neighborhood*` already consumes as its
-// topology mask parameter (`MI: ImageView<Pixel = bool>`), so morphology
-// and neighborhood operations natively accept binary images with no
-// bridging conversion.
+// Binary images are images whose pixel type is `bool`. `bool` rides the
+// `T: Copy` pathway through `Image<T>`, `ImageView`, `ImageRef`, zip, and the
+// parallel iteration machinery, and — because a boolean mask value means the
+// same thing wherever it sits — it also implements
+// [`OriginInvariantPixel`](crate::pixel::OriginInvariantPixel) (below), which
+// is what keeps ordinary `SubView` ROI, tiling, and sliding windows available
+// for binary images (ADR-0051). `bool` is also the pixel type that
+// `map_neighborhood*` already consumes as its topology mask parameter
+// (`MI: ImageView<Pixel = bool>`), so morphology and neighborhood operations
+// natively accept binary images with no bridging conversion.
 //
 // These aliases give that concept a first-class name. They are zero-cost
 // documentation: every `BinaryImage` is structurally identical to the
@@ -71,6 +73,13 @@ pub use zip::{ZipPixelsIter, zip_pixels};
 // this codebase for compile-time-sized structuring elements
 // (`Mask<KW, KH> = Neighborhood<bool, KW, KH>`). Reusing `Mask` for whole
 // images would be a three-way collision.
+
+// A boolean mask value carries no coordinate phase — `true` / `false` means
+// the same thing at any origin — so binary images keep ordinary
+// same-pixel-type ROI, tiling, and sliding windows. The impl lives here,
+// beside the `BinaryImage` aliases it exists to serve, rather than in a pixel
+// family module, because `bool` is a primitive and belongs to no pixel family.
+impl crate::pixel::OriginInvariantPixel for bool {}
 
 /// An image whose pixels are binary (`bool`).
 ///

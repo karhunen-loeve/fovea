@@ -48,8 +48,9 @@ assert_eq!(img.pixel_at(0, 1), 7);
 ```rust
 use fovea::Size;
 use fovea::image::{Image, ImageView, SubView};
+use fovea::pixel::Mono8;
 
-let img = Image::generate(6, 4, |x, y| (x + y * 6) as u8);
+let img = Image::generate(6, 4, |x, y| Mono8::new((x + y * 6) as u8));
 let tiles: Vec<_> = img.tiles(Size::new(3, 2)).collect();
 
 assert_eq!(tiles.len(), 4);

@@ -263,6 +263,131 @@ pub trait ZeroablePixel: Sized + Copy {
 }
 
 // ──────────────────────────────────────────────────────────────────────────
+// Origin-invariant pixel role
+// ──────────────────────────────────────────────────────────────────────────
+
+/// Marker trait for pixel types whose semantic interpretation is
+/// **invariant under translation of the image origin**.
+///
+/// If `P: OriginInvariantPixel`, then a region of interest taken from an
+/// `Image<P>` can be represented as an [`ImageView`](crate::image::ImageView)
+/// with `Pixel = P` without changing what `P` means at local coordinates.
+/// Cropping moves *where* the data lives; it does not change *what* each
+/// pixel is.
+///
+/// # What it gates
+///
+/// This marker is the bound on ordinary, same-pixel-type region access:
+/// [`SubView`](crate::image::SubView) (`roi`, `tiles`, `sliding_windows`)
+/// and [`SubViewMut`](crate::image::SubViewMut) (`roi_mut`). Each of those
+/// APIs translates the local origin, so each is only sound when the pixel
+/// type's meaning survives that translation. Random access
+/// ([`ImageView`](crate::image::ImageView)) and row access
+/// ([`RasterImage`](crate::image::RasterImage)) are **not** gated — they do
+/// not move the origin and stay available for every `T: Copy`.
+///
+/// # Why a separate trait (Philosophy §2, §3)
+///
+/// Origin-invariance is its own axis, orthogonal to the existing pixel
+/// roles, and each trait adds exactly one guarantee:
+///
+/// - [`PlainPixel`] guarantees *byte layout* — it says nothing about
+///   whether meaning depends on position. A coordinate-dependent pixel can
+///   still have a perfectly stable layout.
+/// - [`HomogeneousPixel`] guarantees *channel shape*.
+/// - [`LinearSpace`] guarantees that *interpolation is meaningful*. That is
+///   about mixing values across positions; this is about moving the origin.
+///
+/// The trait deliberately does **not** extend [`PlainPixel`]: ROI safety is
+/// a semantic property, not a layout one. `bool` — the pixel type of
+/// [`BinaryImage`](crate::image::BinaryImage) — is origin-invariant yet is
+/// not part of the plain-layout pixel family.
+///
+/// # Safe trait (Philosophy §11)
+///
+/// `OriginInvariantPixel` is a **safe** trait. A wrong impl does not cause
+/// undefined behaviour or reinterpret bytes; it only re-admits a region API
+/// whose result would be semantically misleading. Per "if it can be written
+/// without unsafe, it must be," the obligation lives in this documentation
+/// rather than in an `unsafe` contract. Compare [`PlainPixel`], which is
+/// `unsafe` precisely because a wrong impl reinterprets memory.
+///
+/// # Implementors and non-implementors
+///
+/// Implemented by every shipped pixel type whose meaning is independent of
+/// `(x, y)`: the `Mono*`, `MonoA*`, `Rgb*` / `Bgr*`, `Srgb*`,
+/// [`Indexed8`](crate::pixel::Indexed8), and [`Label32`](crate::pixel::Label32)
+/// families, plus `bool`.
+///
+/// It is **not** implemented for raw channel primitives (`u8`, `u16`,
+/// `f32`, …): those are channels, not pixels (Philosophy §9). It is also the
+/// opt-out point for coordinate-dependent pixels such as Bayer CFA mosaics
+/// (ADR-0037): an ROI at an odd origin shifts the 2×2 mosaic phase, so
+/// returning the same pattern type would lie about the data. Such pixels
+/// remain usable as [`ImageView`](crate::image::ImageView) /
+/// [`RasterImage`](crate::image::RasterImage) storage and reach for named,
+/// phase-aware ROI APIs instead.
+///
+/// The design is recorded in ADR-0051; the ROI/tiling split it builds on is
+/// ADR-0017.
+///
+/// # Examples
+///
+/// Ordinary ROI works for an origin-invariant pixel such as
+/// [`Mono8`](crate::pixel::Mono8):
+///
+/// ```
+/// use fovea::Rectangle;
+/// use fovea::image::{Image, ImageView, SubView};
+/// use fovea::pixel::Mono8;
+///
+/// let img = Image::fill(4, 4, Mono8::new(7));
+/// let roi = img.roi(Rectangle::new((1, 1), (2, 2))).unwrap();
+/// assert_eq!(roi.pixel_at(0, 0), Mono8::new(7));
+/// ```
+///
+/// A `Copy` pixel whose meaning depends on image coordinates does **not**
+/// implement `OriginInvariantPixel`, so ordinary `roi()` fails to *compile* —
+/// the misuse is rejected by the type system, never at runtime:
+///
+/// ```compile_fail
+/// use fovea::Rectangle;
+/// use fovea::image::{Image, SubView};
+///
+/// // A `Copy` pixel whose meaning depends on the image origin (think Bayer
+/// // CFA phase). It deliberately does not implement `OriginInvariantPixel`.
+/// #[derive(Clone, Copy)]
+/// struct OriginDependent(u8);
+///
+/// let img = Image::fill(4, 4, OriginDependent(0));
+/// // ERROR: `OriginDependent: OriginInvariantPixel` is not satisfied.
+/// let _ = img.roi(Rectangle::new((0, 0), (2, 2)));
+/// ```
+pub trait OriginInvariantPixel: Copy {}
+
+/// Implements the safe [`OriginInvariantPixel`] marker for each listed
+/// pixel type.
+///
+/// The pixel-family modules use this to opt their origin-invariant types
+/// into ordinary [`SubView`](crate::image::SubView) /
+/// [`SubViewMut`](crate::image::SubViewMut) access without repeating the
+/// empty impl by hand. Membership is the whole specification: a
+/// coordinate-dependent pixel (e.g. a future Bayer CFA type, ADR-0037) is
+/// simply left off the list and therefore never gains ordinary `roi()`.
+///
+/// Const-generic families (`Mono<BITS>`, `Rgb<BITS>`, …) implement the
+/// marker by hand next to their other generic impls, since this macro takes
+/// concrete types only.
+macro_rules! impl_origin_invariant_pixel {
+    ($($t:ty),+ $(,)?) => {
+        $(
+            impl $crate::pixel::OriginInvariantPixel for $t {}
+        )+
+    };
+}
+pub(crate) use impl_origin_invariant_pixel;
+
+// ──────────────────────────────────────────────────────────────────────────
 // Label pixel role
 // ──────────────────────────────────────────────────────────────────────────
 

@@ -9,6 +9,7 @@ use std::{
     num::Saturating,
 };
 
+use crate::pixel::impl_origin_invariant_pixel;
 use super::{canonicalize_f32, canonicalize_f64};
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -184,3 +185,11 @@ impl Hash for MonoAF64 {
         canonicalize_f64(self.a).hash(state);
     }
 }
+
+// ---------------------------------------------------------------------------
+// OriginInvariantPixel impls
+// ---------------------------------------------------------------------------
+//
+// Grayscale-with-alpha values mean the same thing regardless of where the
+// pixel sits, so an origin-translated crop preserves their meaning.
+impl_origin_invariant_pixel!(MonoA8, MonoA16, MonoA32, MonoA64, MonoAF32, MonoAF64);

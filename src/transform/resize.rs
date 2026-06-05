@@ -675,8 +675,8 @@ mod tests {
     #[test]
     fn test_resize_nearest_neighbor_into_roi_output() {
         // Resize a 4x4 source into a 2x2 ROI within a 4x4 target
-        let src: Image<u8> = Image::generate(4, 4, |x, y| (y * 10 + x) as u8);
-        let mut target: Image<u8> = Image::fill(4, 4, 255);
+        let src: Image<Mono8> = Image::generate(4, 4, |x, y| Mono8::new((y * 10 + x) as u8));
+        let mut target: Image<Mono8> = Image::fill(4, 4, Mono8::new(255));
 
         {
             let mut roi_out = target.roi_mut(Rectangle::new((1, 1), (2, 2))).unwrap();
@@ -684,14 +684,14 @@ mod tests {
         }
 
         // The ROI region should contain the resized result
-        assert_eq!(target.get(1, 1).unwrap(), 0); // src (0,0)
-        assert_eq!(target.get(2, 1).unwrap(), 3); // src (3,0)
-        assert_eq!(target.get(1, 2).unwrap(), 30); // src (0,3)
-        assert_eq!(target.get(2, 2).unwrap(), 33); // src (3,3)
+        assert_eq!(target.get(1, 1).unwrap(), Mono8::new(0)); // src (0,0)
+        assert_eq!(target.get(2, 1).unwrap(), Mono8::new(3)); // src (3,0)
+        assert_eq!(target.get(1, 2).unwrap(), Mono8::new(30)); // src (0,3)
+        assert_eq!(target.get(2, 2).unwrap(), Mono8::new(33)); // src (3,3)
 
         // Outside the ROI should be untouched
-        assert_eq!(target.get(0, 0).unwrap(), 255);
-        assert_eq!(target.get(3, 3).unwrap(), 255);
+        assert_eq!(target.get(0, 0).unwrap(), Mono8::new(255));
+        assert_eq!(target.get(3, 3).unwrap(), Mono8::new(255));
     }
 
     #[test]
