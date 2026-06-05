@@ -48,7 +48,7 @@ pub trait MatchMethod<I: ImageView, T: ImageView, O: ImageViewMut> {
     /// # Errors
     ///
     /// Implementations **must** preflight via
-    /// [`match_template_preflight`] (or perform the equivalent checks)
+    /// `match_template_preflight` (or perform the equivalent checks)
     /// before doing any subtraction on dimensions. Returning
     /// [`Error::TemplateTooLarge`] for oversized templates is
     /// mandatory so that direct callers of the trait method cannot

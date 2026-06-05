@@ -7,7 +7,7 @@
 //!   `Option<u8>` (Tier 1: `None` for degenerate inputs).
 //! - [`otsu_binary_mask`] — convenience that runs the histogram engine,
 //!   picks the threshold, and applies
-//!   [`BinaryMask`](crate::transform::BinaryMask) to produce a
+//!   [`BinaryMask`] to produce a
 //!   [`BinaryImage`].
 
 use crate::Error;
@@ -24,7 +24,7 @@ use crate::transform::{BinaryMask, convert_image};
 /// pixels at all, or every pixel falls in a single bin. Otherwise
 /// returns `Some(t)` where pixels with channel value `> t` belong to
 /// the bright class, matching
-/// [`BinaryMask`](crate::transform::BinaryMask)'s
+/// [`BinaryMask`]'s
 /// `value > thresh => true` convention.
 ///
 /// Generic over `V` so both `u8` (e.g. [`Indexed8`](crate::pixel::Indexed8))

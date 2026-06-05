@@ -1,24 +1,24 @@
 //! Image storage, views, ROIs, tiles, and neighborhood shapes.
 //!
-//! Start with [`Image`] when you own pixels, [`ImageRef`] / [`ImageRefMut`]
-//! when you borrow existing storage, and [`ImageView`] when you are writing an
+//! Start with [`Image`](crate::image::Image) when you own pixels, [`ImageRef`](crate::image::ImageRef) / [`ImageRefMut`](crate::image::ImageRefMut)
+//! when you borrow existing storage, and [`ImageView`](crate::image::ImageView) when you are writing an
 //! algorithm that only needs random access.
 //!
 //! ## Which access trait?
 //!
 //! | Trait | Guarantee | Reach for it when |
 //! |---|---|---|
-//! | [`ImageView`] | `pixel_at(x, y)` by value | You only need random access. |
-//! | [`ImageViewMut`] | mutable random access | You need to edit individual pixels. |
-//! | [`RasterImage`] | dense row slices | You scan rows or want cache-friendly loops. |
-//! | [`RasterImageMut`] | mutable row slices | You mutate rows in place. |
-//! | [`ContiguousImage`] | one dense pixel slice | You need the fastest whole-buffer path. |
-//! | [`PlainImage`] | byte access to `PlainPixel` storage | You write camera, file, FFI, or GPU boundaries. |
+//! | [`ImageView`](crate::image::ImageView) | `pixel_at(x, y)` by value | You only need random access. |
+//! | [`ImageViewMut`](crate::image::ImageViewMut) | mutable random access | You need to edit individual pixels. |
+//! | [`RasterImage`](crate::image::RasterImage) | dense row slices | You scan rows or want cache-friendly loops. |
+//! | [`RasterImageMut`](crate::image::RasterImageMut) | mutable row slices | You mutate rows in place. |
+//! | [`ContiguousImage`](crate::image::ContiguousImage) | one dense pixel slice | You need the fastest whole-buffer path. |
+//! | [`PlainImage`](crate::image::PlainImage) | byte access to `PlainPixel` storage | You write camera, file, FFI, or GPU boundaries. |
 //!
 //! ## Views do not allocate
 //!
-//! [`SubView::roi`] returns a borrowed region of interest. [`SubView::tiles`]
-//! splits an image into borrowed immutable tiles. [`IntoTilesMut`] yields
+//! [`SubView::roi`](crate::image::SubView::roi) returns a borrowed region of interest. [`SubView::tiles`](crate::image::SubView::tiles)
+//! splits an image into borrowed immutable tiles. [`IntoTilesMut`](crate::image::IntoTilesMut) yields
 //! disjoint mutable tiles for safe chunked in-place processing.
 //!
 //! Do not use this module for pixel semantics. If the question is "is this
