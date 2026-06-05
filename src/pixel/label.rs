@@ -11,7 +11,7 @@ use std::num::Saturating;
 
 use fovea_derive::{HomogeneousPixel, PlainPixel, ZeroablePixel};
 
-use crate::pixel::LabelPixel;
+use crate::pixel::{LabelPixel, impl_origin_invariant_pixel};
 
 /// A 32-bit foreground component label.
 ///
@@ -119,6 +119,17 @@ impl LabelPixel for Label32 {
         self.value() as u64
     }
 }
+
+// ---------------------------------------------------------------------------
+// OriginInvariantPixel impl
+// ---------------------------------------------------------------------------
+//
+// A connected-component label names *which* blob a pixel belongs to; that
+// identity is unchanged by where the crop starts, so ordinary ROI over a
+// label image preserves meaning. (Labels are still not intensities: `Label32`
+// withholds `LinearPixel`/`LinearSpace`, so averaging or blending labels
+// remains a type error — a separate axis from origin-invariance.)
+impl_origin_invariant_pixel!(Label32);
 
 #[cfg(test)]
 mod tests {

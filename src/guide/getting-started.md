@@ -74,8 +74,9 @@ ROIs are borrowed views into existing image memory. Use `roi` when you want to l
 ```rust
 use fovea::{Coordinate, Rectangle, Size};
 use fovea::image::{Image, ImageView, SubView};
+use fovea::pixel::Mono8;
 
-let img = Image::generate(6, 4, |x, y| (x + y * 6) as u8);
+let img = Image::generate(6, 4, |x, y| Mono8::new((x + y * 6) as u8));
 let rect = Rectangle::new(Coordinate::new(2, 1), Size::new(3, 2));
 let roi = img.roi(rect).unwrap();
 

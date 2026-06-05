@@ -7,8 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `OriginInvariantPixel`: a safe marker trait for pixel types whose
+  semantic meaning is invariant under translation of the image origin. It
+  is implemented for every shipped pixel family (`Mono*`, `MonoA*`,
+  `Rgb*` / `Bgr*`, `Srgb*`, `Indexed8`, `Label32`) and for `bool` (the
+  pixel type of `BinaryImage`). See [ADR-0051](https://github.com/karhunen-loeve/fovea/blob/main/docs/adr/0051-origin-invariant-pixel.md).
+
 ### Changed
 
+- **Breaking:** `SubView` / `SubViewMut` — and therefore `roi`, `roi_mut`,
+  `tiles`, and `sliding_windows` — are now gated on
+  `T: OriginInvariantPixel` instead of `T: Copy`. Ordinary same-pixel-type
+  ROI and tiling is available only for pixel types whose meaning survives
+  an origin shift, so coordinate-dependent pixels (e.g. future Bayer CFA
+  types) can no longer silently produce a phase-shifted view. `ImageView`,
+  `ImageViewMut`, `RasterImage`, `ContiguousImage`, and the (ungated)
+  `IntoTilesMut` are unchanged and remain available for any `T: Copy`.
+  Code that used these APIs on raw channel images such as `Image<u8>`
+  should switch to a real pixel type such as `Mono8` (or `bool` for binary
+  images). See [ADR-0051](https://github.com/karhunen-loeve/fovea/blob/main/docs/adr/0051-origin-invariant-pixel.md).
 - **Breaking:** Renamed `SubView::into_tiles` to `SubView::tiles`. The
   method borrows `&self` and returns a borrowing iterator, so the
   `into_*` prefix (which by convention signals a consuming `self`-by-value

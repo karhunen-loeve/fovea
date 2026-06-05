@@ -5,6 +5,8 @@
 
 use fovea_derive::{HomogeneousPixel, PlainPixel, WhiteChannel, ZeroablePixel};
 
+use crate::pixel::impl_origin_invariant_pixel;
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Indexed (palette) pixel type
 //
@@ -64,6 +66,16 @@ impl From<Indexed8> for u8 {
         p.0
     }
 }
+
+// ---------------------------------------------------------------------------
+// OriginInvariantPixel impl
+// ---------------------------------------------------------------------------
+//
+// A palette index resolves through an external lookup table; that mapping is
+// the same regardless of where the pixel sits, so an origin-translated crop
+// preserves its meaning. (Interpolating indices remains a type error, since
+// `Indexed8` withholds `LinearSpace` — a separate axis from origin-invariance.)
+impl_origin_invariant_pixel!(Indexed8);
 
 #[cfg(test)]
 mod tests {

@@ -10,6 +10,8 @@ use fovea_derive::{HomogeneousPixel, PlainPixel, WhiteChannel, ZeroablePixel};
 
 use std::num::Saturating;
 
+use crate::pixel::impl_origin_invariant_pixel;
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // sRGB gamma-encoded pixel types
 //
@@ -411,3 +413,16 @@ impl SrgbMonoA16 {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// OriginInvariantPixel impls
+// ---------------------------------------------------------------------------
+//
+// The sRGB gamma encoding is a per-pixel value transform, not a
+// coordinate-dependent one: a gamma-encoded sample means the same thing
+// wherever it sits, so cropping preserves its meaning. (These types still
+// reject *interpolation* by withholding `LinearSpace`; origin-invariance and
+// linear-space membership are independent axes — Philosophy §2.)
+impl_origin_invariant_pixel!(
+    Srgb8, Srgba8, SrgbMono8, SrgbMonoA8, Srgb16, Srgba16, SrgbMono16, SrgbMonoA16,
+);

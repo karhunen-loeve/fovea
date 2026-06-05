@@ -131,8 +131,9 @@ Use `SubView::roi`. It returns an `Option` because out-of-bounds ROIs are normal
 ```rust
 use fovea::{Rectangle, Size};
 use fovea::image::{Image, ImageView, SubView};
+use fovea::pixel::Mono8;
 
-let img = Image::generate(5, 5, |x, y| (x + y * 5) as u8);
+let img = Image::generate(5, 5, |x, y| Mono8::new((x + y * 5) as u8));
 let roi = img.roi(Rectangle::new((1, 1), Size::new(3, 3))).unwrap();
 
 assert_eq!(roi.size(), Size::new(3, 3));
@@ -160,4 +161,4 @@ pub struct MyBayer8 {
 }
 ```
 
-Only implement `LinearPixel` / `LinearSpace` if interpolation and blending are meaningful for the type.
+Only implement `LinearPixel` / `LinearSpace` if interpolation and blending are meaningful for the type. Likewise, only implement `OriginInvariantPixel` if cropping preserves the pixel's meaning. A Bayer CFA pixel such as `MyBayer8` deliberately omits it: an ROI at an odd origin shifts the 2×2 mosaic phase, so the compiler rejects ordinary `roi`/`tiles`/`sliding_windows` and steers callers to a phase-aware API instead (see ADR-0051).

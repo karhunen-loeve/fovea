@@ -7,7 +7,8 @@
 use fovea_derive::{HomogeneousPixel, LinearPixel, PlainPixel, WhiteChannel, ZeroablePixel};
 
 use crate::pixel::{
-    HomogeneousPixel, IntegralPixel, IntegralSquaredPixel, PlainChannel, PlainPixel, ZeroablePixel,
+    HomogeneousPixel, IntegralPixel, IntegralSquaredPixel, OriginInvariantPixel, PlainChannel,
+    PlainPixel, ZeroablePixel, impl_origin_invariant_pixel,
 };
 use std::{
     hash::{Hash, Hasher},
@@ -997,6 +998,23 @@ unsafe impl<const BITS: usize> HomogeneousPixel for Bgra<BITS> {
     type Channel = Mono<BITS>;
     type Channels = [Mono<BITS>; 4];
 }
+
+// ---------------------------------------------------------------------------
+// OriginInvariantPixel impls
+// ---------------------------------------------------------------------------
+//
+// Interleaved RGB/BGR (with or without alpha) carries no coordinate-phase:
+// every pixel is a full colour sample, so a crop at any origin keeps its
+// meaning. Channel order (RGB vs BGR) is a per-pixel layout choice, not an
+// origin-dependent one, so both orders qualify.
+impl_origin_invariant_pixel!(
+    Rgb8, Rgba8, Rgb16, Rgba16, Rgb32, Rgba32, Rgb64, Rgba64, RgbF32, RgbaF32, RgbF64, RgbaF64,
+    Bgr8, Bgra8, Bgr16, Bgra16, Bgr32, Bgra32, Bgr64, Bgra64, BgrF32, BgraF32, BgrF64, BgraF64,
+);
+impl<const BITS: usize> OriginInvariantPixel for Rgb<BITS> {}
+impl<const BITS: usize> OriginInvariantPixel for Rgba<BITS> {}
+impl<const BITS: usize> OriginInvariantPixel for Bgr<BITS> {}
+impl<const BITS: usize> OriginInvariantPixel for Bgra<BITS> {}
 
 // ---------------------------------------------------------------------------
 // IntegralPixel / IntegralSquaredPixel impls

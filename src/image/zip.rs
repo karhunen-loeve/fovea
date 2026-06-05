@@ -151,6 +151,7 @@ mod tests {
     use super::*;
     use crate::Size;
     use crate::image::{Image, ImageArray, SubView};
+    use crate::pixel::Mono8;
 
     // ── Basic functionality ──────────────────────────────────────────
 
@@ -227,8 +228,8 @@ mod tests {
 
     #[test]
     fn test_zip_pixels_with_sequential_roi() {
-        let img_a = Image::generate(6, 6, |x, y| (x + y * 6) as u8);
-        let img_b = Image::generate(6, 6, |x, y| ((x + y) * 2) as u8);
+        let img_a = Image::generate(6, 6, |x, y| Mono8::new((x + y * 6) as u8));
+        let img_b = Image::generate(6, 6, |x, y| Mono8::new(((x + y) * 2) as u8));
 
         // Take 3×3 ROIs from each
         let roi_a = img_a.roi(crate::Rectangle::new((1, 1), (3, 3))).unwrap();
@@ -238,13 +239,13 @@ mod tests {
         assert_eq!(pairs.len(), 9);
 
         // Verify first pixel: roi_a starts at (1,1), roi_b starts at (2,2)
-        assert_eq!(pairs[0].0, (1 + 6) as u8); // img_a[1,1] = 7
-        assert_eq!(pairs[0].1, ((2 + 2) * 2) as u8); // img_b[2,2] = 8
+        assert_eq!(pairs[0].0, Mono8::new((1 + 6) as u8)); // img_a[1,1] = 7
+        assert_eq!(pairs[0].1, Mono8::new(((2 + 2) * 2) as u8)); // img_b[2,2] = 8
     }
 
     #[test]
     fn test_zip_pixels_roi_size_mismatch() {
-        let img = Image::generate(6, 6, |x, y| (x + y) as u8);
+        let img = Image::generate(6, 6, |x, y| Mono8::new((x + y) as u8));
         let roi_a = img.roi(crate::Rectangle::new((0, 0), (3, 3))).unwrap();
         let roi_b = img.roi(crate::Rectangle::new((0, 0), (4, 3))).unwrap();
 
@@ -289,20 +290,20 @@ mod tests {
 
     #[test]
     fn test_zip_pixels_imagearray_with_roi() {
-        let arr: ImageArray<u8, 3, 3> = ImageArray::generate(|x, y| (x + y) as u8);
-        let img = Image::generate(6, 6, |x, y| (x + y * 6) as u8);
+        let arr: ImageArray<Mono8, 3, 3> = ImageArray::generate(|x, y| Mono8::new((x + y) as u8));
+        let img = Image::generate(6, 6, |x, y| Mono8::new((x + y * 6) as u8));
         let roi = img.roi(crate::Rectangle::new((0, 0), (3, 3))).unwrap();
 
         let pairs: Vec<_> = zip_pixels(&arr, &roi).unwrap().collect();
         assert_eq!(pairs.len(), 9);
 
         // arr[0,0]=0, roi[0,0]=img[0,0]=0
-        assert_eq!(pairs[0].0, 0u8);
-        assert_eq!(pairs[0].1, 0u8);
+        assert_eq!(pairs[0].0, Mono8::new(0));
+        assert_eq!(pairs[0].1, Mono8::new(0));
 
         // arr[2,2]=4, roi[2,2]=img[2,2]=2+2*6=14
-        assert_eq!(pairs[8].0, 4u8);
-        assert_eq!(pairs[8].1, 14u8);
+        assert_eq!(pairs[8].0, Mono8::new(4));
+        assert_eq!(pairs[8].1, Mono8::new(14));
     }
 
     // ── ExactSizeIterator ────────────────────────────────────────────
@@ -563,8 +564,8 @@ mod tests {
 
     #[test]
     fn test_zip_pixels_with_sliding_windows() {
-        let img = Image::generate(5, 5, |x, y| (x + y * 5) as u8);
-        let template: ImageArray<u8, 3, 3> = ImageArray::generate(|x, y| (x + y) as u8);
+        let img = Image::generate(5, 5, |x, y| Mono8::new((x + y * 5) as u8));
+        let template: ImageArray<Mono8, 3, 3> = ImageArray::generate(|x, y| Mono8::new((x + y) as u8));
 
         // Compute SAD (sum of absolute differences) for each window position
         let sads: Vec<u32> = img
@@ -572,7 +573,7 @@ mod tests {
             .map(|window| {
                 zip_pixels(&window, &template)
                     .unwrap()
-                    .map(|(a, b)| a.abs_diff(b) as u32)
+                    .map(|(a, b)| a.value().abs_diff(b.value()) as u32)
                     .sum()
             })
             .collect();
