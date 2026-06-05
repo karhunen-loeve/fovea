@@ -110,7 +110,7 @@ let display: Image<Srgb8> = convert_image(&linear, SrgbGamma);
 assert_eq!(display.size(), srgb.size());
 ```
 
-For a longer first pass, start with the docs.rs guide: [`fovea::guide`](https://docs.rs/fovea/latest/fovea/guide/index.html).
+For a longer first pass, start with the docs.rs guide: [`fovea::guide`](crate::guide).
 
 ## Core types
 
