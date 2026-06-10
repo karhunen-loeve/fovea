@@ -35,7 +35,9 @@ use super::{canonicalize_f32, canonicalize_f64};
 )]
 #[linear(accumulator = MonoAF32)]
 pub struct MonoA8 {
+    /// Value (luminance) channel.
     pub v: Saturating<u8>,
+    /// Alpha channel.
     pub a: Saturating<u8>,
 }
 impl MonoA8 {
@@ -64,7 +66,9 @@ impl MonoA8 {
 )]
 #[linear(accumulator = MonoAF32)]
 pub struct MonoA16 {
+    /// Value (luminance) channel.
     pub v: Saturating<u16>,
+    /// Alpha channel.
     pub a: Saturating<u16>,
 }
 impl MonoA16 {
@@ -93,7 +97,9 @@ impl MonoA16 {
 )]
 #[linear(accumulator = MonoAF64)]
 pub struct MonoA32 {
+    /// Value (luminance) channel.
     pub v: Saturating<u32>,
+    /// Alpha channel.
     pub a: Saturating<u32>,
 }
 impl MonoA32 {
@@ -122,7 +128,9 @@ impl MonoA32 {
 )]
 #[linear(accumulator = MonoAF64)]
 pub struct MonoA64 {
+    /// Value (luminance) channel.
     pub v: Saturating<u64>,
+    /// Alpha channel.
     pub a: Saturating<u64>,
 }
 impl MonoA64 {
@@ -142,8 +150,10 @@ impl MonoA64 {
 #[linear(accumulator = Self)]
 pub struct MonoAF32 {
     // Inner `f32` is a channel, not a pixel.
+    /// Value (luminance) channel.
     #[zero(default)]
     pub v: f32,
+    /// Alpha channel.
     #[zero(default)]
     pub a: f32,
 }
@@ -168,8 +178,10 @@ impl Hash for MonoAF32 {
 #[linear(accumulator = Self)]
 pub struct MonoAF64 {
     // Inner `f64` is a channel, not a pixel.
+    /// Value (luminance) channel.
     #[zero(default)]
     pub v: f64,
+    /// Alpha channel.
     #[zero(default)]
     pub a: f64,
 }

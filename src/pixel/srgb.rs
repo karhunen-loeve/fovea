@@ -51,8 +51,11 @@ use crate::pixel::impl_origin_invariant_pixel;
     WhiteChannel,
 )]
 pub struct Srgb8 {
+    /// Red channel (sRGB-encoded).
     pub r: Saturating<u8>,
+    /// Green channel (sRGB-encoded).
     pub g: Saturating<u8>,
+    /// Blue channel (sRGB-encoded).
     pub b: Saturating<u8>,
 }
 
@@ -96,9 +99,13 @@ impl Srgb8 {
     WhiteChannel,
 )]
 pub struct Srgba8 {
+    /// Red channel (sRGB-encoded).
     pub r: Saturating<u8>,
+    /// Green channel (sRGB-encoded).
     pub g: Saturating<u8>,
+    /// Blue channel (sRGB-encoded).
     pub b: Saturating<u8>,
+    /// Alpha channel (linear).
     pub a: Saturating<u8>,
 }
 
@@ -207,7 +214,9 @@ impl SrgbMono8 {
     WhiteChannel,
 )]
 pub struct SrgbMonoA8 {
+    /// Value (luminance) channel (sRGB-encoded).
     pub v: Saturating<u8>,
+    /// Alpha channel (linear).
     pub a: Saturating<u8>,
 }
 
@@ -265,8 +274,11 @@ impl SrgbMonoA8 {
     WhiteChannel,
 )]
 pub struct Srgb16 {
+    /// Red channel (sRGB-encoded).
     pub r: Saturating<u16>,
+    /// Green channel (sRGB-encoded).
     pub g: Saturating<u16>,
+    /// Blue channel (sRGB-encoded).
     pub b: Saturating<u16>,
 }
 
@@ -310,9 +322,13 @@ impl Srgb16 {
     WhiteChannel,
 )]
 pub struct Srgba16 {
+    /// Red channel (sRGB-encoded).
     pub r: Saturating<u16>,
+    /// Green channel (sRGB-encoded).
     pub g: Saturating<u16>,
+    /// Blue channel (sRGB-encoded).
     pub b: Saturating<u16>,
+    /// Alpha channel (linear).
     pub a: Saturating<u16>,
 }
 
@@ -401,7 +417,9 @@ impl SrgbMono16 {
     WhiteChannel,
 )]
 pub struct SrgbMonoA16 {
+    /// Value (luminance) channel (sRGB-encoded).
     pub v: Saturating<u16>,
+    /// Alpha channel (linear).
     pub a: Saturating<u16>,
 }
 

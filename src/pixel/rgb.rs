@@ -39,8 +39,11 @@ use super::{canonicalize_f32, canonicalize_f64};
 )]
 #[linear(accumulator = RgbF32)]
 pub struct Rgb8 {
+    /// Red channel.
     pub r: Saturating<u8>,
+    /// Green channel.
     pub g: Saturating<u8>,
+    /// Blue channel.
     pub b: Saturating<u8>,
 }
 impl Rgb8 {
@@ -70,9 +73,13 @@ impl Rgb8 {
 )]
 #[linear(accumulator = RgbaF32)]
 pub struct Rgba8 {
+    /// Red channel.
     pub r: Saturating<u8>,
+    /// Green channel.
     pub g: Saturating<u8>,
+    /// Blue channel.
     pub b: Saturating<u8>,
+    /// Alpha channel.
     pub a: Saturating<u8>,
 }
 impl Rgba8 {
@@ -103,8 +110,11 @@ impl Rgba8 {
 )]
 #[linear(accumulator = RgbF32)]
 pub struct Rgb16 {
+    /// Red channel.
     pub r: Saturating<u16>,
+    /// Green channel.
     pub g: Saturating<u16>,
+    /// Blue channel.
     pub b: Saturating<u16>,
 }
 impl Rgb16 {
@@ -134,9 +144,13 @@ impl Rgb16 {
 )]
 #[linear(accumulator = RgbaF32)]
 pub struct Rgba16 {
+    /// Red channel.
     pub r: Saturating<u16>,
+    /// Green channel.
     pub g: Saturating<u16>,
+    /// Blue channel.
     pub b: Saturating<u16>,
+    /// Alpha channel.
     pub a: Saturating<u16>,
 }
 impl Rgba16 {
@@ -167,8 +181,11 @@ impl Rgba16 {
 )]
 #[linear(accumulator = RgbF64)]
 pub struct Rgb32 {
+    /// Red channel.
     pub r: Saturating<u32>,
+    /// Green channel.
     pub g: Saturating<u32>,
+    /// Blue channel.
     pub b: Saturating<u32>,
 }
 impl Rgb32 {
@@ -198,9 +215,13 @@ impl Rgb32 {
 )]
 #[linear(accumulator = RgbaF64)]
 pub struct Rgba32 {
+    /// Red channel.
     pub r: Saturating<u32>,
+    /// Green channel.
     pub g: Saturating<u32>,
+    /// Blue channel.
     pub b: Saturating<u32>,
+    /// Alpha channel.
     pub a: Saturating<u32>,
 }
 impl Rgba32 {
@@ -231,8 +252,11 @@ impl Rgba32 {
 )]
 #[linear(accumulator = RgbF64)]
 pub struct Rgb64 {
+    /// Red channel.
     pub r: Saturating<u64>,
+    /// Green channel.
     pub g: Saturating<u64>,
+    /// Blue channel.
     pub b: Saturating<u64>,
 }
 impl Rgb64 {
@@ -262,9 +286,13 @@ impl Rgb64 {
 )]
 #[linear(accumulator = RgbaF64)]
 pub struct Rgba64 {
+    /// Red channel.
     pub r: Saturating<u64>,
+    /// Green channel.
     pub g: Saturating<u64>,
+    /// Blue channel.
     pub b: Saturating<u64>,
+    /// Alpha channel.
     pub a: Saturating<u64>,
 }
 impl Rgba64 {
@@ -288,10 +316,13 @@ impl Rgba64 {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, LinearPixel)]
 #[linear(accumulator = RgbF32)]
 pub struct Rgb<const BITS: usize> {
+    /// Red channel.
     #[linear(nested)]
     pub r: Mono<BITS>,
+    /// Green channel.
     #[linear(nested)]
     pub g: Mono<BITS>,
+    /// Blue channel.
     #[linear(nested)]
     pub b: Mono<BITS>,
 }
@@ -315,12 +346,16 @@ pub type Rgb14 = Rgb<14>;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, LinearPixel)]
 #[linear(accumulator = RgbaF32)]
 pub struct Rgba<const BITS: usize> {
+    /// Red channel.
     #[linear(nested)]
     pub r: Mono<BITS>,
+    /// Green channel.
     #[linear(nested)]
     pub g: Mono<BITS>,
+    /// Blue channel.
     #[linear(nested)]
     pub b: Mono<BITS>,
+    /// Alpha channel.
     #[linear(nested)]
     pub a: Mono<BITS>,
 }
@@ -351,10 +386,13 @@ pub type Rgba14 = Rgba<14>;
 #[linear(accumulator = Self)]
 pub struct RgbF32 {
     // Inner `f32` is a channel, not a pixel.
+    /// Red channel.
     #[zero(default)]
     pub r: f32,
+    /// Green channel.
     #[zero(default)]
     pub g: f32,
+    /// Blue channel.
     #[zero(default)]
     pub b: f32,
 }
@@ -380,12 +418,16 @@ impl Hash for RgbF32 {
 #[linear(accumulator = Self)]
 pub struct RgbaF32 {
     // Inner `f32` is a channel, not a pixel.
+    /// Red channel.
     #[zero(default)]
     pub r: f32,
+    /// Green channel.
     #[zero(default)]
     pub g: f32,
+    /// Blue channel.
     #[zero(default)]
     pub b: f32,
+    /// Alpha channel.
     #[zero(default)]
     pub a: f32,
 }
@@ -412,10 +454,13 @@ impl Hash for RgbaF32 {
 #[linear(accumulator = Self)]
 pub struct RgbF64 {
     // Inner `f64` is a channel, not a pixel.
+    /// Red channel.
     #[zero(default)]
     pub r: f64,
+    /// Green channel.
     #[zero(default)]
     pub g: f64,
+    /// Blue channel.
     #[zero(default)]
     pub b: f64,
 }
@@ -441,12 +486,16 @@ impl Hash for RgbF64 {
 #[linear(accumulator = Self)]
 pub struct RgbaF64 {
     // Inner `f64` is a channel, not a pixel.
+    /// Red channel.
     #[zero(default)]
     pub r: f64,
+    /// Green channel.
     #[zero(default)]
     pub g: f64,
+    /// Blue channel.
     #[zero(default)]
     pub b: f64,
+    /// Alpha channel.
     #[zero(default)]
     pub a: f64,
 }
@@ -486,8 +535,11 @@ impl Hash for RgbaF64 {
 )]
 #[linear(accumulator = BgrF32)]
 pub struct Bgr8 {
+    /// Blue channel.
     pub b: Saturating<u8>,
+    /// Green channel.
     pub g: Saturating<u8>,
+    /// Red channel.
     pub r: Saturating<u8>,
 }
 impl Bgr8 {
@@ -517,8 +569,11 @@ impl Bgr8 {
 )]
 #[linear(accumulator = BgrF32)]
 pub struct Bgr16 {
+    /// Blue channel.
     pub b: Saturating<u16>,
+    /// Green channel.
     pub g: Saturating<u16>,
+    /// Red channel.
     pub r: Saturating<u16>,
 }
 impl Bgr16 {
@@ -548,8 +603,11 @@ impl Bgr16 {
 )]
 #[linear(accumulator = BgrF64)]
 pub struct Bgr32 {
+    /// Blue channel.
     pub b: Saturating<u32>,
+    /// Green channel.
     pub g: Saturating<u32>,
+    /// Red channel.
     pub r: Saturating<u32>,
 }
 impl Bgr32 {
@@ -579,8 +637,11 @@ impl Bgr32 {
 )]
 #[linear(accumulator = BgrF64)]
 pub struct Bgr64 {
+    /// Blue channel.
     pub b: Saturating<u64>,
+    /// Green channel.
     pub g: Saturating<u64>,
+    /// Red channel.
     pub r: Saturating<u64>,
 }
 impl Bgr64 {
@@ -614,9 +675,13 @@ impl Bgr64 {
 )]
 #[linear(accumulator = BgraF32)]
 pub struct Bgra8 {
+    /// Blue channel.
     pub b: Saturating<u8>,
+    /// Green channel.
     pub g: Saturating<u8>,
+    /// Red channel.
     pub r: Saturating<u8>,
+    /// Alpha channel.
     pub a: Saturating<u8>,
 }
 impl Bgra8 {
@@ -647,9 +712,13 @@ impl Bgra8 {
 )]
 #[linear(accumulator = BgraF32)]
 pub struct Bgra16 {
+    /// Blue channel.
     pub b: Saturating<u16>,
+    /// Green channel.
     pub g: Saturating<u16>,
+    /// Red channel.
     pub r: Saturating<u16>,
+    /// Alpha channel.
     pub a: Saturating<u16>,
 }
 impl Bgra16 {
@@ -680,9 +749,13 @@ impl Bgra16 {
 )]
 #[linear(accumulator = BgraF64)]
 pub struct Bgra32 {
+    /// Blue channel.
     pub b: Saturating<u32>,
+    /// Green channel.
     pub g: Saturating<u32>,
+    /// Red channel.
     pub r: Saturating<u32>,
+    /// Alpha channel.
     pub a: Saturating<u32>,
 }
 impl Bgra32 {
@@ -713,9 +786,13 @@ impl Bgra32 {
 )]
 #[linear(accumulator = BgraF64)]
 pub struct Bgra64 {
+    /// Blue channel.
     pub b: Saturating<u64>,
+    /// Green channel.
     pub g: Saturating<u64>,
+    /// Red channel.
     pub r: Saturating<u64>,
+    /// Alpha channel.
     pub a: Saturating<u64>,
 }
 impl Bgra64 {
@@ -739,10 +816,13 @@ impl Bgra64 {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, LinearPixel)]
 #[linear(accumulator = BgrF32)]
 pub struct Bgr<const BITS: usize> {
+    /// Blue channel.
     #[linear(nested)]
     pub b: Mono<BITS>,
+    /// Green channel.
     #[linear(nested)]
     pub g: Mono<BITS>,
+    /// Red channel.
     #[linear(nested)]
     pub r: Mono<BITS>,
 }
@@ -764,12 +844,16 @@ pub type Bgr14 = Bgr<14>;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, LinearPixel)]
 #[linear(accumulator = BgraF32)]
 pub struct Bgra<const BITS: usize> {
+    /// Blue channel.
     #[linear(nested)]
     pub b: Mono<BITS>,
+    /// Green channel.
     #[linear(nested)]
     pub g: Mono<BITS>,
+    /// Red channel.
     #[linear(nested)]
     pub r: Mono<BITS>,
+    /// Alpha channel.
     #[linear(nested)]
     pub a: Mono<BITS>,
 }
@@ -800,10 +884,13 @@ pub type Bgra14 = Bgra<14>;
 #[linear(accumulator = Self)]
 pub struct BgrF32 {
     // Inner `f32` is a channel, not a pixel.
+    /// Blue channel.
     #[zero(default)]
     pub b: f32,
+    /// Green channel.
     #[zero(default)]
     pub g: f32,
+    /// Red channel.
     #[zero(default)]
     pub r: f32,
 }
@@ -829,12 +916,16 @@ impl Hash for BgrF32 {
 #[linear(accumulator = Self)]
 pub struct BgraF32 {
     // Inner `f32` is a channel, not a pixel.
+    /// Blue channel.
     #[zero(default)]
     pub b: f32,
+    /// Green channel.
     #[zero(default)]
     pub g: f32,
+    /// Red channel.
     #[zero(default)]
     pub r: f32,
+    /// Alpha channel.
     #[zero(default)]
     pub a: f32,
 }
@@ -861,10 +952,13 @@ impl Hash for BgraF32 {
 #[linear(accumulator = Self)]
 pub struct BgrF64 {
     // Inner `f64` is a channel, not a pixel.
+    /// Blue channel.
     #[zero(default)]
     pub b: f64,
+    /// Green channel.
     #[zero(default)]
     pub g: f64,
+    /// Red channel.
     #[zero(default)]
     pub r: f64,
 }
@@ -890,12 +984,16 @@ impl Hash for BgrF64 {
 #[linear(accumulator = Self)]
 pub struct BgraF64 {
     // Inner `f64` is a channel, not a pixel.
+    /// Blue channel.
     #[zero(default)]
     pub b: f64,
+    /// Green channel.
     #[zero(default)]
     pub g: f64,
+    /// Red channel.
     #[zero(default)]
     pub r: f64,
+    /// Alpha channel.
     #[zero(default)]
     pub a: f64,
 }

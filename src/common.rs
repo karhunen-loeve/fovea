@@ -8,7 +8,9 @@
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Size {
+    /// Image width in pixels.
     pub width: usize,
+    /// Image height in pixels.
     pub height: usize,
 }
 impl Size {
@@ -53,7 +55,9 @@ impl From<(usize, usize)> for Size {
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Coordinate {
+    /// Horizontal position.
     pub x: usize,
+    /// Vertical position.
     pub y: usize,
 }
 impl Coordinate {
@@ -82,7 +86,9 @@ impl From<(usize, usize)> for Coordinate {
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Rectangle {
+    /// Top-left corner of the rectangle.
     pub offset: Coordinate,
+    /// Width and height of the rectangle.
     pub size: Size,
 }
 
