@@ -518,7 +518,9 @@ where
 /// assert!((mid - MonoF32(150.0)).abs().0 < 1e-5);
 /// ```
 pub struct LinearCombine {
+    /// Weight applied to pixel `a`.
     pub wa: f32,
+    /// Weight applied to pixel `b`.
     pub wb: f32,
 }
 
@@ -553,6 +555,7 @@ impl<P: LinearPixel + LinearSpace> CombinePixels<P, P> for LinearCombine {
 /// assert!((mid - MonoF32(100.0)).abs().0 < 1e-5);
 /// ```
 pub struct Blend {
+    /// Interpolation factor: 0.0 → pixel `a`, 1.0 → pixel `b`.
     pub alpha: f32,
 }
 
