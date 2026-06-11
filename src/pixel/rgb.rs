@@ -47,6 +47,7 @@ pub struct Rgb8 {
     pub b: Saturating<u8>,
 }
 impl Rgb8 {
+    /// Creates an `Rgb8` pixel from the given 8-bit R, G, B channel values.
     pub fn new(r: u8, g: u8, b: u8) -> Self {
         Rgb8 {
             r: Saturating(r),
@@ -83,6 +84,7 @@ pub struct Rgba8 {
     pub a: Saturating<u8>,
 }
 impl Rgba8 {
+    /// Creates an `Rgba8` pixel from the given 8-bit R, G, B, A channel values.
     pub fn new(r: u8, g: u8, b: u8, a: u8) -> Self {
         Rgba8 {
             r: Saturating(r),
@@ -118,6 +120,7 @@ pub struct Rgb16 {
     pub b: Saturating<u16>,
 }
 impl Rgb16 {
+    /// Creates an `Rgb16` pixel from the given 16-bit R, G, B channel values.
     pub fn new(r: u16, g: u16, b: u16) -> Self {
         Rgb16 {
             r: Saturating(r),
@@ -154,6 +157,7 @@ pub struct Rgba16 {
     pub a: Saturating<u16>,
 }
 impl Rgba16 {
+    /// Creates an `Rgba16` pixel from the given 16-bit R, G, B, A channel values.
     pub fn new(r: u16, g: u16, b: u16, a: u16) -> Self {
         Rgba16 {
             r: Saturating(r),
@@ -189,6 +193,7 @@ pub struct Rgb32 {
     pub b: Saturating<u32>,
 }
 impl Rgb32 {
+    /// Creates an `Rgb32` pixel from the given 32-bit R, G, B channel values.
     pub fn new(r: u32, g: u32, b: u32) -> Self {
         Rgb32 {
             r: Saturating(r),
@@ -225,6 +230,7 @@ pub struct Rgba32 {
     pub a: Saturating<u32>,
 }
 impl Rgba32 {
+    /// Creates an `Rgba32` pixel from the given 32-bit R, G, B, A channel values.
     pub fn new(r: u32, g: u32, b: u32, a: u32) -> Self {
         Rgba32 {
             r: Saturating(r),
@@ -260,6 +266,7 @@ pub struct Rgb64 {
     pub b: Saturating<u64>,
 }
 impl Rgb64 {
+    /// Creates an `Rgb64` pixel from the given 64-bit R, G, B channel values.
     pub fn new(r: u64, g: u64, b: u64) -> Self {
         Rgb64 {
             r: Saturating(r),
@@ -296,6 +303,7 @@ pub struct Rgba64 {
     pub a: Saturating<u64>,
 }
 impl Rgba64 {
+    /// Creates an `Rgba64` pixel from the given 64-bit R, G, B, A channel values.
     pub fn new(r: u64, g: u64, b: u64, a: u64) -> Self {
         Rgba64 {
             r: Saturating(r),
@@ -327,6 +335,9 @@ pub struct Rgb<const BITS: usize> {
     pub b: Mono<BITS>,
 }
 impl<const BITS: usize> Rgb<BITS> {
+    /// Creates an `Rgb<BITS>` pixel, clamping each channel to the bit-depth maximum.
+    ///
+    /// Values above the `BITS`-depth maximum are silently clamped via [`Mono::new`].
     pub fn new(r: u16, g: u16, b: u16) -> Self {
         Rgb {
             r: Mono::new(r),
@@ -336,8 +347,11 @@ impl<const BITS: usize> Rgb<BITS> {
     }
 }
 
+/// 10-bit RGB pixel (3 × 10-bit channels). Channel values are clamped to 1023.
 pub type Rgb10 = Rgb<10>;
+/// 12-bit RGB pixel (3 × 12-bit channels). Channel values are clamped to 4095.
 pub type Rgb12 = Rgb<12>;
+/// 14-bit RGB pixel (3 × 14-bit channels). Channel values are clamped to 16383.
 pub type Rgb14 = Rgb<14>;
 
 /// The `Rgba` struct represents an RGBA pixel with 10-bit, 12-bit, or 14-bit depth per channel.
@@ -360,6 +374,9 @@ pub struct Rgba<const BITS: usize> {
     pub a: Mono<BITS>,
 }
 impl<const BITS: usize> Rgba<BITS> {
+    /// Creates an `Rgba<BITS>` pixel, clamping each channel to the bit-depth maximum.
+    ///
+    /// Values above the `BITS`-depth maximum are silently clamped via [`Mono::new`].
     pub fn new(r: u16, g: u16, b: u16, a: u16) -> Self {
         Rgba {
             r: Mono::new(r),
@@ -370,8 +387,11 @@ impl<const BITS: usize> Rgba<BITS> {
     }
 }
 
+/// 10-bit RGBA pixel (4 × 10-bit channels). Channel values are clamped to 1023.
 pub type Rgba10 = Rgba<10>;
+/// 12-bit RGBA pixel (4 × 12-bit channels). Channel values are clamped to 4095.
 pub type Rgba12 = Rgba<12>;
+/// 14-bit RGBA pixel (4 × 14-bit channels). Channel values are clamped to 16383.
 pub type Rgba14 = Rgba<14>;
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -397,6 +417,7 @@ pub struct RgbF32 {
     pub b: f32,
 }
 impl RgbF32 {
+    /// Creates an `RgbF32` pixel from the given 32-bit floating-point R, G, B channel values.
     pub fn new(r: f32, g: f32, b: f32) -> Self {
         RgbF32 { r, g, b }
     }
@@ -432,6 +453,7 @@ pub struct RgbaF32 {
     pub a: f32,
 }
 impl RgbaF32 {
+    /// Creates an `RgbaF32` pixel from the given 32-bit floating-point R, G, B, A channel values.
     pub fn new(r: f32, g: f32, b: f32, a: f32) -> Self {
         RgbaF32 { r, g, b, a }
     }
@@ -465,6 +487,7 @@ pub struct RgbF64 {
     pub b: f64,
 }
 impl RgbF64 {
+    /// Creates an `RgbF64` pixel from the given 64-bit floating-point R, G, B channel values.
     pub fn new(r: f64, g: f64, b: f64) -> Self {
         RgbF64 { r, g, b }
     }
@@ -500,6 +523,7 @@ pub struct RgbaF64 {
     pub a: f64,
 }
 impl RgbaF64 {
+    /// Creates an `RgbaF64` pixel from the given 64-bit floating-point R, G, B, A channel values.
     pub fn new(r: f64, g: f64, b: f64, a: f64) -> Self {
         RgbaF64 { r, g, b, a }
     }
@@ -543,6 +567,9 @@ pub struct Bgr8 {
     pub r: Saturating<u8>,
 }
 impl Bgr8 {
+    /// Creates a `Bgr8` pixel from the given 8-bit B, G, R channel values.
+    ///
+    /// Note: parameter order is B, G, R — matching the in-memory layout.
     pub fn new(b: u8, g: u8, r: u8) -> Self {
         Bgr8 {
             b: Saturating(b),
@@ -577,6 +604,7 @@ pub struct Bgr16 {
     pub r: Saturating<u16>,
 }
 impl Bgr16 {
+    /// Creates a `Bgr16` pixel from the given 16-bit B, G, R channel values (B first).
     pub fn new(b: u16, g: u16, r: u16) -> Self {
         Bgr16 {
             b: Saturating(b),
@@ -611,6 +639,7 @@ pub struct Bgr32 {
     pub r: Saturating<u32>,
 }
 impl Bgr32 {
+    /// Creates a `Bgr32` pixel from the given 32-bit B, G, R channel values (B first).
     pub fn new(b: u32, g: u32, r: u32) -> Self {
         Bgr32 {
             b: Saturating(b),
@@ -645,6 +674,7 @@ pub struct Bgr64 {
     pub r: Saturating<u64>,
 }
 impl Bgr64 {
+    /// Creates a `Bgr64` pixel from the given 64-bit B, G, R channel values (B first).
     pub fn new(b: u64, g: u64, r: u64) -> Self {
         Bgr64 {
             b: Saturating(b),
@@ -685,6 +715,7 @@ pub struct Bgra8 {
     pub a: Saturating<u8>,
 }
 impl Bgra8 {
+    /// Creates a `Bgra8` pixel from the given 8-bit B, G, R, A channel values (B first).
     pub fn new(b: u8, g: u8, r: u8, a: u8) -> Self {
         Bgra8 {
             b: Saturating(b),
@@ -722,6 +753,7 @@ pub struct Bgra16 {
     pub a: Saturating<u16>,
 }
 impl Bgra16 {
+    /// Creates a `Bgra16` pixel from the given 16-bit B, G, R, A channel values (B first).
     pub fn new(b: u16, g: u16, r: u16, a: u16) -> Self {
         Bgra16 {
             b: Saturating(b),
@@ -759,6 +791,7 @@ pub struct Bgra32 {
     pub a: Saturating<u32>,
 }
 impl Bgra32 {
+    /// Creates a `Bgra32` pixel from the given 32-bit B, G, R, A channel values (B first).
     pub fn new(b: u32, g: u32, r: u32, a: u32) -> Self {
         Bgra32 {
             b: Saturating(b),
@@ -796,6 +829,7 @@ pub struct Bgra64 {
     pub a: Saturating<u64>,
 }
 impl Bgra64 {
+    /// Creates a `Bgra64` pixel from the given 64-bit B, G, R, A channel values (B first).
     pub fn new(b: u64, g: u64, r: u64, a: u64) -> Self {
         Bgra64 {
             b: Saturating(b),
@@ -827,6 +861,7 @@ pub struct Bgr<const BITS: usize> {
     pub r: Mono<BITS>,
 }
 impl<const BITS: usize> Bgr<BITS> {
+    /// Creates a `Bgr<BITS>` pixel, clamping each channel to the bit-depth maximum (B first).
     pub fn new(b: u16, g: u16, r: u16) -> Self {
         Bgr {
             b: Mono::new(b),
@@ -835,8 +870,11 @@ impl<const BITS: usize> Bgr<BITS> {
         }
     }
 }
+/// 10-bit BGR pixel (3 × 10-bit channels, B first in memory). Channel values are clamped to 1023.
 pub type Bgr10 = Bgr<10>;
+/// 12-bit BGR pixel (3 × 12-bit channels, B first in memory). Channel values are clamped to 4095.
 pub type Bgr12 = Bgr<12>;
+/// 14-bit BGR pixel (3 × 14-bit channels, B first in memory). Channel values are clamped to 16383.
 pub type Bgr14 = Bgr<14>;
 
 /// The `Bgra` struct represents a BGRA pixel with 10-bit, 12-bit, or 14-bit depth per channel.
@@ -858,6 +896,7 @@ pub struct Bgra<const BITS: usize> {
     pub a: Mono<BITS>,
 }
 impl<const BITS: usize> Bgra<BITS> {
+    /// Creates a `Bgra<BITS>` pixel, clamping each channel to the bit-depth maximum (B first).
     pub fn new(b: u16, g: u16, r: u16, a: u16) -> Self {
         Bgra {
             b: Mono::new(b),
@@ -868,8 +907,11 @@ impl<const BITS: usize> Bgra<BITS> {
     }
 }
 
+/// 10-bit BGRA pixel (4 × 10-bit channels, B first in memory). Channel values are clamped to 1023.
 pub type Bgra10 = Bgra<10>;
+/// 12-bit BGRA pixel (4 × 12-bit channels, B first in memory). Channel values are clamped to 4095.
 pub type Bgra12 = Bgra<12>;
+/// 14-bit BGRA pixel (4 × 14-bit channels, B first in memory). Channel values are clamped to 16383.
 pub type Bgra14 = Bgra<14>;
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -895,6 +937,7 @@ pub struct BgrF32 {
     pub r: f32,
 }
 impl BgrF32 {
+    /// Creates a `BgrF32` pixel from the given 32-bit floating-point B, G, R channel values (B first).
     pub fn new(b: f32, g: f32, r: f32) -> Self {
         BgrF32 { b, g, r }
     }
@@ -930,6 +973,7 @@ pub struct BgraF32 {
     pub a: f32,
 }
 impl BgraF32 {
+    /// Creates a `BgraF32` pixel from the given 32-bit floating-point B, G, R, A channel values (B first).
     pub fn new(b: f32, g: f32, r: f32, a: f32) -> Self {
         BgraF32 { b, g, r, a }
     }
@@ -963,6 +1007,7 @@ pub struct BgrF64 {
     pub r: f64,
 }
 impl BgrF64 {
+    /// Creates a `BgrF64` pixel from the given 64-bit floating-point B, G, R channel values (B first).
     pub fn new(b: f64, g: f64, r: f64) -> Self {
         BgrF64 { b, g, r }
     }
@@ -998,6 +1043,7 @@ pub struct BgraF64 {
     pub a: f64,
 }
 impl BgraF64 {
+    /// Creates a `BgraF64` pixel from the given 64-bit floating-point B, G, R, A channel values (B first).
     pub fn new(b: f64, g: f64, r: f64, a: f64) -> Self {
         BgraF64 { b, g, r, a }
     }

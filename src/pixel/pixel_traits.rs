@@ -15,9 +15,15 @@ mod sealed {
     impl<T, const N: usize> SealedArray<T> for [T; N] {}
 }
 
+/// A fixed-size array abstraction used to represent homogeneous multi-channel pixel layouts.
+///
+/// This is a crate-internal sealed helper. The only external implementation is `[T; N]`.
 pub trait Array<T>: sealed::SealedArray<T> + AsRef<[T]> + AsMut<[T]> {
+    /// The number of elements in the array.
     const LEN: usize;
+    /// The same array type with element type `U` instead of `T`.
     type Map<U>: Array<U>;
+    /// Constructs the array by calling `f(i)` for each index `i` in `0..LEN`.
     fn from_fn<F: FnMut(usize) -> T>(f: F) -> Self;
 }
 
@@ -172,7 +178,7 @@ pub unsafe trait PlainPixel: PlainChannel {
         "SIZE must equal sum of CHANNELS"
     );
 
-    // Convert the pixel to a mutable byte slice (native endianness)
+    /// Returns a mutable view of the pixel as raw bytes in native byte order.
     fn as_mut_bytes(&mut self) -> &mut [u8] {
         unsafe { crate::internal::as_mut_bytes(std::slice::from_mut(self)) }
     }
@@ -258,7 +264,13 @@ pub unsafe trait PlainPixel: PlainChannel {
     }
 }
 
+/// A pixel type that has a well-defined all-zero value.
+///
+/// Implement this when your pixel type can be safely zero-initialized.
+/// All standard fovea pixel types implement `ZeroablePixel`, enabling
+/// [`Image::zero`](crate::image::Image::zero).
 pub trait ZeroablePixel: Sized + Copy {
+    /// Returns the zero value of this pixel type.
     fn zero() -> Self;
 }
 
@@ -789,6 +801,10 @@ pub trait LinearChannel<S = f32>: Sized + Copy {
 /// lossy (rounding, clamping) and the orphan rule prevents implementing
 /// `From<f32> for u8`.
 pub trait FromLinear<A> {
+    /// Converts a linear-space accumulator value back to this pixel type, applying rounding and clamping.
+    ///
+    /// Used in algorithm bounds instead of `From<A>` to avoid orphan-rule conflicts and to make the
+    /// intentionally lossy accumulator-to-storage conversion explicit at call sites.
     fn from_linear(acc: A) -> Self;
 }
 
@@ -858,16 +874,23 @@ pub fn blend<T: LinearPixel + LinearSpace>(a: &T, b: &T, alpha: f32) -> T::Accum
 /// - Data corruption in planar ↔ interleaved conversions
 /// - Undefined behavior in downstream code relying on channel semantics
 pub unsafe trait HomogeneousPixel: PlainPixel {
+    /// The scalar type of each channel, e.g. `u8` for `Rgb8` or `f32` for `RgbF32`.
     type Channel: PlainChannel + Copy;
 
     /// The channel array type, e.g. `[u8; 3]` for Rgb8.
     type Channels: Array<Self::Channel>;
 
+    /// Number of channels — 1 for monochrome, 3 for RGB/BGR, 4 for RGBA/BGRA.
     const CHANNEL_COUNT: usize = <Self::Channels as Array<Self::Channel>>::LEN;
 
+    /// Compile-time assertion: `size_of::<Self>() == size_of::<Channel>() * CHANNEL_COUNT`.
     const _SIZE_ASSERT: () =
         assert!(size_of::<Self>() == size_of::<Self::Channel>() * Self::CHANNEL_COUNT);
 
+    /// Returns the channel value at the given `index`.
+    ///
+    /// # Panics
+    /// Panics if `index >= CHANNEL_COUNT`.
     fn channel(&self, index: usize) -> Self::Channel {
         assert!(index < Self::CHANNEL_COUNT);
         let size = size_of::<Self::Channel>();
@@ -879,6 +902,10 @@ pub unsafe trait HomogeneousPixel: PlainPixel {
         .expect("internal error: channel size mismatch")
     }
 
+    /// Sets the channel at `index` to `value`.
+    ///
+    /// # Panics
+    /// Panics if `index >= CHANNEL_COUNT`.
     fn set_channel(&mut self, index: usize, value: Self::Channel) {
         assert!(index < Self::CHANNEL_COUNT);
         let size = size_of::<Self::Channel>();
@@ -887,6 +914,10 @@ pub unsafe trait HomogeneousPixel: PlainPixel {
             .copy_from_slice(<Self::Channel as PlainChannel>::as_bytes(&value));
     }
 
+    /// Constructs a pixel from a slice of channel values.
+    ///
+    /// # Panics
+    /// Panics if `channels.len() != CHANNEL_COUNT`.
     fn from_channels(channels: &[Self::Channel]) -> Self {
         assert_eq!(channels.len(), Self::CHANNEL_COUNT);
         let size = size_of::<Self::Channel>();
@@ -907,6 +938,7 @@ pub unsafe trait HomogeneousPixel: PlainPixel {
             .expect("internal error: constructed byte buf size mismatch")
     }
 
+    /// Returns all channel values as an array ordered by channel index.
     fn to_channels(&self) -> Self::Channels {
         Self::Channels::from_fn(|i| self.channel(i))
     }

@@ -7,13 +7,17 @@ use crate::{Size, internal};
 /// The `ImageView` trait is a non-mutable representation of a part of
 /// an image. This trait should be like a 2D slice for an image.
 pub trait ImageView {
+    /// The pixel type stored in this image view.
     type Pixel: Copy;
 
+    /// Returns the dimensions of the image as a [`Size`].
     fn size(&self) -> Size;
+    /// Returns the image width in pixels.
     #[inline(always)]
     fn width(&self) -> usize {
         self.size().width
     }
+    /// Returns the image height in pixels.
     #[inline(always)]
     fn height(&self) -> usize {
         self.size().height
@@ -32,6 +36,7 @@ pub trait ImageView {
     /// Panics if `(x, y)` is out of bounds (via slice indexing).
     fn pixel_at(&self, x: usize, y: usize) -> Self::Pixel;
 
+    /// Returns the pixel at `(x, y)`, or `None` if the coordinate is out of bounds.
     #[inline(always)]
     fn get(&self, x: usize, y: usize) -> Option<Self::Pixel> {
         if internal::in_bounds(&self.size(), x, y) {
@@ -52,6 +57,7 @@ pub trait ImageViewMut: ImageView {
     /// Panics if `(x, y)` is out of bounds (via slice indexing).
     fn pixel_at_mut(&mut self, x: usize, y: usize) -> &mut Self::Pixel;
 
+    /// Returns a mutable reference to the pixel at `(x, y)`, or `None` if out of bounds.
     #[inline(always)]
     fn get_mut(&mut self, x: usize, y: usize) -> Option<&mut Self::Pixel> {
         if internal::in_bounds(&self.size(), x, y) {

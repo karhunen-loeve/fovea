@@ -12,6 +12,7 @@ use crate::pixel::{FromLinear, LinearPixel, LinearSpace, ZeroablePixel, blend};
 /// or `I::Pixel: LinearPixel + LinearSpace` for bilinear) belong in the `impl`
 /// blocks, not in the trait definition itself.
 pub trait ResizeMethod<I: ImageView, O: ImageViewMut> {
+    /// Resizes `img` into `out`, which must already have the desired target dimensions.
     fn resize_into(&self, img: &I, out: &mut O);
 }
 
@@ -129,6 +130,25 @@ where
     method.resize_into(img, out)
 }
 
+/// Resizes `img` to `new_size`, allocating and returning a new output image.
+///
+/// Use [`NearestNeighbor`] for any pixel type when speed matters; use [`Bilinear`]
+/// for photos and camera frames — it requires `I::Pixel: LinearSpace` to prevent
+/// subtly incorrect results from gamma-encoded data.
+///
+/// To resize into an existing buffer, use [`resize_into`] instead.
+///
+/// # Example
+/// ```
+/// # use fovea::image::Image;
+/// # use fovea::pixel::Rgb8;
+/// # use fovea::Size;
+/// # use fovea::transform::{resize, NearestNeighbor};
+/// let src: Image<Rgb8> = Image::fill(640, 480, Rgb8::new(128, 64, 32));
+/// let dst = resize(&src, Size::new(320, 240), NearestNeighbor);
+/// assert_eq!(dst.width(), 320);
+/// assert_eq!(dst.height(), 240);
+/// ```
 #[must_use]
 pub fn resize<I, P, M>(img: &I, new_size: Size, method: M) -> Image<P>
 where

@@ -177,6 +177,7 @@ pub(crate) mod contiguous_sealed {
 /// assert_eq!(slice, &[0, 1, 2, 3, 4, 5]);
 /// ```
 pub trait ContiguousImage: RasterImage + contiguous_sealed::Sealed {
+    /// Returns the entire pixel buffer as a flat slice in row-major order.
     fn as_slice(&self) -> &[Self::Pixel];
 }
 
@@ -196,6 +197,7 @@ pub trait ContiguousImage: RasterImage + contiguous_sealed::Sealed {
 /// assert_eq!(img.pixel_at(1, 1), 42);
 /// ```
 pub trait ContiguousImageMut: ContiguousImage + RasterImageMut {
+    /// Returns the entire pixel buffer as a mutable flat slice in row-major order.
     fn as_mut_slice(&mut self) -> &mut [Self::Pixel];
 }
 
@@ -216,8 +218,11 @@ pub trait PlainImage: ContiguousImage
 where
     Self::Pixel: PlainPixel,
 {
+    /// Returns the pixel buffer as raw bytes in native byte order.
     fn as_bytes(&self) -> &[u8];
+    /// Returns the pixel buffer as bytes in little-endian order (zero-copy on LE platforms).
     fn as_bytes_le(&self) -> Cow<'_, [u8]>;
+    /// Returns the pixel buffer as bytes in big-endian order (zero-copy on BE platforms).
     fn as_bytes_be(&self) -> Cow<'_, [u8]>;
 }
 
@@ -230,6 +235,7 @@ pub trait PlainImageMut: PlainImage + ContiguousImageMut
 where
     Self::Pixel: PlainPixel,
 {
+    /// Returns the pixel buffer as a mutable byte slice in native byte order.
     fn as_mut_bytes(&mut self) -> &mut [u8];
 }
 
@@ -1139,6 +1145,17 @@ impl<T> Image<T> {
         })
     }
 
+    /// Builds an image by calling `f(x, y)` for every pixel position, in row-major order.
+    ///
+    /// Use `generate` when pixel values are computed rather than copied from existing storage.
+    /// For a constant fill use [`Image::fill`]; for a zero-initialized image use [`Image::zero`].
+    ///
+    /// # Example
+    /// ```
+    /// # use fovea::image::{Image, ImageView};
+    /// let img = Image::generate(4, 3, |x, y| (x + y * 4) as u8);
+    /// assert_eq!(img.pixel_at(1, 1), 5u8);
+    /// ```
     pub fn generate(width: usize, height: usize, f: impl Fn(usize, usize) -> T) -> Self {
         let size = Size::new(width, height);
         let mut data = Vec::with_capacity(size.area());
@@ -1155,6 +1172,9 @@ impl<T> Image<T> {
 }
 
 impl<T: ZeroablePixel> Image<T> {
+    /// Creates an image with all pixels set to their zero value.
+    ///
+    /// Use [`Image::fill`] when you need a non-zero initial value.
     pub fn zero(width: usize, height: usize) -> Self {
         let size = Size::new(width, height);
         let data = vec![T::zero(); size.area()];

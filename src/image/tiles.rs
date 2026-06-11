@@ -10,6 +10,7 @@ use crate::{Coordinate, Rectangle, Size, Stride};
 /// Implement to provide sub-view (region of interest)
 /// and tiling iterators
 pub trait SubView: ImageView {
+    /// The immutable sub-view type returned by [`roi`](SubView::roi) and the tile/window iterators.
     type Sub<'a>: ImageView<Pixel = Self::Pixel>
     where
         Self: 'a;
@@ -89,15 +90,19 @@ pub trait SubView: ImageView {
 /// Implement to provide mutable sub-view (region of interest)
 /// and tiling iterators
 pub trait SubViewMut: SubView + ImageViewMut {
+    /// The mutable sub-view type returned by [`roi_mut`](SubViewMut::roi_mut).
     type SubMut<'a>: ImageViewMut<Pixel = Self::Pixel>
     where
         Self: 'a;
 
-    // Returns a mutable sub-view as ImageViewMut
+    /// Returns a mutable sub-view for `rect`, or `None` if `rect` exceeds image bounds.
     fn roi_mut(&mut self, rect: Rectangle) -> Option<Self::SubMut<'_>>;
 }
 
-// Immutable Tile Iterator
+/// An iterator that yields non-overlapping sub-views (tiles) of a fixed size.
+///
+/// Produced by [`SubView::tiles`]. Partial tiles appear at the right and bottom
+/// edges when the image dimensions are not exact multiples of the tile size.
 #[derive(Clone, Debug)]
 pub struct TileIter<'a, T: SubView> {
     size: Size,
@@ -590,10 +595,13 @@ mod sealed {
 /// assert_eq!(img.get(4, 4), Some(255));
 /// ```
 pub trait IntoTilesMut<'a>: sealed::Sealed {
+    /// The pixel type of the tiles.
     type Pixel;
+    /// The mutable tile view type yielded by the iterator.
     type TileMut<'b>: ImageViewMut<Pixel = Self::Pixel>
     where
         Self: 'b;
+    /// The iterator type over mutable tiles.
     type TilesIterMut<'b>: Iterator<Item = Self::TileMut<'b>>
     where
         Self: 'b;

@@ -76,7 +76,10 @@ pub use rgb::{
     Rgba64, RgbaF32, RgbaF64,
 };
 
-pub use srgb::{Srgb8, Srgb16, SrgbMono8, SrgbMono16, SrgbMonoA8, SrgbMonoA16, Srgba8, Srgba16};
+pub use srgb::{
+    Srgb8, Srgb16, SrgbBgr8, SrgbBgr16, SrgbBgra8, SrgbBgra16, SrgbMono8, SrgbMono16, SrgbMonoA8,
+    SrgbMonoA16, Srgba8, Srgba16,
+};
 
 pub use indexed::Indexed8;
 

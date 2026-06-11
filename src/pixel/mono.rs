@@ -27,8 +27,11 @@ use super::{canonicalize_f32, canonicalize_f64};
 pub struct Mono<const BITS: usize> {
     d: Saturating<u16>,
 }
+/// 10-bit monochrome pixel. Values above 1023 are silently clamped to 1023.
 pub type Mono10 = Mono<10>;
+/// 12-bit monochrome pixel. Values above 4095 are silently clamped to 4095.
 pub type Mono12 = Mono<12>;
+/// 14-bit monochrome pixel. Values above 16383 are silently clamped to 16383.
 pub type Mono14 = Mono<14>;
 
 impl<const BITS: usize> Mono<BITS> {
@@ -46,12 +49,17 @@ impl<const BITS: usize> Mono<BITS> {
         (1 << BITS) - 1
     };
 
+    /// Creates a `Mono<BITS>` pixel, clamping `value` to the bit-depth maximum.
+    ///
+    /// For 10-bit the maximum is 1023; for 12-bit, 4095; for 14-bit, 16383.
+    /// Values exceeding the maximum are silently clamped — not wrapped or panicked.
     pub fn new(value: u16) -> Self {
         Mono {
             d: Saturating(value.min(Self::MAX)),
         }
     }
 
+    /// Returns the raw channel value as `u16`.
     pub fn value(&self) -> u16 {
         self.d.0
     }
@@ -237,6 +245,7 @@ impl<const BITS: usize> std::ops::DivAssign<&u16> for Mono<BITS> {
 #[linear(accumulator = MonoF32)]
 pub struct Mono8(Saturating<u8>);
 impl Mono8 {
+    /// Creates a `Mono8` pixel with the given 8-bit intensity.
     pub fn new(value: u8) -> Self {
         Mono8(Saturating(value))
     }
@@ -295,6 +304,7 @@ impl Mul<f32> for &Mono8 {
 #[linear(accumulator = MonoF32)]
 pub struct Mono16(Saturating<u16>);
 impl Mono16 {
+    /// Creates a `Mono16` pixel with the given 16-bit intensity.
     pub fn new(value: u16) -> Self {
         Mono16(Saturating(value))
     }
@@ -339,6 +349,7 @@ impl From<u16> for Mono16 {
 #[linear(accumulator = MonoF64)]
 pub struct Mono32(Saturating<u32>);
 impl Mono32 {
+    /// Creates a `Mono32` pixel with the given 32-bit intensity.
     pub fn new(value: u32) -> Self {
         Mono32(Saturating(value))
     }
@@ -423,6 +434,7 @@ impl LinearPixel<f64> for Mono32 {
 #[linear(accumulator = MonoF64)]
 pub struct Mono64(Saturating<u64>);
 impl Mono64 {
+    /// Creates a `Mono64` pixel with the given 64-bit intensity.
     pub fn new(value: u64) -> Self {
         Mono64(Saturating(value))
     }
@@ -500,6 +512,7 @@ impl LinearPixel<f64> for Mono64 {
 // zero initialisation.
 pub struct MonoF32(#[zero(default)] pub f32);
 impl MonoF32 {
+    /// Creates a `MonoF32` pixel with the given 32-bit floating-point intensity.
     #[inline]
     pub fn new(value: f32) -> Self {
         MonoF32(value)
@@ -576,6 +589,7 @@ impl Hash for MonoF32 {
 // Inner `f64` is a channel, not a pixel.
 pub struct MonoF64(#[zero(default)] pub f64);
 impl MonoF64 {
+    /// Creates a `MonoF64` pixel with the given 64-bit floating-point intensity.
     #[inline]
     pub fn new(value: f64) -> Self {
         MonoF64(value)
