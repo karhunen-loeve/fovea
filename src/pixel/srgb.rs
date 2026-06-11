@@ -60,6 +60,7 @@ pub struct Srgb8 {
 }
 
 impl Srgb8 {
+    /// Creates an `Srgb8` pixel from the given 8-bit sRGB-encoded R, G, B channel values.
     pub fn new(r: u8, g: u8, b: u8) -> Self {
         Srgb8 {
             r: Saturating(r),
@@ -110,6 +111,7 @@ pub struct Srgba8 {
 }
 
 impl Srgba8 {
+    /// Creates an `Srgba8` pixel. R, G, B are sRGB-encoded (gamma); A is linear.
     pub fn new(r: u8, g: u8, b: u8, a: u8) -> Self {
         Srgba8 {
             r: Saturating(r),
@@ -179,6 +181,7 @@ impl Srgba8 {
 pub struct SrgbMono8(pub Saturating<u8>);
 
 impl SrgbMono8 {
+    /// Creates an `SrgbMono8` pixel with the given sRGB-encoded 8-bit value.
     pub fn new(value: u8) -> Self {
         SrgbMono8(Saturating(value))
     }
@@ -221,6 +224,7 @@ pub struct SrgbMonoA8 {
 }
 
 impl SrgbMonoA8 {
+    /// Creates an `SrgbMonoA8` pixel. `v` is sRGB-encoded (gamma); `a` is linear alpha.
     pub fn new(v: u8, a: u8) -> Self {
         SrgbMonoA8 {
             v: Saturating(v),
@@ -283,6 +287,7 @@ pub struct Srgb16 {
 }
 
 impl Srgb16 {
+    /// Creates an `Srgb16` pixel from the given 16-bit sRGB-encoded R, G, B channel values.
     pub fn new(r: u16, g: u16, b: u16) -> Self {
         Srgb16 {
             r: Saturating(r),
@@ -333,6 +338,7 @@ pub struct Srgba16 {
 }
 
 impl Srgba16 {
+    /// Creates an `Srgba16` pixel. R, G, B are 16-bit sRGB-encoded (gamma); A is linear.
     pub fn new(r: u16, g: u16, b: u16, a: u16) -> Self {
         Srgba16 {
             r: Saturating(r),
@@ -382,6 +388,7 @@ impl Srgba16 {
 pub struct SrgbMono16(pub Saturating<u16>);
 
 impl SrgbMono16 {
+    /// Creates an `SrgbMono16` pixel with the given sRGB-encoded 16-bit value.
     pub fn new(value: u16) -> Self {
         SrgbMono16(Saturating(value))
     }
@@ -424,9 +431,241 @@ pub struct SrgbMonoA16 {
 }
 
 impl SrgbMonoA16 {
+    /// Creates an `SrgbMonoA16` pixel. `v` is 16-bit sRGB-encoded (gamma); `a` is linear alpha.
     pub fn new(v: u16, a: u16) -> Self {
         SrgbMonoA16 {
             v: Saturating(v),
+            a: Saturating(a),
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// sRGB gamma-encoded BGR-order pixel types (OpenCV interop)
+//
+// Same memory layout as Bgr8 / Bgra8 / Bgr16 / Bgra16 (blue first) but
+// representing sRGB-encoded values.  This is the exact combination produced by
+// OpenCV's `cv::imread`: gamma-encoded sRGB samples stored in B, G, R channel
+// order.  Neither `Bgr8` (linear, wrong color space) nor `Srgb8` (gamma but RGB
+// order) models it, so wrapping an OpenCV buffer as either lies about the data.
+//
+// Like the other sRGB types, these intentionally do NOT implement `LinearPixel`
+// or `LinearSpace`: the compiler rejects passing them to interpolation
+// algorithms.  Reorder to the RGB-order sRGB family with the `ColorSwap`
+// strategy, or decode straight to linear-light BGR float with `SrgbGamma`.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// sRGB-encoded BGR pixel with 8-bit depth per channel.
+///
+/// This type has the same memory layout as [`Bgr8`](crate::pixel::Bgr8) (three `Saturating<u8>`
+/// in B, G, R order) but represents **gamma-encoded** sRGB values.  It models
+/// the default output of OpenCV's `cv::imread` (`CV_8UC3`): sRGB-gamma samples
+/// in BGR channel order.
+///
+/// It does **not** implement [`LinearPixel`](crate::pixel::LinearPixel) or [`LinearSpace`](crate::pixel::LinearSpace), so the
+/// compiler will reject attempts to use it with interpolation algorithms like
+/// bilinear resize.  Bridge to the rest of the pipeline with the `ColorSwap`
+/// strategy (reorder to [`Srgb8`](crate::pixel::Srgb8), keeping the gamma intact) or decode
+/// straight to linear-light BGR with `SrgbGamma`:
+///
+/// ```
+/// # use fovea::pixel::{SrgbBgr8, Srgb8, BgrF32, RgbF32};
+/// # use fovea::transform::{ConvertPixel, ConvertPixelExt, ColorSwap, SrgbGamma};
+/// let bgr = SrgbBgr8::new(200, 64, 128); // B, G, R (as stored by OpenCV)
+///
+/// // Decode in place to linear-light BGR float:
+/// let linear: BgrF32 = SrgbGamma.convert(&bgr);
+///
+/// // Or reorder to RGB-order sRGB, then decode to linear RGB (OpenCV → linear):
+/// let rgb: RgbF32 = ColorSwap.then::<Srgb8, _>(SrgbGamma).convert(&bgr);
+/// ```
+#[repr(C)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    PlainPixel,
+    HomogeneousPixel,
+    ZeroablePixel,
+    WhiteChannel,
+)]
+pub struct SrgbBgr8 {
+    /// Blue channel (sRGB-encoded).
+    pub b: Saturating<u8>,
+    /// Green channel (sRGB-encoded).
+    pub g: Saturating<u8>,
+    /// Red channel (sRGB-encoded).
+    pub r: Saturating<u8>,
+}
+
+impl SrgbBgr8 {
+    /// Creates an `SrgbBgr8` pixel from the given 8-bit sRGB-encoded B, G, R channel values.
+    ///
+    /// Note: parameter order is B, G, R — matching the in-memory layout (and OpenCV).
+    pub fn new(b: u8, g: u8, r: u8) -> Self {
+        SrgbBgr8 {
+            b: Saturating(b),
+            g: Saturating(g),
+            r: Saturating(r),
+        }
+    }
+}
+
+/// sRGB-encoded BGRA pixel with 8-bit depth per channel.
+///
+/// This type has the same memory layout as [`Bgra8`](crate::pixel::Bgra8) (four `Saturating<u8>`
+/// in B, G, R, A order) but the B, G, R channels represent **gamma-encoded**
+/// sRGB values.  The alpha channel is always linear, as required by the sRGB
+/// specification.  It models OpenCV's `CV_8UC4` (sRGB-gamma BGRA) buffers.
+///
+/// It does **not** implement [`LinearPixel`](crate::pixel::LinearPixel) or [`LinearSpace`](crate::pixel::LinearSpace).  Reorder to
+/// [`Srgba8`](crate::pixel::Srgba8) with `ColorSwap` or decode to linear-light [`BgraF32`](crate::pixel::BgraF32) with
+/// the `SrgbGamma` conversion strategy:
+///
+/// ```
+/// # use fovea::pixel::{SrgbBgra8, BgraF32};
+/// # use fovea::transform::{ConvertPixel, SrgbGamma};
+/// let bgra = SrgbBgra8::new(200, 64, 128, 255); // B, G, R, A
+/// let linear: BgraF32 = SrgbGamma.convert(&bgra);
+/// ```
+#[repr(C)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    PlainPixel,
+    HomogeneousPixel,
+    ZeroablePixel,
+    WhiteChannel,
+)]
+pub struct SrgbBgra8 {
+    /// Blue channel (sRGB-encoded).
+    pub b: Saturating<u8>,
+    /// Green channel (sRGB-encoded).
+    pub g: Saturating<u8>,
+    /// Red channel (sRGB-encoded).
+    pub r: Saturating<u8>,
+    /// Alpha channel (linear).
+    pub a: Saturating<u8>,
+}
+
+impl SrgbBgra8 {
+    /// Creates an `SrgbBgra8` pixel. B, G, R are sRGB-encoded (gamma); A is linear.
+    ///
+    /// Note: parameter order is B, G, R, A — matching the in-memory layout (and OpenCV).
+    pub fn new(b: u8, g: u8, r: u8, a: u8) -> Self {
+        SrgbBgra8 {
+            b: Saturating(b),
+            g: Saturating(g),
+            r: Saturating(r),
+            a: Saturating(a),
+        }
+    }
+}
+
+/// sRGB-encoded BGR pixel with 16-bit depth per channel.
+///
+/// This type has the same memory layout as [`Bgr16`](crate::pixel::Bgr16) (three `Saturating<u16>`
+/// in B, G, R order) but represents **gamma-encoded** sRGB values.  It models a
+/// 16-bit OpenCV `CV_16UC3` buffer holding sRGB-gamma samples in BGR order.
+///
+/// It does **not** implement [`LinearPixel`](crate::pixel::LinearPixel) or [`LinearSpace`](crate::pixel::LinearSpace).  Reorder to
+/// [`Srgb16`](crate::pixel::Srgb16) with `ColorSwap` or decode to linear-light [`BgrF32`](crate::pixel::BgrF32) with the
+/// `SrgbGamma` conversion strategy:
+///
+/// ```
+/// # use fovea::pixel::{SrgbBgr16, BgrF32};
+/// # use fovea::transform::{ConvertPixel, SrgbGamma};
+/// let bgr = SrgbBgr16::new(50000, 16384, 32768); // B, G, R
+/// let linear: BgrF32 = SrgbGamma.convert(&bgr);
+/// ```
+#[repr(C)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    PlainPixel,
+    HomogeneousPixel,
+    ZeroablePixel,
+    WhiteChannel,
+)]
+pub struct SrgbBgr16 {
+    /// Blue channel (sRGB-encoded).
+    pub b: Saturating<u16>,
+    /// Green channel (sRGB-encoded).
+    pub g: Saturating<u16>,
+    /// Red channel (sRGB-encoded).
+    pub r: Saturating<u16>,
+}
+
+impl SrgbBgr16 {
+    /// Creates an `SrgbBgr16` pixel from the given 16-bit sRGB-encoded B, G, R channel values (B first).
+    pub fn new(b: u16, g: u16, r: u16) -> Self {
+        SrgbBgr16 {
+            b: Saturating(b),
+            g: Saturating(g),
+            r: Saturating(r),
+        }
+    }
+}
+
+/// sRGB-encoded BGRA pixel with 16-bit depth per channel.
+///
+/// This type has the same memory layout as [`Bgra16`](crate::pixel::Bgra16) (four `Saturating<u16>`
+/// in B, G, R, A order) but the B, G, R channels represent **gamma-encoded**
+/// sRGB values.  The alpha channel is always linear, as required by the sRGB
+/// specification.  It models a 16-bit OpenCV `CV_16UC4` sRGB-gamma BGRA buffer.
+///
+/// It does **not** implement [`LinearPixel`](crate::pixel::LinearPixel) or [`LinearSpace`](crate::pixel::LinearSpace).  Reorder to
+/// [`Srgba16`](crate::pixel::Srgba16) with `ColorSwap` or decode to linear-light [`BgraF32`](crate::pixel::BgraF32) with
+/// the `SrgbGamma` conversion strategy:
+///
+/// ```
+/// # use fovea::pixel::{SrgbBgra16, BgraF32};
+/// # use fovea::transform::{ConvertPixel, SrgbGamma};
+/// let bgra = SrgbBgra16::new(50000, 16384, 32768, 65535); // B, G, R, A
+/// let linear: BgraF32 = SrgbGamma.convert(&bgra);
+/// ```
+#[repr(C)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    PlainPixel,
+    HomogeneousPixel,
+    ZeroablePixel,
+    WhiteChannel,
+)]
+pub struct SrgbBgra16 {
+    /// Blue channel (sRGB-encoded).
+    pub b: Saturating<u16>,
+    /// Green channel (sRGB-encoded).
+    pub g: Saturating<u16>,
+    /// Red channel (sRGB-encoded).
+    pub r: Saturating<u16>,
+    /// Alpha channel (linear).
+    pub a: Saturating<u16>,
+}
+
+impl SrgbBgra16 {
+    /// Creates an `SrgbBgra16` pixel. B, G, R are 16-bit sRGB-encoded (gamma); A is linear.
+    pub fn new(b: u16, g: u16, r: u16, a: u16) -> Self {
+        SrgbBgra16 {
+            b: Saturating(b),
+            g: Saturating(g),
+            r: Saturating(r),
             a: Saturating(a),
         }
     }
@@ -442,5 +681,6 @@ impl SrgbMonoA16 {
 // reject *interpolation* by withholding `LinearSpace`; origin-invariance and
 // linear-space membership are independent axes — Philosophy §2.)
 impl_origin_invariant_pixel!(
-    Srgb8, Srgba8, SrgbMono8, SrgbMonoA8, Srgb16, Srgba16, SrgbMono16, SrgbMonoA16,
+    Srgb8, Srgba8, SrgbMono8, SrgbMonoA8, Srgb16, Srgba16, SrgbMono16, SrgbMonoA16, SrgbBgr8,
+    SrgbBgra8, SrgbBgr16, SrgbBgra16,
 );

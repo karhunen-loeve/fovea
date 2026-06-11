@@ -41,6 +41,7 @@ pub struct MonoA8 {
     pub a: Saturating<u8>,
 }
 impl MonoA8 {
+    /// Creates a `MonoA8` pixel with the given 8-bit luminance `v` and alpha `a`.
     pub fn new(v: u8, a: u8) -> Self {
         MonoA8 {
             v: Saturating(v),
@@ -72,6 +73,7 @@ pub struct MonoA16 {
     pub a: Saturating<u16>,
 }
 impl MonoA16 {
+    /// Creates a `MonoA16` pixel with the given 16-bit luminance `v` and alpha `a`.
     pub fn new(v: u16, a: u16) -> Self {
         MonoA16 {
             v: Saturating(v),
@@ -103,6 +105,7 @@ pub struct MonoA32 {
     pub a: Saturating<u32>,
 }
 impl MonoA32 {
+    /// Creates a `MonoA32` pixel with the given 32-bit luminance `v` and alpha `a`.
     pub fn new(v: u32, a: u32) -> Self {
         MonoA32 {
             v: Saturating(v),
@@ -134,6 +137,7 @@ pub struct MonoA64 {
     pub a: Saturating<u64>,
 }
 impl MonoA64 {
+    /// Creates a `MonoA64` pixel with the given 64-bit luminance `v` and alpha `a`.
     pub fn new(v: u64, a: u64) -> Self {
         MonoA64 {
             v: Saturating(v),
@@ -158,6 +162,7 @@ pub struct MonoAF32 {
     pub a: f32,
 }
 impl MonoAF32 {
+    /// Creates a `MonoAF32` pixel with the given 32-bit floating-point luminance `v` and alpha `a`.
     pub fn new(v: f32, a: f32) -> Self {
         MonoAF32 { v, a }
     }
@@ -186,6 +191,7 @@ pub struct MonoAF64 {
     pub a: f64,
 }
 impl MonoAF64 {
+    /// Creates a `MonoAF64` pixel with the given 64-bit floating-point luminance `v` and alpha `a`.
     pub fn new(v: f64, a: f64) -> Self {
         MonoAF64 { v, a }
     }
