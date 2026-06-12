@@ -101,7 +101,8 @@ assert_eq!(img.pixel_at(1, 1), Mono8::new(255));
 
 ## Where next?
 
-- Pixel choice: `guide::pixel_types`
-- Camera SDK buffers: `guide::camera_buffers`
-- Large-image processing: `guide::large_images`
-- Common questions: `guide::faq`
+- Pixel choice: [`pixel_types`]
+- Conversion strategies: [`pixel_conversions`]
+- Camera SDK buffers: [`camera_buffers`]
+- Large-image processing: [`large_images`]
+- Common questions: [`faq`]

@@ -144,7 +144,7 @@ assert_eq!(roi.pixel_at(0, 0), img.pixel_at(1, 1));
 
 fovea gives you safe pieces; your application chooses the execution policy. For per-pixel work, use contiguous slices or rows. For region-local work, split into tiles. For in-place tile mutation, use `into_tiles_mut`, which yields disjoint mutable tiles.
 
-See `guide::large_images` for the decision table and Rayon-shaped examples.
+See [`large_images`] for the decision table and Rayon-shaped examples.
 
 ## How do I define a custom pixel type?
 

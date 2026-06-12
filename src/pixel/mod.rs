@@ -17,6 +17,9 @@
 //!
 //! Do not use this module to choose storage access. For ownership, borrowing,
 //! rows, slices, ROIs, and tiles, use [`crate::image`].
+//!
+//! For conversion strategies and common paths between pixel types,
+//! see [`crate::guide::pixel_conversions`].
 
 mod indexed;
 mod label;

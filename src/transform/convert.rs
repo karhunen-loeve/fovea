@@ -59,14 +59,30 @@ pub trait ConvertPixel<Src, Dst> {
 /// range of the destination type.  This preserves *intensity*: maximum
 /// brightness in the source stays maximum brightness in the destination.
 ///
-/// For floating-point ↔ integer conversions the floating-point range is
-/// assumed to be `[0.0, 1.0]`.
+/// For integer types the range is exactly defined by the bit width (e.g.
+/// `[0, 255]` for `u8`, `[0, 65535]` for `u16`).  For floating-point pixel
+/// types (`MonoF32`, `RgbF32`, etc.) the range is **assumed to be
+/// `[0.0, 1.0]`** — values outside that range are clamped.
+///
+/// # Caveat: float pixel types
+///
+/// `MonoF32` (and other float pixel types) have no defined maximum value —
+/// they can represent HDR data above `1.0` or negative values.  The
+/// `[0.0, 1.0]` range used by `FullRange` is therefore an implicit
+/// convention, not a type-level contract.  This makes `FullRange` a
+/// potentially surprising choice for float → integer conversions: a
+/// `MonoF32` value of `2.0` silently clamps to `Mono8(255)` just like
+/// `1.0` does.
+///
+/// If your `MonoF32` data may be outside `[0.0, 1.0]`, use
+/// [`PixelMap`] with an explicit normalization factor instead.
 ///
 /// # Examples
 /// - `Mono8(255)` → `Mono16(65535)` — white stays white
 /// - `Mono16(32768)` → `Mono8(128)` — mid-gray stays mid-gray
 /// - `Mono8(0)` → `Mono16(0)` — black stays black
-/// - `Mono8(255)` → `f32(1.0)` — max maps to 1.0
+/// - `MonoF32(1.0)` → `Mono8(255)` — `1.0` maps to max
+/// - `MonoF32(1.5)` → `Mono8(255)` — clamped (outside `[0.0, 1.0]`)
 ///
 /// ```
 /// # use fovea::pixel::{Mono8, Mono16};
