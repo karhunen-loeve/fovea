@@ -681,6 +681,16 @@ impl SrgbBgra16 {
 // reject *interpolation* by withholding `LinearSpace`; origin-invariance and
 // linear-space membership are independent axes — Philosophy §2.)
 impl_origin_invariant_pixel!(
-    Srgb8, Srgba8, SrgbMono8, SrgbMonoA8, Srgb16, Srgba16, SrgbMono16, SrgbMonoA16, SrgbBgr8,
-    SrgbBgra8, SrgbBgr16, SrgbBgra16,
+    Srgb8,
+    Srgba8,
+    SrgbMono8,
+    SrgbMonoA8,
+    Srgb16,
+    Srgba16,
+    SrgbMono16,
+    SrgbMonoA16,
+    SrgbBgr8,
+    SrgbBgra8,
+    SrgbBgr16,
+    SrgbBgra16,
 );

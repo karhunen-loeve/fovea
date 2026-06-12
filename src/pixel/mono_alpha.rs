@@ -9,8 +9,8 @@ use std::{
     num::Saturating,
 };
 
-use crate::pixel::impl_origin_invariant_pixel;
 use super::{canonicalize_f32, canonicalize_f64};
+use crate::pixel::impl_origin_invariant_pixel;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // MonoA (Grayscale-with-Alpha) pixel types

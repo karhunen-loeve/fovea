@@ -180,12 +180,12 @@ where
 ///
 /// # Example
 /// ```
-/// # use fovea::image::Image;
+/// # use fovea::image::{Image, ImageView};
 /// # use fovea::pixel::Rgb8;
 /// # use fovea::Size;
 /// # use fovea::transform::{resize, NearestNeighbor};
 /// let src: Image<Rgb8> = Image::fill(640, 480, Rgb8::new(128, 64, 32));
-/// let dst = resize(&src, Size::new(320, 240), NearestNeighbor);
+/// let dst: Image<Rgb8> = resize(&src, Size::new(320, 240), NearestNeighbor);
 /// assert_eq!(dst.width(), 320);
 /// assert_eq!(dst.height(), 240);
 /// ```

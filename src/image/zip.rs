@@ -565,7 +565,8 @@ mod tests {
     #[test]
     fn test_zip_pixels_with_sliding_windows() {
         let img = Image::generate(5, 5, |x, y| Mono8::new((x + y * 5) as u8));
-        let template: ImageArray<Mono8, 3, 3> = ImageArray::generate(|x, y| Mono8::new((x + y) as u8));
+        let template: ImageArray<Mono8, 3, 3> =
+            ImageArray::generate(|x, y| Mono8::new((x + y) as u8));
 
         // Compute SAD (sum of absolute differences) for each window position
         let sads: Vec<u32> = img

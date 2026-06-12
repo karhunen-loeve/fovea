@@ -1617,7 +1617,8 @@ mod tests {
 
     #[test]
     fn test_roi() {
-        let img: ImageArray<Mono8, 4, 4> = ImageArray::generate(|x, y| Mono8::new((x + y * 4) as u8 + 1));
+        let img: ImageArray<Mono8, 4, 4> =
+            ImageArray::generate(|x, y| Mono8::new((x + y * 4) as u8 + 1));
         let roi = img.roi(Rectangle::new((1, 1), (2, 2))).unwrap();
         assert_eq!(roi.size(), Size::new(2, 2));
         assert_eq!(roi.get(0, 0), Some(Mono8::new(6)));
@@ -1639,7 +1640,8 @@ mod tests {
 
     #[test]
     fn test_tiles_iter() {
-        let img: ImageArray<Mono8, 4, 4> = ImageArray::generate(|x, y| Mono8::new((x + y * 4) as u8 + 1));
+        let img: ImageArray<Mono8, 4, 4> =
+            ImageArray::generate(|x, y| Mono8::new((x + y * 4) as u8 + 1));
         let img = &img;
         let mut iter = img.tiles(Size::new(2, 2));
 
@@ -1676,7 +1678,8 @@ mod tests {
 
     #[test]
     fn test_roi_out_of_bounds() {
-        let img: ImageArray<Mono8, 4, 4> = ImageArray::generate(|x, y| Mono8::new((x + y * 4) as u8 + 1));
+        let img: ImageArray<Mono8, 4, 4> =
+            ImageArray::generate(|x, y| Mono8::new((x + y * 4) as u8 + 1));
         // ROI extends beyond image bounds
         let roi = img.roi(Rectangle::new((3, 3), (2, 2)));
         assert!(roi.is_none());
@@ -1704,7 +1707,8 @@ mod tests {
 
     #[test]
     fn test_roi_get_out_of_bounds() {
-        let img: ImageArray<Mono8, 4, 4> = ImageArray::generate(|x, y| Mono8::new((x + y * 4) as u8 + 1));
+        let img: ImageArray<Mono8, 4, 4> =
+            ImageArray::generate(|x, y| Mono8::new((x + y * 4) as u8 + 1));
         let roi = img.roi(Rectangle::new((1, 1), (2, 2))).unwrap();
         assert_eq!(roi.get(2, 0), None);
         assert_eq!(roi.get(0, 2), None);
@@ -1917,7 +1921,8 @@ mod tests {
 
     #[test]
     fn test_roi_width_height() {
-        let img: ImageArray<Mono8, 4, 4> = ImageArray::generate(|x, y| Mono8::new((x + y * 4) as u8 + 1));
+        let img: ImageArray<Mono8, 4, 4> =
+            ImageArray::generate(|x, y| Mono8::new((x + y * 4) as u8 + 1));
         let roi = img.roi(Rectangle::new((1, 1), (2, 2))).unwrap();
         assert_eq!(roi.width(), 2);
         assert_eq!(roi.height(), 2);
@@ -1933,7 +1938,8 @@ mod tests {
 
     #[test]
     fn test_roi_pixel_at() {
-        let img: ImageArray<Mono8, 4, 4> = ImageArray::generate(|x, y| Mono8::new((x + y * 4) as u8 + 1));
+        let img: ImageArray<Mono8, 4, 4> =
+            ImageArray::generate(|x, y| Mono8::new((x + y * 4) as u8 + 1));
         let roi = img.roi(Rectangle::new((1, 1), (2, 2))).unwrap();
         assert_eq!(roi.pixel_at(0, 0), Mono8::new(6));
         assert_eq!(roi.pixel_at(1, 1), Mono8::new(11));
@@ -2113,7 +2119,8 @@ mod tests {
 
     #[test]
     fn test_image_array_roi_at_edges() {
-        let img: ImageArray<Mono8, 4, 4> = ImageArray::generate(|x, y| Mono8::new((x + y * 4) as u8 + 1));
+        let img: ImageArray<Mono8, 4, 4> =
+            ImageArray::generate(|x, y| Mono8::new((x + y * 4) as u8 + 1));
 
         // ROI at top-left corner
         let roi = img.roi(Rectangle::new((0, 0), (2, 2))).unwrap();
@@ -2207,7 +2214,8 @@ mod tests {
 
     #[test]
     fn test_image_array_roi_mut_valid() {
-        let mut img: ImageArray<Mono8, 4, 4> = ImageArray::generate(|x, y| Mono8::new((x + y * 4) as u8));
+        let mut img: ImageArray<Mono8, 4, 4> =
+            ImageArray::generate(|x, y| Mono8::new((x + y * 4) as u8));
         {
             let mut roi = img.roi_mut(Rectangle::new((1, 1), (2, 2))).unwrap();
             assert_eq!(roi.width(), 2);
@@ -2223,7 +2231,8 @@ mod tests {
 
     #[test]
     fn test_image_array_roi_mut_out_of_bounds() {
-        let mut img: ImageArray<Mono8, 4, 4> = ImageArray::generate(|x, y| Mono8::new((x + y * 4) as u8));
+        let mut img: ImageArray<Mono8, 4, 4> =
+            ImageArray::generate(|x, y| Mono8::new((x + y * 4) as u8));
         let roi = img.roi_mut(Rectangle::new((3, 3), (2, 2)));
         assert!(roi.is_none());
     }
@@ -2307,7 +2316,8 @@ mod tests {
         fn assert_send<T: Send>() {}
         fn assert_sync<T: Sync>() {}
         // Verify ImageArray's roi_mut also produces Send+Sync ROIs
-        let mut img: ImageArray<Mono8, 4, 4> = ImageArray::generate(|x, y| Mono8::new((x + y * 4) as u8));
+        let mut img: ImageArray<Mono8, 4, 4> =
+            ImageArray::generate(|x, y| Mono8::new((x + y * 4) as u8));
         let roi = img.roi_mut(Rectangle::new((0, 0), (2, 2))).unwrap();
         assert_eq!(roi.get(0, 0), Some(Mono8::new(0)));
         assert_send::<ImageRefMut<'_, Mono8>>();
@@ -2611,7 +2621,8 @@ mod tests {
     #[test]
     fn test_image_ref_width_height_pixel_at() {
         // Exercises ImageRef via ImageArray ROI
-        let img: ImageArray<Mono8, 5, 5> = ImageArray::generate(|x, y| Mono8::new((x + y * 5) as u8));
+        let img: ImageArray<Mono8, 5, 5> =
+            ImageArray::generate(|x, y| Mono8::new((x + y * 5) as u8));
         let roi = img.roi(Rectangle::new((1, 1), (3, 2))).unwrap();
         assert_eq!(roi.width(), 3);
         assert_eq!(roi.height(), 2);
@@ -2621,7 +2632,8 @@ mod tests {
 
     #[test]
     fn test_image_ref_get_out_of_bounds_imagearray() {
-        let img: ImageArray<Mono8, 4, 4> = ImageArray::generate(|x, y| Mono8::new((x + y * 4) as u8));
+        let img: ImageArray<Mono8, 4, 4> =
+            ImageArray::generate(|x, y| Mono8::new((x + y * 4) as u8));
         let roi = img.roi(Rectangle::new((0, 0), (2, 2))).unwrap();
         assert_eq!(roi.get(0, 0), Some(Mono8::new(0)));
         assert_eq!(roi.get(1, 1), Some(Mono8::new(5)));
@@ -3241,9 +3253,18 @@ mod tests {
         let roi1 = img.roi(Rectangle::new((1, 1), (6, 6))).unwrap();
         let roi2 = roi1.roi(Rectangle::new((1, 1), (3, 3))).unwrap();
         // roi2 sees absolute pixels starting at (2,2)
-        assert_eq!(roi2.row(0), &[Mono8::new(18), Mono8::new(19), Mono8::new(20)]);
-        assert_eq!(roi2.row(1), &[Mono8::new(26), Mono8::new(27), Mono8::new(28)]);
-        assert_eq!(roi2.row(2), &[Mono8::new(34), Mono8::new(35), Mono8::new(36)]);
+        assert_eq!(
+            roi2.row(0),
+            &[Mono8::new(18), Mono8::new(19), Mono8::new(20)]
+        );
+        assert_eq!(
+            roi2.row(1),
+            &[Mono8::new(26), Mono8::new(27), Mono8::new(28)]
+        );
+        assert_eq!(
+            roi2.row(2),
+            &[Mono8::new(34), Mono8::new(35), Mono8::new(36)]
+        );
     }
 
     // ── ImageRefMut ────────────────────────────────────────────────
@@ -3682,7 +3703,9 @@ mod origin_invariant_gate_tests {
     fn mono8_gated_apis_round_trip() {
         let img = Image::generate(4, 4, |x, y| Mono8::new((x + y * 4) as u8));
         assert_eq!(
-            img.roi(Rectangle::new((1, 1), (2, 2))).unwrap().pixel_at(0, 0),
+            img.roi(Rectangle::new((1, 1), (2, 2)))
+                .unwrap()
+                .pixel_at(0, 0),
             Mono8::new(5),
         );
         assert_eq!(img.tiles(Size::new(2, 2)).count(), 4);

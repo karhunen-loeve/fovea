@@ -45,8 +45,7 @@ pub mod image;
 pub mod border {
     #[doc(inline)]
     pub use crate::image::border::{
-        BorderPolicy, Clamp, Constant, FullFrameBorder, Mirror, Skip, Wrap,
-        compute_interior_region,
+        BorderPolicy, Clamp, Constant, FullFrameBorder, Mirror, Skip, Wrap, compute_interior_region,
     };
 }
 
