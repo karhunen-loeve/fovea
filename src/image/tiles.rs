@@ -876,7 +876,8 @@ mod tests {
 
     #[test]
     fn test_sliding_window_imagearray() {
-        let img: ImageArray<Mono8, 6, 6> = ImageArray::generate(|x, y| Mono8::new((x + y * 6) as u8));
+        let img: ImageArray<Mono8, 6, 6> =
+            ImageArray::generate(|x, y| Mono8::new((x + y * 6) as u8));
         let windows: Vec<_> = img.sliding_windows(Size::new(3, 3)).collect();
         assert_eq!(windows.len(), 16);
         assert_eq!(windows[0].get(0, 0), Some(Mono8::new(0)));
@@ -991,7 +992,8 @@ mod tests {
 
     #[test]
     fn test_tiles_iter_with_imagearray() {
-        let img: ImageArray<Mono8, 8, 8> = ImageArray::generate(|x, y| Mono8::new((x + y * 8) as u8));
+        let img: ImageArray<Mono8, 8, 8> =
+            ImageArray::generate(|x, y| Mono8::new((x + y * 8) as u8));
         let tiles: Vec<_> = img.tiles(Size::new(4, 4)).collect();
         // 8x8 image with 4x4 tiles = 4 tiles
         assert_eq!(tiles.len(), 4);
@@ -1000,7 +1002,8 @@ mod tests {
 
     #[test]
     fn test_tiles_iter_imagearray_partial() {
-        let img: ImageArray<Mono8, 7, 7> = ImageArray::generate(|x, y| Mono8::new((x + y * 7) as u8));
+        let img: ImageArray<Mono8, 7, 7> =
+            ImageArray::generate(|x, y| Mono8::new((x + y * 7) as u8));
         let tiles: Vec<_> = img.tiles(Size::new(3, 3)).collect();
         // 7x7 image with 3x3 tiles: positions 0,3,6 in both dimensions = 9 tiles
         assert_eq!(tiles.len(), 9);
@@ -1491,7 +1494,8 @@ mod tests {
     #[test]
     fn test_into_tiles_mut_imagearray() {
         // Same test with ImageArray<Mono8, 6, 4>
-        let mut img: ImageArray<Mono8, 6, 4> = ImageArray::generate(|x, y| Mono8::new((x + y * 6) as u8));
+        let mut img: ImageArray<Mono8, 6, 4> =
+            ImageArray::generate(|x, y| Mono8::new((x + y * 6) as u8));
         let tile_size = Size::new(3, 2);
 
         // Verify sizes match immutable
@@ -1686,7 +1690,8 @@ mod tests {
     #[test]
     fn test_subview_into_tiles_imagearray() {
         // Works on ImageArray without any trait import beyond SubView
-        let img: ImageArray<Mono8, 8, 6> = ImageArray::generate(|x, y| Mono8::new((x + y * 8) as u8));
+        let img: ImageArray<Mono8, 8, 6> =
+            ImageArray::generate(|x, y| Mono8::new((x + y * 8) as u8));
         let tiles: Vec<_> = img.tiles(Size::new(4, 3)).collect();
         assert_eq!(tiles.len(), 4);
         assert_eq!(tiles[0].size(), Size::new(4, 3));

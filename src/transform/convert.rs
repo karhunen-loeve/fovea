@@ -5104,8 +5104,9 @@ mod tests {
 
     #[test]
     fn convert_image_srgbbgr8_to_srgb8() {
-        let img: Image<SrgbBgr8> =
-            Image::generate(4, 4, |x, y| SrgbBgr8::new((x * 60) as u8, (y * 60) as u8, 100));
+        let img: Image<SrgbBgr8> = Image::generate(4, 4, |x, y| {
+            SrgbBgr8::new((x * 60) as u8, (y * 60) as u8, 100)
+        });
         let out: Image<Srgb8> = convert_image(&img, ColorSwap);
         for y in 0..4 {
             for x in 0..4 {
@@ -5117,8 +5118,9 @@ mod tests {
 
     #[test]
     fn convert_image_srgbbgr8_roundtrip_through_linear() {
-        let orig: Image<SrgbBgr8> =
-            Image::generate(4, 4, |x, y| SrgbBgr8::new((x * 60) as u8, (y * 60) as u8, 128));
+        let orig: Image<SrgbBgr8> = Image::generate(4, 4, |x, y| {
+            SrgbBgr8::new((x * 60) as u8, (y * 60) as u8, 128)
+        });
         let linear: Image<BgrF32> = convert_image(&orig, SrgbGamma);
         let back: Image<SrgbBgr8> = convert_image(&linear, SrgbGamma);
         for y in 0..4 {
