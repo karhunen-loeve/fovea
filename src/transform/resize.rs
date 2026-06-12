@@ -1,3 +1,43 @@
+//! Resize images using pluggable [`ResizeMethod`] strategies.
+//!
+//! ## Which method?
+//!
+//! | Method | Pixel constraint | Use when |
+//! |---|---|---|
+//! | [`NearestNeighbor`] | `Copy` + `Into` target pixel | Speed matters or the source is gamma-encoded |
+//! | [`Bilinear`] | [`LinearSpace`](crate::pixel::LinearSpace) | Correct photographic or camera resize |
+//!
+//! **Important:** `Bilinear` will not compile for `Srgb8` or any other gamma-encoded pixel type.
+//! Bilinear interpolation blends neighboring samples; doing that in a non-linear encoding
+//! produces subtly wrong results. Linearize first with
+//! [`convert_image`](crate::transform::convert_image) + [`SrgbGamma`](crate::transform::SrgbGamma),
+//! resize, then re-encode if needed.
+//!
+//! ```rust
+//! use fovea::Size;
+//! use fovea::image::{Image, ImageView};
+//! use fovea::pixel::{RgbF32, Srgb8};
+//! use fovea::transform::{SrgbGamma, Bilinear, NearestNeighbor, convert_image, resize};
+//!
+//! let srgb = Image::generate(4, 3, |x, y| Srgb8::new((x * 40) as u8, (y * 60) as u8, 128));
+//!
+//! // NearestNeighbor copies samples — works directly on gamma-encoded pixels.
+//! let preview: Image<Srgb8> = resize(&srgb, Size::new(8, 6), NearestNeighbor);
+//! assert_eq!(preview.size(), Size::new(8, 6));
+//!
+//! // Bilinear requires LinearSpace — linearize first.
+//! let linear: Image<RgbF32> = convert_image(&srgb, SrgbGamma);
+//! let resized: Image<RgbF32> = resize(&linear, Size::new(8, 6), Bilinear);
+//! assert_eq!(resized.size(), Size::new(8, 6));
+//! ```
+//!
+//! ## Implementing a custom resize strategy
+//!
+//! Implement [`ResizeMethod`] to plug in your own algorithm. The only requirement is to
+//! fill `out` (pre-sized to the target dimensions) from `img`. The pixel-level constraints
+//! live in each `impl` block, not in the trait itself, so you can express exactly the bounds
+//! your algorithm needs.
+
 use crate::Size;
 use crate::image::{Image, ImageView, ImageViewMut};
 use crate::pixel::{FromLinear, LinearPixel, LinearSpace, ZeroablePixel, blend};

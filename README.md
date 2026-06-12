@@ -75,17 +75,15 @@ Linearize first with `SrgbGamma`, resize in `RgbF32` or `MonoF32`, then encode b
 
 ## Install
 
-```toml
-[dependencies]
-fovea = "0.1.1"
+```sh
+cargo add fovea
 ```
 
 For PNG, JPEG, or BMP I/O, add `fovea-io` with the codec features you need:
 
-```toml
-[dependencies]
-fovea = "0.1.1"
-fovea-io = { version = "0.1.1", features = ["png"] }
+```sh
+cargo add fovea
+cargo add fovea-io --features png
 ```
 
 ## Getting started
