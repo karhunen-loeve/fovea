@@ -8,7 +8,7 @@
 //! - [`strategy`] — the [`BinningStrategy`] trait, the [`BinIndex`]
 //!   classification enum, and the concrete [`NaturalBins`], [`LinearBins`],
 //!   and [`CustomBins`] strategies.
-//! - [`histogram_mod`](mod@histogram) — the [`Histogram`] type itself.
+//! - [`engine`] — the [`Histogram`] type itself.
 //! - [`HistogramOutput`] — caller-driven output shape (single histogram,
 //!   `Vec`, or fixed-size array).
 //! - [`histogram`](self::histogram()) — the top-level entry point.
@@ -92,7 +92,7 @@
 //! [`NaturalBins`]: strategy::NaturalBins
 //! [`LinearBins`]: strategy::LinearBins
 //! [`CustomBins`]: strategy::CustomBins
-//! [`Histogram`]: histogram::Histogram
+//! [`Histogram`]: engine::Histogram
 //!
 //! # Consumers
 //!
@@ -103,13 +103,13 @@
 //! - [`equalization_lut`] / [`equalize_image`] /
 //!   [`equalize_image_into`] — per-channel histogram equalization.
 
-pub mod histogram;
+pub mod engine;
 pub mod strategy;
 
 pub mod equalize;
 pub mod otsu;
 
-pub use histogram::Histogram;
+pub use engine::Histogram;
 pub use strategy::{BinIndex, BinningStrategy, CustomBins, LinearBins, NaturalBins};
 
 pub use equalize::{equalization_lut, equalize_image, equalize_image_into};

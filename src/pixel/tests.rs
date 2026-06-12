@@ -5003,10 +5003,13 @@ fn test_partial_ord_monof32_nan() {
     assert_eq!(nan.partial_cmp(&a), None);
     assert_eq!(nan.partial_cmp(&nan), None);
     // NaN is not less than, greater than, or equal to anything.
-    assert!(!(nan < a));
-    assert!(!(nan > a));
-    assert!(!(nan <= a));
-    assert!(!(nan >= a));
+    #[allow(clippy::neg_cmp_op_on_partial_ord)]
+    {
+        assert!(!(nan < a));
+        assert!(!(nan > a));
+        assert!(!(nan <= a));
+        assert!(!(nan >= a));
+    }
     assert!(!(nan == a));
 }
 

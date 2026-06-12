@@ -16,10 +16,7 @@
 //! | Apply a convolution/filter | [`convolve`](crate::transform::convolve) or named filters | Choose an explicit border policy. |
 //! | Erode/dilate/median | [`map_neighborhood`](crate::transform::map_neighborhood) or morphology helpers | Use masks for active neighborhood positions. |
 //!
-//! This module organises transforms into four conceptual levels,
-//! presented in increasing scope (a single coordinate → the whole image).
-//!
-//! ## Level 0 — Coordinate-only transforms (`geometry`)
+//! ## Geometry and flips
 //!
 //! Pixel **positions** are rearranged without modifying pixel **values**.
 //! [`flip_h`](crate::transform::flip_h), [`flip_v`](crate::transform::flip_v),
@@ -35,7 +32,7 @@
 //! [`crate::pixel::Indexed8`]). These are physical operations rather
 //! than view wrappers, so the result is a normal image.
 //!
-//! ## Level 1 — Unary pixel transforms (`ConvertPixel` / `PixelMap`)
+//! ## Pixel conversion
 //!
 //! Apply a function to every pixel independently, potentially changing the
 //! pixel type.  The workhorse here is [`convert_image`](crate::transform::convert_image)
@@ -45,7 +42,7 @@
 //! [`Clamp`](crate::transform::Clamp) cover the most common conversions; the
 //! [`PixelMap`](crate::transform::PixelMap) wrapper lets you pass an arbitrary closure.
 //!
-//! ## Level 2 — Binary pixel transforms (`CombinePixels` / `combine_images`)
+//! ## Image arithmetic
 //!
 //! Combine two images of the same size pixel-wise, producing a third image.
 //! [`combine_images`](crate::transform::combine_images) is the generic engine;
@@ -65,7 +62,7 @@
 //! [`image_max`](crate::transform::image_max)) are provided as
 //! discoverability shortcuts.
 //!
-//! ## Level 3 — Neighbourhood transforms (`FoldOp` / `MapOp`)
+//! ## Neighbourhood transforms
 //!
 //! Each output pixel is computed from a window of input pixels centred at
 //! that position.  Two complementary primitives are provided:

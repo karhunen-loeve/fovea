@@ -3109,8 +3109,8 @@ mod tests {
         let img = Image::generate(5, 4, |x, y| (y * 10 + x) as u8);
         for y in 0..img.height() {
             let row = img.row(y);
-            for x in 0..img.width() {
-                assert_eq!(row[x], img.pixel_at(x, y));
+            for (x, &pixel) in row.iter().enumerate() {
+                assert_eq!(pixel, img.pixel_at(x, y));
             }
         }
     }
@@ -3165,8 +3165,8 @@ mod tests {
         let img: ImageArray<u8, 4, 4> = ImageArray::generate(|x, y| (y * 4 + x) as u8);
         for y in 0..img.height() {
             let row = img.row(y);
-            for x in 0..img.width() {
-                assert_eq!(row[x], img.pixel_at(x, y));
+            for (x, &pixel) in row.iter().enumerate() {
+                assert_eq!(pixel, img.pixel_at(x, y));
             }
         }
     }
@@ -3188,8 +3188,8 @@ mod tests {
         let img = ImageRef::new(5, 4, &data).unwrap();
         for y in 0..img.height() {
             let row = img.row(y);
-            for x in 0..img.width() {
-                assert_eq!(row[x], img.pixel_at(x, y));
+            for (x, &pixel) in row.iter().enumerate() {
+                assert_eq!(pixel, img.pixel_at(x, y));
             }
         }
     }
@@ -3220,8 +3220,8 @@ mod tests {
         let roi = img.roi(Rectangle::new((2, 1), (3, 4))).unwrap();
         for y in 0..roi.height() {
             let row = roi.row(y);
-            for x in 0..roi.width() {
-                assert_eq!(row[x], roi.pixel_at(x, y));
+            for (x, &pixel) in row.iter().enumerate() {
+                assert_eq!(pixel, roi.pixel_at(x, y));
             }
         }
     }
@@ -3272,7 +3272,8 @@ mod tests {
         let mut data: Vec<u8> = (0..6).collect();
         let mut view = ImageRefMut::new(3, 2, &mut data).unwrap();
         view.row_mut(0)[1] = 99;
-        drop(view);
+        #[allow(clippy::drop_non_drop)]
+        drop(view); // extends `view`'s borrow lifetime, allowing `data` to be read below
         assert_eq!(data, vec![0, 99, 2, 3, 4, 5]);
     }
 
@@ -3304,8 +3305,8 @@ mod tests {
         let view = ImageRefMut::new(5, 4, &mut data).unwrap();
         for y in 0..view.height() {
             let row = view.row(y);
-            for x in 0..view.width() {
-                assert_eq!(row[x], view.pixel_at(x, y));
+            for (x, &pixel) in row.iter().enumerate() {
+                assert_eq!(pixel, view.pixel_at(x, y));
             }
         }
     }
