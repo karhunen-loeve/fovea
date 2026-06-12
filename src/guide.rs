@@ -6,6 +6,9 @@ pub mod faq {}
 #[doc = include_str!("guide/pixel-types.md")]
 pub mod pixel_types {}
 
+#[doc = include_str!("guide/pixel-conversions.md")]
+pub mod pixel_conversions {}
+
 #[doc = include_str!("guide/camera-buffers.md")]
 pub mod camera_buffers {}
 

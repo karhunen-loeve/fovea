@@ -180,8 +180,6 @@ fovea is designed around a small set of explicit principles: types are the spec,
 
 > The compiler is the first reviewer.
 
-Read the full design philosophy in [`PHILOSOPHY.md`](https://github.com/karhunen-loeve/fovea/blob/main/PHILOSOPHY.md).
-
 ## License
 
 Licensed under the [MIT License](https://github.com/karhunen-loeve/fovea/blob/main/LICENSE).

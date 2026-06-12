@@ -12,6 +12,7 @@
 //! - [`guide`] — first working examples and the core pipeline shape
 //! - [`guide::faq`] — common questions about images, pixels, conversions, ROIs, and large images
 //! - [`guide::pixel_types`] — how to choose the right pixel type
+//! - [`guide::pixel_conversions`] — conversion strategies, common paths, and `.then()` combinator
 //! - [`guide::camera_buffers`] — raw bytes, camera SDK buffers, and byte layout
 //! - [`guide::large_images`] — slices, rows, tiles, sliding windows, and parallel runtimes
 
@@ -42,7 +43,11 @@ pub mod image;
 /// known value. These policies are used by neighborhood transforms such as
 /// convolution, filters, and morphology.
 pub mod border {
-    pub use crate::image::border::*;
+    #[doc(inline)]
+    pub use crate::image::border::{
+        BorderPolicy, Clamp, Constant, FullFrameBorder, Mirror, Skip, Wrap,
+        compute_interior_region,
+    };
 }
 
 pub use fovea_derive::HomogeneousPixel;
@@ -50,10 +55,19 @@ pub use fovea_derive::LinearPixel;
 pub use fovea_derive::PlainPixel;
 pub use fovea_derive::ZeroablePixel;
 
-/// The pixel module contains definitions and implementations related to pixel types and operations.
+/// Pixel types and the traits that make image operations type-safe.
+///
+/// Start with [`pixel::Srgb8`] (gamma-encoded display/file data),
+/// [`pixel::RgbF32`] (linear-light float), or [`pixel::Mono8`] (grayscale).
+/// For choosing between types, see [`guide::pixel_types`].
+/// For conversion strategies and common paths, see [`guide::pixel_conversions`].
 pub mod pixel;
 
-/// The `transform` module contains definitions and implementations related to image transformations.
+/// Image-producing operations: conversion, resize, geometry, filters, morphology.
+///
+/// Start with [`transform::convert_image`] when the pixel type changes,
+/// [`transform::resize`] when dimensions change, and the filter or
+/// convolution APIs when each output pixel depends on a neighborhood.
 pub mod transform;
 
 /// Image analysis operations (histograms, statistics, descriptors).

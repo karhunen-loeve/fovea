@@ -94,6 +94,37 @@
 //! [`CustomBins`]: strategy::CustomBins
 //! [`Histogram`]: engine::Histogram
 //!
+//! # Recipe
+//!
+//! Compute a histogram and locate the mode (most common intensity value):
+//!
+//! ```
+//! use fovea::analyze::histogram::{Histogram, NaturalBins, histogram};
+//! use fovea::image::Image;
+//! use fovea::pixel::Mono8;
+//!
+//! let img = Image::from_vec(4, 2, vec![
+//!     Mono8::new(0),   Mono8::new(128), Mono8::new(128), Mono8::new(255),
+//!     Mono8::new(0),   Mono8::new(128), Mono8::new(128), Mono8::new(255),
+//! ])?;
+//!
+//! let hist: Histogram<NaturalBins, _> = histogram(&img, &NaturalBins)?;
+//! assert_eq!(hist.total_count, 8);
+//! assert_eq!(hist.count_at_bin(128), 4); // four mid-grey pixels
+//!
+//! // Mode bin: the intensity value that appears most often.
+//! let mode_bin = hist.bins().iter()
+//!     .enumerate()
+//!     .max_by_key(|(_i, count)| **count)
+//!     .map(|(i, _)| i)
+//!     .unwrap();
+//! assert_eq!(mode_bin, 128);
+//! # Ok::<(), fovea::Error>(())
+//! ```
+//!
+//! For a full example with display and log-scale overlay, see `show_histogram`
+//! in [fovea-examples](https://github.com/karhunen-loeve/fovea-examples).
+//!
 //! # Consumers
 //!
 //! Operations built on top of the histogram engine live alongside it:
