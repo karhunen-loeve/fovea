@@ -337,6 +337,7 @@ where
     P::Channel: ZeroablePixel,
 {
     // Creators
+    /// Creates an `ImagePlanes` with all pixel channels set to zero.
     pub fn zero(width: usize, height: usize) -> Self {
         let size = Size::new(width, height);
         let planes =

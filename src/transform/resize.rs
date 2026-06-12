@@ -1,3 +1,43 @@
+//! Resize images using pluggable [`ResizeMethod`] strategies.
+//!
+//! ## Which method?
+//!
+//! | Method | Pixel constraint | Use when |
+//! |---|---|---|
+//! | [`NearestNeighbor`] | `Copy` + `Into` target pixel | Speed matters or the source is gamma-encoded |
+//! | [`Bilinear`] | [`LinearSpace`](crate::pixel::LinearSpace) | Correct photographic or camera resize |
+//!
+//! **Important:** `Bilinear` will not compile for `Srgb8` or any other gamma-encoded pixel type.
+//! Bilinear interpolation blends neighboring samples; doing that in a non-linear encoding
+//! produces subtly wrong results. Linearize first with
+//! [`convert_image`](crate::transform::convert_image) + [`SrgbGamma`](crate::transform::SrgbGamma),
+//! resize, then re-encode if needed.
+//!
+//! ```rust
+//! use fovea::Size;
+//! use fovea::image::{Image, ImageView};
+//! use fovea::pixel::{RgbF32, Srgb8};
+//! use fovea::transform::{SrgbGamma, Bilinear, NearestNeighbor, convert_image, resize};
+//!
+//! let srgb = Image::generate(4, 3, |x, y| Srgb8::new((x * 40) as u8, (y * 60) as u8, 128));
+//!
+//! // NearestNeighbor copies samples — works directly on gamma-encoded pixels.
+//! let preview: Image<Srgb8> = resize(&srgb, Size::new(8, 6), NearestNeighbor);
+//! assert_eq!(preview.size(), Size::new(8, 6));
+//!
+//! // Bilinear requires LinearSpace — linearize first.
+//! let linear: Image<RgbF32> = convert_image(&srgb, SrgbGamma);
+//! let resized: Image<RgbF32> = resize(&linear, Size::new(8, 6), Bilinear);
+//! assert_eq!(resized.size(), Size::new(8, 6));
+//! ```
+//!
+//! ## Implementing a custom resize strategy
+//!
+//! Implement [`ResizeMethod`] to plug in your own algorithm. The only requirement is to
+//! fill `out` (pre-sized to the target dimensions) from `img`. The pixel-level constraints
+//! live in each `impl` block, not in the trait itself, so you can express exactly the bounds
+//! your algorithm needs.
+
 use crate::Size;
 use crate::image::{Image, ImageView, ImageViewMut};
 use crate::pixel::{FromLinear, LinearPixel, LinearSpace, ZeroablePixel, blend};
@@ -12,6 +52,7 @@ use crate::pixel::{FromLinear, LinearPixel, LinearSpace, ZeroablePixel, blend};
 /// or `I::Pixel: LinearPixel + LinearSpace` for bilinear) belong in the `impl`
 /// blocks, not in the trait definition itself.
 pub trait ResizeMethod<I: ImageView, O: ImageViewMut> {
+    /// Resizes `img` into `out`, which must already have the desired target dimensions.
     fn resize_into(&self, img: &I, out: &mut O);
 }
 
@@ -129,6 +170,25 @@ where
     method.resize_into(img, out)
 }
 
+/// Resizes `img` to `new_size`, allocating and returning a new output image.
+///
+/// Use [`NearestNeighbor`] for any pixel type when speed matters; use [`Bilinear`]
+/// for photos and camera frames — it requires `I::Pixel: LinearSpace` to prevent
+/// subtly incorrect results from gamma-encoded data.
+///
+/// To resize into an existing buffer, use [`resize_into`] instead.
+///
+/// # Example
+/// ```
+/// # use fovea::image::{Image, ImageView};
+/// # use fovea::pixel::Rgb8;
+/// # use fovea::Size;
+/// # use fovea::transform::{resize, NearestNeighbor};
+/// let src: Image<Rgb8> = Image::fill(640, 480, Rgb8::new(128, 64, 32));
+/// let dst: Image<Rgb8> = resize(&src, Size::new(320, 240), NearestNeighbor);
+/// assert_eq!(dst.width(), 320);
+/// assert_eq!(dst.height(), 240);
+/// ```
 #[must_use]
 pub fn resize<I, P, M>(img: &I, new_size: Size, method: M) -> Image<P>
 where
@@ -675,8 +735,8 @@ mod tests {
     #[test]
     fn test_resize_nearest_neighbor_into_roi_output() {
         // Resize a 4x4 source into a 2x2 ROI within a 4x4 target
-        let src: Image<u8> = Image::generate(4, 4, |x, y| (y * 10 + x) as u8);
-        let mut target: Image<u8> = Image::fill(4, 4, 255);
+        let src: Image<Mono8> = Image::generate(4, 4, |x, y| Mono8::new((y * 10 + x) as u8));
+        let mut target: Image<Mono8> = Image::fill(4, 4, Mono8::new(255));
 
         {
             let mut roi_out = target.roi_mut(Rectangle::new((1, 1), (2, 2))).unwrap();
@@ -684,14 +744,14 @@ mod tests {
         }
 
         // The ROI region should contain the resized result
-        assert_eq!(target.get(1, 1).unwrap(), 0); // src (0,0)
-        assert_eq!(target.get(2, 1).unwrap(), 3); // src (3,0)
-        assert_eq!(target.get(1, 2).unwrap(), 30); // src (0,3)
-        assert_eq!(target.get(2, 2).unwrap(), 33); // src (3,3)
+        assert_eq!(target.get(1, 1).unwrap(), Mono8::new(0)); // src (0,0)
+        assert_eq!(target.get(2, 1).unwrap(), Mono8::new(3)); // src (3,0)
+        assert_eq!(target.get(1, 2).unwrap(), Mono8::new(30)); // src (0,3)
+        assert_eq!(target.get(2, 2).unwrap(), Mono8::new(33)); // src (3,3)
 
         // Outside the ROI should be untouched
-        assert_eq!(target.get(0, 0).unwrap(), 255);
-        assert_eq!(target.get(3, 3).unwrap(), 255);
+        assert_eq!(target.get(0, 0).unwrap(), Mono8::new(255));
+        assert_eq!(target.get(3, 3).unwrap(), Mono8::new(255));
     }
 
     #[test]

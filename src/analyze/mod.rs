@@ -5,15 +5,17 @@
 //! That distinguishes this module from [`crate::transform`], whose
 //! operations produce images.
 //!
-//! Currently exposed:
+//! ## Which analysis?
 //!
-//! - [`histogram`](crate::analyze::histogram) — per-channel value histograms with explicit binning
-//!   strategies.
-//! - [`integral`](crate::analyze::integral) — summed-area tables for `O(1)` rectangular region
-//!   sums (and sums of squares) with an explicit, type-checked
-//!   accumulator pixel.
-//! - [`components`](crate::analyze::components) — connected-component labeling on binary images,
-//!   with optional per-component stats (area, bounding box, centroid).
+//! | Question | Start with | Output |
+//! |---|---|---|
+//! | "How are channel values distributed?" | [`histogram`](crate::analyze::histogram) | Counts per bin, per channel. |
+//! | "What threshold separates foreground?" | [`histogram::otsu_threshold`](crate::analyze::histogram::otsu_threshold) / [`histogram::otsu_binary_mask`](crate::analyze::histogram::otsu_binary_mask) | Threshold value or binary mask. |
+//! | "What is the sum of this rectangle?" | [`integral`](crate::analyze::integral) | Summed-area table with explicit accumulator pixels. |
+//! | "How many foreground blobs are in this mask?" | [`components`](crate::analyze::components) | Label image and optional component stats. |
+//!
+//! Do not use this module for operations that produce another image of the
+//! same conceptual kind. Those belong in [`crate::transform`].
 
 pub mod components;
 pub mod histogram;

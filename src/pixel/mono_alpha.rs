@@ -10,6 +10,7 @@ use std::{
 };
 
 use super::{canonicalize_f32, canonicalize_f64};
+use crate::pixel::impl_origin_invariant_pixel;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // MonoA (Grayscale-with-Alpha) pixel types
@@ -34,10 +35,13 @@ use super::{canonicalize_f32, canonicalize_f64};
 )]
 #[linear(accumulator = MonoAF32)]
 pub struct MonoA8 {
+    /// Value (luminance) channel.
     pub v: Saturating<u8>,
+    /// Alpha channel.
     pub a: Saturating<u8>,
 }
 impl MonoA8 {
+    /// Creates a `MonoA8` pixel with the given 8-bit luminance `v` and alpha `a`.
     pub fn new(v: u8, a: u8) -> Self {
         MonoA8 {
             v: Saturating(v),
@@ -63,10 +67,13 @@ impl MonoA8 {
 )]
 #[linear(accumulator = MonoAF32)]
 pub struct MonoA16 {
+    /// Value (luminance) channel.
     pub v: Saturating<u16>,
+    /// Alpha channel.
     pub a: Saturating<u16>,
 }
 impl MonoA16 {
+    /// Creates a `MonoA16` pixel with the given 16-bit luminance `v` and alpha `a`.
     pub fn new(v: u16, a: u16) -> Self {
         MonoA16 {
             v: Saturating(v),
@@ -92,10 +99,13 @@ impl MonoA16 {
 )]
 #[linear(accumulator = MonoAF64)]
 pub struct MonoA32 {
+    /// Value (luminance) channel.
     pub v: Saturating<u32>,
+    /// Alpha channel.
     pub a: Saturating<u32>,
 }
 impl MonoA32 {
+    /// Creates a `MonoA32` pixel with the given 32-bit luminance `v` and alpha `a`.
     pub fn new(v: u32, a: u32) -> Self {
         MonoA32 {
             v: Saturating(v),
@@ -121,10 +131,13 @@ impl MonoA32 {
 )]
 #[linear(accumulator = MonoAF64)]
 pub struct MonoA64 {
+    /// Value (luminance) channel.
     pub v: Saturating<u64>,
+    /// Alpha channel.
     pub a: Saturating<u64>,
 }
 impl MonoA64 {
+    /// Creates a `MonoA64` pixel with the given 64-bit luminance `v` and alpha `a`.
     pub fn new(v: u64, a: u64) -> Self {
         MonoA64 {
             v: Saturating(v),
@@ -141,12 +154,15 @@ impl MonoA64 {
 #[linear(accumulator = Self)]
 pub struct MonoAF32 {
     // Inner `f32` is a channel, not a pixel.
+    /// Value (luminance) channel.
     #[zero(default)]
     pub v: f32,
+    /// Alpha channel.
     #[zero(default)]
     pub a: f32,
 }
 impl MonoAF32 {
+    /// Creates a `MonoAF32` pixel with the given 32-bit floating-point luminance `v` and alpha `a`.
     pub fn new(v: f32, a: f32) -> Self {
         MonoAF32 { v, a }
     }
@@ -167,12 +183,15 @@ impl Hash for MonoAF32 {
 #[linear(accumulator = Self)]
 pub struct MonoAF64 {
     // Inner `f64` is a channel, not a pixel.
+    /// Value (luminance) channel.
     #[zero(default)]
     pub v: f64,
+    /// Alpha channel.
     #[zero(default)]
     pub a: f64,
 }
 impl MonoAF64 {
+    /// Creates a `MonoAF64` pixel with the given 64-bit floating-point luminance `v` and alpha `a`.
     pub fn new(v: f64, a: f64) -> Self {
         MonoAF64 { v, a }
     }
@@ -184,3 +203,11 @@ impl Hash for MonoAF64 {
         canonicalize_f64(self.a).hash(state);
     }
 }
+
+// ---------------------------------------------------------------------------
+// OriginInvariantPixel impls
+// ---------------------------------------------------------------------------
+//
+// Grayscale-with-alpha values mean the same thing regardless of where the
+// pixel sits, so an origin-translated crop preserves their meaning.
+impl_origin_invariant_pixel!(MonoA8, MonoA16, MonoA32, MonoA64, MonoAF32, MonoAF64);

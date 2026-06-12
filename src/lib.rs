@@ -1,31 +1,20 @@
 #![doc = include_str!("../README.md")]
 #![cfg_attr(docsrs, feature(doc_cfg))]
-#![warn(missing_docs)]
+#![deny(missing_docs)]
 #![warn(unreachable_pub)]
 #![deny(rustdoc::broken_intra_doc_links)]
 
-//! ## Modules
+//! ## docs.rs guide pages
 //!
-//! - [`image`] — Image types, views, kernels, and containers
-//! - [`pixel`] — Pixel type definitions and traits
-//! - [`transform`] — Image transformations (convolution, morphology, combine, etc.)
-//! - [`analyze`] — Image analysis (histograms, integral images / summed-area tables)
-//! - [`border`] — Border policies for neighborhood operations
+//! The crate root above is the quick evaluation path. For task-oriented docs,
+//! use the documentation-only [`guide`] module on docs.rs:
 //!
-//! ## Transform overview
-//!
-//! The [`transform`] module organises operations into three levels:
-//!
-//! 1. **Unary pixel transforms** — apply a function to every pixel independently
-//!    ([`transform::convert_image`], strategies like [`transform::Luminance`],
-//!    [`transform::SrgbGamma`], [`transform::Narrow`]).
-//! 2. **Binary pixel transforms** — combine two same-sized images pixel-wise
-//!    ([`transform::combine_images`], strategies like [`transform::PixelAdd`],
-//!    [`transform::AbsDiff`], [`transform::Blend`]).
-//! 3. **Neighbourhood transforms** — compute each output pixel from a window of
-//!    input pixels: [`transform::fold_neighborhood`] for weighted aggregation
-//!    (convolution, separable filters) and [`transform::map_neighborhood`] for
-//!    non-linear operations (erosion, dilation, median).
+//! - [`guide`] — first working examples and the core pipeline shape
+//! - [`guide::faq`] — common questions about images, pixels, conversions, ROIs, and large images
+//! - [`guide::pixel_types`] — how to choose the right pixel type
+//! - [`guide::pixel_conversions`] — conversion strategies, common paths, and `.then()` combinator
+//! - [`guide::camera_buffers`] — raw bytes, camera SDK buffers, and byte layout
+//! - [`guide::large_images`] — slices, rows, tiles, sliding windows, and parallel runtimes
 
 extern crate self as fovea;
 
@@ -47,8 +36,17 @@ mod internal;
 pub mod image;
 
 /// Border policies for out-of-bounds pixel access in neighborhood operations.
+///
+/// Start with [`Clamp`](border::Clamp) for ordinary image filtering,
+/// [`Skip`](border::Skip) for valid-only convolution, and
+/// [`Constant`](border::Constant) when the outside of the image should have a
+/// known value. These policies are used by neighborhood transforms such as
+/// convolution, filters, and morphology.
 pub mod border {
-    pub use crate::image::border::*;
+    #[doc(inline)]
+    pub use crate::image::border::{
+        BorderPolicy, Clamp, Constant, FullFrameBorder, Mirror, Skip, Wrap, compute_interior_region,
+    };
 }
 
 pub use fovea_derive::HomogeneousPixel;
@@ -56,10 +54,19 @@ pub use fovea_derive::LinearPixel;
 pub use fovea_derive::PlainPixel;
 pub use fovea_derive::ZeroablePixel;
 
-/// The pixel module contains definitions and implementations related to pixel types and operations.
+/// Pixel types and the traits that make image operations type-safe.
+///
+/// Start with [`pixel::Srgb8`] (gamma-encoded display/file data),
+/// [`pixel::RgbF32`] (linear-light float), or [`pixel::Mono8`] (grayscale).
+/// For choosing between types, see [`guide::pixel_types`].
+/// For conversion strategies and common paths, see [`guide::pixel_conversions`].
 pub mod pixel;
 
-/// The `transform` module contains definitions and implementations related to image transformations.
+/// Image-producing operations: conversion, resize, geometry, filters, morphology.
+///
+/// Start with [`transform::convert_image`] when the pixel type changes,
+/// [`transform::resize`] when dimensions change, and the filter or
+/// convolution APIs when each output pixel depends on a neighborhood.
 pub mod transform;
 
 /// Image analysis operations (histograms, statistics, descriptors).
@@ -67,6 +74,9 @@ pub mod transform;
 /// Distinguished from [`transform`] by output: analysis operations produce
 /// data *about* an image (counts, scalars, descriptors), not new images.
 pub mod analyze;
+
+#[cfg(doc)]
+pub mod guide;
 
 // ── Core vocabulary types (module-agnostic, kept at root) ────────────────────
 pub use common::{Coordinate, Rectangle, Size, Stride};

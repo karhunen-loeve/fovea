@@ -15,9 +15,15 @@ mod sealed {
     impl<T, const N: usize> SealedArray<T> for [T; N] {}
 }
 
+/// A fixed-size array abstraction used to represent homogeneous multi-channel pixel layouts.
+///
+/// This is a crate-internal sealed helper. The only external implementation is `[T; N]`.
 pub trait Array<T>: sealed::SealedArray<T> + AsRef<[T]> + AsMut<[T]> {
+    /// The number of elements in the array.
     const LEN: usize;
+    /// The same array type with element type `U` instead of `T`.
     type Map<U>: Array<U>;
+    /// Constructs the array by calling `f(i)` for each index `i` in `0..LEN`.
     fn from_fn<F: FnMut(usize) -> T>(f: F) -> Self;
 }
 
@@ -172,7 +178,7 @@ pub unsafe trait PlainPixel: PlainChannel {
         "SIZE must equal sum of CHANNELS"
     );
 
-    // Convert the pixel to a mutable byte slice (native endianness)
+    /// Returns a mutable view of the pixel as raw bytes in native byte order.
     fn as_mut_bytes(&mut self) -> &mut [u8] {
         unsafe { crate::internal::as_mut_bytes(std::slice::from_mut(self)) }
     }
@@ -258,9 +264,140 @@ pub unsafe trait PlainPixel: PlainChannel {
     }
 }
 
+/// A pixel type that has a well-defined all-zero value.
+///
+/// Implement this when your pixel type can be safely zero-initialized.
+/// All standard fovea pixel types implement `ZeroablePixel`, enabling
+/// [`Image::zero`](crate::image::Image::zero).
 pub trait ZeroablePixel: Sized + Copy {
+    /// Returns the zero value of this pixel type.
     fn zero() -> Self;
 }
+
+// ──────────────────────────────────────────────────────────────────────────
+// Origin-invariant pixel role
+// ──────────────────────────────────────────────────────────────────────────
+
+/// Marker trait for pixel types whose semantic interpretation is
+/// **invariant under translation of the image origin**.
+///
+/// If `P: OriginInvariantPixel`, then a region of interest taken from an
+/// `Image<P>` can be represented as an [`ImageView`](crate::image::ImageView)
+/// with `Pixel = P` without changing what `P` means at local coordinates.
+/// Cropping moves *where* the data lives; it does not change *what* each
+/// pixel is.
+///
+/// # What it gates
+///
+/// This marker is the bound on ordinary, same-pixel-type region access:
+/// [`SubView`](crate::image::SubView) (`roi`, `tiles`, `sliding_windows`)
+/// and [`SubViewMut`](crate::image::SubViewMut) (`roi_mut`). Each of those
+/// APIs translates the local origin, so each is only sound when the pixel
+/// type's meaning survives that translation. Random access
+/// ([`ImageView`](crate::image::ImageView)) and row access
+/// ([`RasterImage`](crate::image::RasterImage)) are **not** gated — they do
+/// not move the origin and stay available for every `T: Copy`.
+///
+/// # Why a separate trait (Philosophy §2, §3)
+///
+/// Origin-invariance is its own axis, orthogonal to the existing pixel
+/// roles, and each trait adds exactly one guarantee:
+///
+/// - [`PlainPixel`] guarantees *byte layout* — it says nothing about
+///   whether meaning depends on position. A coordinate-dependent pixel can
+///   still have a perfectly stable layout.
+/// - [`HomogeneousPixel`] guarantees *channel shape*.
+/// - [`LinearSpace`] guarantees that *interpolation is meaningful*. That is
+///   about mixing values across positions; this is about moving the origin.
+///
+/// The trait deliberately does **not** extend [`PlainPixel`]: ROI safety is
+/// a semantic property, not a layout one. `bool` — the pixel type of
+/// [`BinaryImage`](crate::image::BinaryImage) — is origin-invariant yet is
+/// not part of the plain-layout pixel family.
+///
+/// # Safe trait (Philosophy §11)
+///
+/// `OriginInvariantPixel` is a **safe** trait. A wrong impl does not cause
+/// undefined behaviour or reinterpret bytes; it only re-admits a region API
+/// whose result would be semantically misleading. Per "if it can be written
+/// without unsafe, it must be," the obligation lives in this documentation
+/// rather than in an `unsafe` contract. Compare [`PlainPixel`], which is
+/// `unsafe` precisely because a wrong impl reinterprets memory.
+///
+/// # Implementors and non-implementors
+///
+/// Implemented by every shipped pixel type whose meaning is independent of
+/// `(x, y)`: the `Mono*`, `MonoA*`, `Rgb*` / `Bgr*`, `Srgb*`,
+/// [`Indexed8`](crate::pixel::Indexed8), and [`Label32`](crate::pixel::Label32)
+/// families, plus `bool`.
+///
+/// It is **not** implemented for raw channel primitives (`u8`, `u16`,
+/// `f32`, …): those are channels, not pixels (Philosophy §9). It is also the
+/// opt-out point for coordinate-dependent pixels such as Bayer CFA mosaics
+/// (ADR-0037): an ROI at an odd origin shifts the 2×2 mosaic phase, so
+/// returning the same pattern type would lie about the data. Such pixels
+/// remain usable as [`ImageView`](crate::image::ImageView) /
+/// [`RasterImage`](crate::image::RasterImage) storage and reach for named,
+/// phase-aware ROI APIs instead.
+///
+/// The design is recorded in ADR-0051; the ROI/tiling split it builds on is
+/// ADR-0017.
+///
+/// # Examples
+///
+/// Ordinary ROI works for an origin-invariant pixel such as
+/// [`Mono8`](crate::pixel::Mono8):
+///
+/// ```
+/// use fovea::Rectangle;
+/// use fovea::image::{Image, ImageView, SubView};
+/// use fovea::pixel::Mono8;
+///
+/// let img = Image::fill(4, 4, Mono8::new(7));
+/// let roi = img.roi(Rectangle::new((1, 1), (2, 2))).unwrap();
+/// assert_eq!(roi.pixel_at(0, 0), Mono8::new(7));
+/// ```
+///
+/// A `Copy` pixel whose meaning depends on image coordinates does **not**
+/// implement `OriginInvariantPixel`, so ordinary `roi()` fails to *compile* —
+/// the misuse is rejected by the type system, never at runtime:
+///
+/// ```compile_fail
+/// use fovea::Rectangle;
+/// use fovea::image::{Image, SubView};
+///
+/// // A `Copy` pixel whose meaning depends on the image origin (think Bayer
+/// // CFA phase). It deliberately does not implement `OriginInvariantPixel`.
+/// #[derive(Clone, Copy)]
+/// struct OriginDependent(u8);
+///
+/// let img = Image::fill(4, 4, OriginDependent(0));
+/// // ERROR: `OriginDependent: OriginInvariantPixel` is not satisfied.
+/// let _ = img.roi(Rectangle::new((0, 0), (2, 2)));
+/// ```
+pub trait OriginInvariantPixel: Copy {}
+
+/// Implements the safe [`OriginInvariantPixel`] marker for each listed
+/// pixel type.
+///
+/// The pixel-family modules use this to opt their origin-invariant types
+/// into ordinary [`SubView`](crate::image::SubView) /
+/// [`SubViewMut`](crate::image::SubViewMut) access without repeating the
+/// empty impl by hand. Membership is the whole specification: a
+/// coordinate-dependent pixel (e.g. a future Bayer CFA type, ADR-0037) is
+/// simply left off the list and therefore never gains ordinary `roi()`.
+///
+/// Const-generic families (`Mono<BITS>`, `Rgb<BITS>`, …) implement the
+/// marker by hand next to their other generic impls, since this macro takes
+/// concrete types only.
+macro_rules! impl_origin_invariant_pixel {
+    ($($t:ty),+ $(,)?) => {
+        $(
+            impl $crate::pixel::OriginInvariantPixel for $t {}
+        )+
+    };
+}
+pub(crate) use impl_origin_invariant_pixel;
 
 // ──────────────────────────────────────────────────────────────────────────
 // Label pixel role
@@ -664,6 +801,10 @@ pub trait LinearChannel<S = f32>: Sized + Copy {
 /// lossy (rounding, clamping) and the orphan rule prevents implementing
 /// `From<f32> for u8`.
 pub trait FromLinear<A> {
+    /// Converts a linear-space accumulator value back to this pixel type, applying rounding and clamping.
+    ///
+    /// Used in algorithm bounds instead of `From<A>` to avoid orphan-rule conflicts and to make the
+    /// intentionally lossy accumulator-to-storage conversion explicit at call sites.
     fn from_linear(acc: A) -> Self;
 }
 
@@ -733,16 +874,23 @@ pub fn blend<T: LinearPixel + LinearSpace>(a: &T, b: &T, alpha: f32) -> T::Accum
 /// - Data corruption in planar ↔ interleaved conversions
 /// - Undefined behavior in downstream code relying on channel semantics
 pub unsafe trait HomogeneousPixel: PlainPixel {
+    /// The scalar type of each channel, e.g. `u8` for `Rgb8` or `f32` for `RgbF32`.
     type Channel: PlainChannel + Copy;
 
     /// The channel array type, e.g. `[u8; 3]` for Rgb8.
     type Channels: Array<Self::Channel>;
 
+    /// Number of channels — 1 for monochrome, 3 for RGB/BGR, 4 for RGBA/BGRA.
     const CHANNEL_COUNT: usize = <Self::Channels as Array<Self::Channel>>::LEN;
 
+    /// Compile-time assertion: `size_of::<Self>() == size_of::<Channel>() * CHANNEL_COUNT`.
     const _SIZE_ASSERT: () =
         assert!(size_of::<Self>() == size_of::<Self::Channel>() * Self::CHANNEL_COUNT);
 
+    /// Returns the channel value at the given `index`.
+    ///
+    /// # Panics
+    /// Panics if `index >= CHANNEL_COUNT`.
     fn channel(&self, index: usize) -> Self::Channel {
         assert!(index < Self::CHANNEL_COUNT);
         let size = size_of::<Self::Channel>();
@@ -754,6 +902,10 @@ pub unsafe trait HomogeneousPixel: PlainPixel {
         .expect("internal error: channel size mismatch")
     }
 
+    /// Sets the channel at `index` to `value`.
+    ///
+    /// # Panics
+    /// Panics if `index >= CHANNEL_COUNT`.
     fn set_channel(&mut self, index: usize, value: Self::Channel) {
         assert!(index < Self::CHANNEL_COUNT);
         let size = size_of::<Self::Channel>();
@@ -762,6 +914,10 @@ pub unsafe trait HomogeneousPixel: PlainPixel {
             .copy_from_slice(<Self::Channel as PlainChannel>::as_bytes(&value));
     }
 
+    /// Constructs a pixel from a slice of channel values.
+    ///
+    /// # Panics
+    /// Panics if `channels.len() != CHANNEL_COUNT`.
     fn from_channels(channels: &[Self::Channel]) -> Self {
         assert_eq!(channels.len(), Self::CHANNEL_COUNT);
         let size = size_of::<Self::Channel>();
@@ -782,6 +938,7 @@ pub unsafe trait HomogeneousPixel: PlainPixel {
             .expect("internal error: constructed byte buf size mismatch")
     }
 
+    /// Returns all channel values as an array ordered by channel index.
     fn to_channels(&self) -> Self::Channels {
         Self::Channels::from_fn(|i| self.channel(i))
     }

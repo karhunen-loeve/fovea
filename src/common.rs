@@ -8,10 +8,13 @@
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Size {
+    /// Image width in pixels.
     pub width: usize,
+    /// Image height in pixels.
     pub height: usize,
 }
 impl Size {
+    /// Creates a `Size` with the given `width` and `height`.
     pub fn new(width: usize, height: usize) -> Self {
         Self { width, height }
     }
@@ -53,10 +56,13 @@ impl From<(usize, usize)> for Size {
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Coordinate {
+    /// Horizontal position.
     pub x: usize,
+    /// Vertical position.
     pub y: usize,
 }
 impl Coordinate {
+    /// Creates a `Coordinate` at the given `(x, y)` position.
     pub fn new(x: usize, y: usize) -> Self {
         Self { x, y }
     }
@@ -82,20 +88,25 @@ impl From<(usize, usize)> for Coordinate {
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Rectangle {
+    /// Top-left corner of the rectangle.
     pub offset: Coordinate,
+    /// Width and height of the rectangle.
     pub size: Size,
 }
 
 impl Rectangle {
+    /// Creates a `Rectangle` with the given top-left `offset` and `size`.
     pub fn new(offset: impl Into<Coordinate>, size: impl Into<Size>) -> Self {
         Self {
             offset: offset.into(),
             size: size.into(),
         }
     }
+    /// Returns the area as `size.width * size.height`.
     pub fn area(&self) -> usize {
         self.size.area()
     }
+    /// Returns the x-coordinate of the left edge (`offset.x`).
     pub fn left(&self) -> usize {
         self.offset.x
     }
@@ -110,6 +121,7 @@ impl Rectangle {
             .checked_add(self.size.width)
             .expect("Rectangle::right: offset.x + size.width overflows usize")
     }
+    /// Returns the y-coordinate of the top edge (`offset.y`).
     pub fn top(&self) -> usize {
         self.offset.y
     }

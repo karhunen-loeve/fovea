@@ -1165,14 +1165,14 @@ mod tests {
 
     #[test]
     fn clamp_with_f32_pixel() {
-        let img = Image::generate(3, 3, |x, y| x as f32 + y as f32 * 3.0 );
+        let img = Image::generate(3, 3, |x, y| x as f32 + y as f32 * 3.0);
         assert_eq!(Clamp.pixel_at(&img, -1, 0), img.pixel_at(0, 0));
         assert_eq!(Clamp.pixel_at(&img, 3, 2), img.pixel_at(2, 2));
     }
 
     #[test]
     fn constant_with_f32_pixel() {
-        let img = Image::generate(3, 3, |x, y| x as f32 + y as f32 * 3.0 );
+        let img = Image::generate(3, 3, |x, y| x as f32 + y as f32 * 3.0);
         let policy = Constant(0.0f32);
         assert_eq!(policy.pixel_at(&img, -1, 0), 0.0);
         assert_eq!(policy.pixel_at(&img, 1, 1), 4.0);
