@@ -10,6 +10,7 @@ use crate::{Coordinate, Rectangle, Size, Stride};
 /// Implement to provide sub-view (region of interest)
 /// and tiling iterators
 pub trait SubView: ImageView {
+    /// The immutable sub-view type returned by [`roi`](SubView::roi) and the tile/window iterators.
     type Sub<'a>: ImageView<Pixel = Self::Pixel>
     where
         Self: 'a;
@@ -27,13 +28,14 @@ pub trait SubView: ImageView {
     /// ```
     /// use fovea::Size;
     /// use fovea::image::{Image, ImageView, SubView};
+    /// use fovea::pixel::Mono8;
     ///
-    /// let img = Image::generate(6, 4, |x, y| (x + y * 6) as u8);
-    /// let tiles: Vec<_> = img.into_tiles(Size::new(3, 2)).collect();
+    /// let img = Image::generate(6, 4, |x, y| Mono8::new((x + y * 6) as u8));
+    /// let tiles: Vec<_> = img.tiles(Size::new(3, 2)).collect();
     /// assert_eq!(tiles.len(), 4);
     /// assert_eq!(tiles[0].size(), Size::new(3, 2));
     /// ```
-    fn into_tiles(&self, size: Size) -> TileIter<'_, Self>
+    fn tiles(&self, size: Size) -> TileIter<'_, Self>
     where
         Self: Sized,
     {
@@ -51,8 +53,9 @@ pub trait SubView: ImageView {
     /// ```
     /// use fovea::{Size, Stride};
     /// use fovea::image::{Image, ImageView, SubView, SlidingWindow};
+    /// use fovea::pixel::Mono8;
     ///
-    /// let img = Image::generate(8, 8, |x, y| (x + y) as u8);
+    /// let img = Image::generate(8, 8, |x, y| Mono8::new((x + y) as u8));
     ///
     /// // Builder API for stride > 1:
     /// let windows: Vec<_> = SlidingWindow::new(Size::new(3, 3))
@@ -66,8 +69,9 @@ pub trait SubView: ImageView {
     /// ```
     /// use fovea::Size;
     /// use fovea::image::{Image, ImageView, SubView};
+    /// use fovea::pixel::Mono8;
     ///
-    /// let img = Image::generate(4, 4, |x, y| (x + y * 4) as u8);
+    /// let img = Image::generate(4, 4, |x, y| Mono8::new((x + y * 4) as u8));
     /// // 3×3 window on a 4×4 image with stride 1 → 2×2 = 4 positions
     /// let windows: Vec<_> = img.sliding_windows(Size::new(3, 3)).collect();
     /// assert_eq!(windows.len(), 4);
@@ -86,15 +90,19 @@ pub trait SubView: ImageView {
 /// Implement to provide mutable sub-view (region of interest)
 /// and tiling iterators
 pub trait SubViewMut: SubView + ImageViewMut {
+    /// The mutable sub-view type returned by [`roi_mut`](SubViewMut::roi_mut).
     type SubMut<'a>: ImageViewMut<Pixel = Self::Pixel>
     where
         Self: 'a;
 
-    // Returns a mutable sub-view as ImageViewMut
+    /// Returns a mutable sub-view for `rect`, or `None` if `rect` exceeds image bounds.
     fn roi_mut(&mut self, rect: Rectangle) -> Option<Self::SubMut<'_>>;
 }
 
-// Immutable Tile Iterator
+/// An iterator that yields non-overlapping sub-views (tiles) of a fixed size.
+///
+/// Produced by [`SubView::tiles`]. Partial tiles appear at the right and bottom
+/// edges when the image dimensions are not exact multiples of the tile size.
 #[derive(Clone, Debug)]
 pub struct TileIter<'a, T: SubView> {
     size: Size,
@@ -169,8 +177,9 @@ where
 /// ```
 /// use fovea::{Size, Stride};
 /// use fovea::image::{Image, ImageView, SubView, SlidingWindow};
+/// use fovea::pixel::Mono8;
 ///
-/// let img = Image::generate(10, 10, |x, y| (x + y) as u8);
+/// let img = Image::generate(10, 10, |x, y| Mono8::new((x + y) as u8));
 ///
 /// // Stride-1 (default) — same as img.sliding_windows(size)
 /// let iter = SlidingWindow::new(Size::new(3, 3)).iter(&img);
@@ -232,8 +241,9 @@ impl SlidingWindow {
 /// ```
 /// use fovea::{Size, Stride};
 /// use fovea::image::{Image, ImageView, SubView, SlidingWindow};
+/// use fovea::pixel::Mono8;
 ///
-/// let img = Image::generate(6, 6, |x, y| (x + y * 6) as u8);
+/// let img = Image::generate(6, 6, |x, y| Mono8::new((x + y * 6) as u8));
 ///
 /// // Stride 1 via the SubView convenience method
 /// let count = img.sliding_windows(Size::new(3, 3)).count();
@@ -307,8 +317,9 @@ where
     /// ```
     /// use fovea::Size;
     /// use fovea::image::{Image, ImageView, SubView};
+    /// use fovea::pixel::Mono8;
     ///
-    /// let img = Image::generate(5, 5, |x, y| (x + y * 5) as u8);
+    /// let img = Image::generate(5, 5, |x, y| Mono8::new((x + y * 5) as u8));
     /// for ((col, row), window) in img.sliding_windows(Size::new(3, 3)).enumerate_positions() {
     ///     assert_eq!(window.size(), Size::new(3, 3));
     ///     // col in 0..3, row in 0..3
@@ -584,10 +595,13 @@ mod sealed {
 /// assert_eq!(img.get(4, 4), Some(255));
 /// ```
 pub trait IntoTilesMut<'a>: sealed::Sealed {
+    /// The pixel type of the tiles.
     type Pixel;
+    /// The mutable tile view type yielded by the iterator.
     type TileMut<'b>: ImageViewMut<Pixel = Self::Pixel>
     where
         Self: 'b;
+    /// The iterator type over mutable tiles.
     type TilesIterMut<'b>: Iterator<Item = Self::TileMut<'b>>
     where
         Self: 'b;
@@ -636,6 +650,7 @@ mod tests {
     use crate::image::sequential::{
         ContiguousImage, ContiguousImageMut, Image, ImageArray, ImageRefMut,
     };
+    use crate::pixel::Mono8;
 
     // ───────────────────────────────────────────────────────────────────
     // SlidingWindowIter tests
@@ -644,13 +659,13 @@ mod tests {
     #[test]
     fn test_sliding_window_stride1_count() {
         // (W - kw + 1) * (H - kh + 1) = (6-3+1)*(6-3+1) = 16
-        let img: Image<u8> = Image::generate(6, 6, |x, y| (x + y * 6) as u8);
+        let img: Image<Mono8> = Image::generate(6, 6, |x, y| Mono8::new((x + y * 6) as u8));
         assert_eq!(img.sliding_windows(Size::new(3, 3)).count(), 16);
     }
 
     #[test]
     fn test_sliding_window_stride1_all_same_size() {
-        let img: Image<u8> = Image::generate(5, 5, |x, y| (x + y * 5) as u8);
+        let img: Image<Mono8> = Image::generate(5, 5, |x, y| Mono8::new((x + y * 5) as u8));
         for w in img.sliding_windows(Size::new(3, 3)) {
             assert_eq!(w.size(), Size::new(3, 3));
         }
@@ -659,22 +674,22 @@ mod tests {
     #[test]
     fn test_sliding_window_stride1_data() {
         // 4×4 image, 2×2 window, stride 1 → 3×3 = 9 windows
-        let img: Image<u8> = Image::generate(4, 4, |x, y| (x + y * 4) as u8);
+        let img: Image<Mono8> = Image::generate(4, 4, |x, y| Mono8::new((x + y * 4) as u8));
         let windows: Vec<_> = img.sliding_windows(Size::new(2, 2)).collect();
         assert_eq!(windows.len(), 9);
         // First window at (0,0)
-        assert_eq!(windows[0].get(0, 0), Some(0));
-        assert_eq!(windows[0].get(1, 0), Some(1));
-        assert_eq!(windows[0].get(0, 1), Some(4));
-        assert_eq!(windows[0].get(1, 1), Some(5));
+        assert_eq!(windows[0].get(0, 0), Some(Mono8::new(0)));
+        assert_eq!(windows[0].get(1, 0), Some(Mono8::new(1)));
+        assert_eq!(windows[0].get(0, 1), Some(Mono8::new(4)));
+        assert_eq!(windows[0].get(1, 1), Some(Mono8::new(5)));
         // Second window at (1,0)
-        assert_eq!(windows[1].get(0, 0), Some(1));
-        assert_eq!(windows[1].get(1, 1), Some(6));
+        assert_eq!(windows[1].get(0, 0), Some(Mono8::new(1)));
+        assert_eq!(windows[1].get(1, 1), Some(Mono8::new(6)));
         // Window at (0,1) — 4th window (index 3)
-        assert_eq!(windows[3].get(0, 0), Some(4));
+        assert_eq!(windows[3].get(0, 0), Some(Mono8::new(4)));
         // Last window at (2,2) — index 8
-        assert_eq!(windows[8].get(0, 0), Some(10));
-        assert_eq!(windows[8].get(1, 1), Some(15));
+        assert_eq!(windows[8].get(0, 0), Some(Mono8::new(10)));
+        assert_eq!(windows[8].get(1, 1), Some(Mono8::new(15)));
     }
 
     #[test]
@@ -683,20 +698,20 @@ mod tests {
         // max_x = 8-3 = 5, cols = 5/2+1 = 3
         // max_y = 8-3 = 5, rows = 5/2+1 = 3
         // → 9 windows
-        let img: Image<u8> = Image::generate(8, 8, |x, y| (x + y * 8) as u8);
+        let img: Image<Mono8> = Image::generate(8, 8, |x, y| Mono8::new((x + y * 8) as u8));
         let windows: Vec<_> = SlidingWindow::new(Size::new(3, 3))
             .stride(Stride::new(2, 2))
             .iter(&img)
             .collect();
         assert_eq!(windows.len(), 9);
         // First at (0,0)
-        assert_eq!(windows[0].get(0, 0), Some(0));
+        assert_eq!(windows[0].get(0, 0), Some(Mono8::new(0)));
         // Second at (2,0)
-        assert_eq!(windows[1].get(0, 0), Some(2));
+        assert_eq!(windows[1].get(0, 0), Some(Mono8::new(2)));
         // Third at (4,0)
-        assert_eq!(windows[2].get(0, 0), Some(4));
+        assert_eq!(windows[2].get(0, 0), Some(Mono8::new(4)));
         // Fourth at (0,2)
-        assert_eq!(windows[3].get(0, 0), Some(16));
+        assert_eq!(windows[3].get(0, 0), Some(Mono8::new(16)));
     }
 
     #[test]
@@ -704,33 +719,33 @@ mod tests {
         // 10×8, 3×3, stride (3, 2)
         // max_x = 10-3 = 7, cols = 7/3+1 = 3  (positions 0,3,6)
         // max_y = 8-3 = 5,  rows = 5/2+1 = 3  (positions 0,2,4)
-        let img: Image<u8> = Image::generate(10, 8, |x, y| (x + y * 10) as u8);
+        let img: Image<Mono8> = Image::generate(10, 8, |x, y| Mono8::new((x + y * 10) as u8));
         let windows: Vec<_> = SlidingWindow::new(Size::new(3, 3))
             .stride(Stride::new(3, 2))
             .iter(&img)
             .collect();
         assert_eq!(windows.len(), 9);
         // Check pixel origin of each window
-        assert_eq!(windows[0].get(0, 0), Some(0)); // (0,0)
-        assert_eq!(windows[1].get(0, 0), Some(3)); // (3,0)
-        assert_eq!(windows[2].get(0, 0), Some(6)); // (6,0)
-        assert_eq!(windows[3].get(0, 0), Some(20)); // (0,2)
-        assert_eq!(windows[6].get(0, 0), Some(40)); // (0,4)
+        assert_eq!(windows[0].get(0, 0), Some(Mono8::new(0))); // (0,0)
+        assert_eq!(windows[1].get(0, 0), Some(Mono8::new(3))); // (3,0)
+        assert_eq!(windows[2].get(0, 0), Some(Mono8::new(6))); // (6,0)
+        assert_eq!(windows[3].get(0, 0), Some(Mono8::new(20))); // (0,2)
+        assert_eq!(windows[6].get(0, 0), Some(Mono8::new(40))); // (0,4)
     }
 
     #[test]
     fn test_sliding_window_window_equals_image() {
-        let img: Image<u8> = Image::generate(3, 3, |x, y| (x + y * 3) as u8);
+        let img: Image<Mono8> = Image::generate(3, 3, |x, y| Mono8::new((x + y * 3) as u8));
         let windows: Vec<_> = img.sliding_windows(Size::new(3, 3)).collect();
         assert_eq!(windows.len(), 1);
         assert_eq!(windows[0].size(), Size::new(3, 3));
-        assert_eq!(windows[0].get(0, 0), Some(0));
-        assert_eq!(windows[0].get(2, 2), Some(8));
+        assert_eq!(windows[0].get(0, 0), Some(Mono8::new(0)));
+        assert_eq!(windows[0].get(2, 2), Some(Mono8::new(8)));
     }
 
     #[test]
     fn test_sliding_window_larger_than_image() {
-        let img: Image<u8> = Image::generate(3, 3, |x, y| (x + y * 3) as u8);
+        let img: Image<Mono8> = Image::generate(3, 3, |x, y| Mono8::new((x + y * 3) as u8));
         let windows: Vec<_> = img.sliding_windows(Size::new(4, 4)).collect();
         assert_eq!(windows.len(), 0);
     }
@@ -738,21 +753,21 @@ mod tests {
     #[test]
     fn test_sliding_window_1x1() {
         // 1×1 window → every pixel is a window
-        let img: Image<u8> = Image::generate(3, 4, |x, y| (x + y * 3) as u8);
+        let img: Image<Mono8> = Image::generate(3, 4, |x, y| Mono8::new((x + y * 3) as u8));
         let windows: Vec<_> = img.sliding_windows(Size::new(1, 1)).collect();
         assert_eq!(windows.len(), 12); // 3*4
         for w in &windows {
             assert_eq!(w.size(), Size::new(1, 1));
         }
-        assert_eq!(windows[0].get(0, 0), Some(0));
-        assert_eq!(windows[11].get(0, 0), Some(11));
+        assert_eq!(windows[0].get(0, 0), Some(Mono8::new(0)));
+        assert_eq!(windows[11].get(0, 0), Some(Mono8::new(11)));
     }
 
     #[test]
     fn test_sliding_window_non_square_window() {
         // 6×4 image, 2×3 window, stride 1
         // cols = 6-2+1 = 5, rows = 4-3+1 = 2 → 10
-        let img: Image<u8> = Image::generate(6, 4, |x, y| (x + y * 6) as u8);
+        let img: Image<Mono8> = Image::generate(6, 4, |x, y| Mono8::new((x + y * 6) as u8));
         let windows: Vec<_> = img.sliding_windows(Size::new(2, 3)).collect();
         assert_eq!(windows.len(), 10);
         for w in &windows {
@@ -766,7 +781,7 @@ mod tests {
         // max_x = 10-2 = 8, cols = 8/4+1 = 3  (pos 0,4,8)
         // max_y = 10-2 = 8, rows = 8/4+1 = 3
         // → 9 windows
-        let img: Image<u8> = Image::generate(10, 10, |x, y| (x + y * 10) as u8);
+        let img: Image<Mono8> = Image::generate(10, 10, |x, y| Mono8::new((x + y * 10) as u8));
         let windows: Vec<_> = SlidingWindow::new(Size::new(2, 2))
             .stride(Stride::new(4, 4))
             .iter(&img)
@@ -780,21 +795,21 @@ mod tests {
         // max_x = 7-3 = 4, cols = 4/3+1 = 2  (positions 0, 3)
         // Position 6 would be 6+3=9 > 7, not visited. That's correct:
         // max_x=4, 2*3=6 > 4, so only 0 and 3.
-        let img: Image<u8> = Image::generate(7, 7, |x, y| (x + y * 7) as u8);
+        let img: Image<Mono8> = Image::generate(7, 7, |x, y| Mono8::new((x + y * 7) as u8));
         let windows: Vec<_> = SlidingWindow::new(Size::new(3, 3))
             .stride(Stride::new(3, 3))
             .iter(&img)
             .collect();
         assert_eq!(windows.len(), 4); // 2×2
-        assert_eq!(windows[0].get(0, 0), Some(0)); // (0,0)
-        assert_eq!(windows[1].get(0, 0), Some(3)); // (3,0)
-        assert_eq!(windows[2].get(0, 0), Some(21)); // (0,3)
-        assert_eq!(windows[3].get(0, 0), Some(24)); // (3,3)
+        assert_eq!(windows[0].get(0, 0), Some(Mono8::new(0))); // (0,0)
+        assert_eq!(windows[1].get(0, 0), Some(Mono8::new(3))); // (3,0)
+        assert_eq!(windows[2].get(0, 0), Some(Mono8::new(21))); // (0,3)
+        assert_eq!(windows[3].get(0, 0), Some(Mono8::new(24))); // (3,3)
     }
 
     #[test]
     fn test_sliding_window_exact_size_iterator() {
-        let img: Image<u8> = Image::generate(6, 6, |x, y| (x + y * 6) as u8);
+        let img: Image<Mono8> = Image::generate(6, 6, |x, y| Mono8::new((x + y * 6) as u8));
         let mut iter = img.sliding_windows(Size::new(3, 3));
         assert_eq!(iter.len(), 16);
         iter.next();
@@ -806,7 +821,7 @@ mod tests {
 
     #[test]
     fn test_sliding_window_exhaustion() {
-        let img: Image<u8> = Image::generate(4, 4, |x, y| (x + y * 4) as u8);
+        let img: Image<Mono8> = Image::generate(4, 4, |x, y| Mono8::new((x + y * 4) as u8));
         let mut iter = img.sliding_windows(Size::new(3, 3));
         let mut count = 0;
         while iter.next().is_some() {
@@ -819,7 +834,7 @@ mod tests {
 
     #[test]
     fn test_sliding_window_enumerate_positions() {
-        let img: Image<u8> = Image::generate(5, 5, |x, y| (x + y * 5) as u8);
+        let img: Image<Mono8> = Image::generate(5, 5, |x, y| Mono8::new((x + y * 5) as u8));
         let items: Vec<_> = img
             .sliding_windows(Size::new(3, 3))
             .enumerate_positions()
@@ -833,12 +848,12 @@ mod tests {
         assert_eq!(items[8].0, (2, 2));
         // Data check: position (1,2) → pixel origin (1,2)
         assert_eq!(items[7].0, (1, 2));
-        assert_eq!(items[7].1.get(0, 0), Some(11)); // pixel at (1,2)=1+2*5=11
+        assert_eq!(items[7].1.get(0, 0), Some(Mono8::new(11))); // pixel at (1,2)=1+2*5=11
     }
 
     #[test]
     fn test_sliding_window_enumerate_positions_with_stride() {
-        let img: Image<u8> = Image::generate(8, 8, |x, y| (x + y * 8) as u8);
+        let img: Image<Mono8> = Image::generate(8, 8, |x, y| Mono8::new((x + y * 8) as u8));
         let items: Vec<_> = SlidingWindow::new(Size::new(3, 3))
             .stride(Stride::new(2, 2))
             .iter(&img)
@@ -847,12 +862,12 @@ mod tests {
         assert_eq!(items.len(), 9); // 3×3 grid
         // Grid position (1,1) → pixel origin (2,2)
         assert_eq!(items[4].0, (1, 1));
-        assert_eq!(items[4].1.get(0, 0), Some(18)); // 2+2*8=18
+        assert_eq!(items[4].1.get(0, 0), Some(Mono8::new(18))); // 2+2*8=18
     }
 
     #[test]
     fn test_sliding_window_enumerate_positions_exact_size() {
-        let img: Image<u8> = Image::generate(5, 5, |x, y| (x + y * 5) as u8);
+        let img: Image<Mono8> = Image::generate(5, 5, |x, y| Mono8::new((x + y * 5) as u8));
         let mut iter = img.sliding_windows(Size::new(3, 3)).enumerate_positions();
         assert_eq!(iter.len(), 9);
         iter.next();
@@ -861,27 +876,28 @@ mod tests {
 
     #[test]
     fn test_sliding_window_imagearray() {
-        let img: ImageArray<u8, 6, 6> = ImageArray::generate(|x, y| (x + y * 6) as u8);
+        let img: ImageArray<Mono8, 6, 6> =
+            ImageArray::generate(|x, y| Mono8::new((x + y * 6) as u8));
         let windows: Vec<_> = img.sliding_windows(Size::new(3, 3)).collect();
         assert_eq!(windows.len(), 16);
-        assert_eq!(windows[0].get(0, 0), Some(0));
+        assert_eq!(windows[0].get(0, 0), Some(Mono8::new(0)));
         // cols=4, rows=4. Last window index 15 → col=3, row=3 → px=(3,3) → 3+3*6=21
-        assert_eq!(windows[15].get(0, 0), Some(21));
+        assert_eq!(windows[15].get(0, 0), Some(Mono8::new(21)));
     }
 
     #[test]
     fn test_sliding_window_does_not_consume() {
-        let img: Image<u8> = Image::generate(4, 4, |x, y| (x + y * 4) as u8);
+        let img: Image<Mono8> = Image::generate(4, 4, |x, y| Mono8::new((x + y * 4) as u8));
         let w1: Vec<_> = img.sliding_windows(Size::new(2, 2)).collect();
         let w2: Vec<_> = img.sliding_windows(Size::new(2, 2)).collect();
         assert_eq!(w1.len(), w2.len());
-        assert_eq!(img.get(0, 0), Some(0));
+        assert_eq!(img.get(0, 0), Some(Mono8::new(0)));
     }
 
     #[test]
     fn test_sliding_window_builder_default_stride() {
         // Builder with no .stride() call should produce stride-1 results
-        let img: Image<u8> = Image::generate(5, 5, |x, y| (x + y * 5) as u8);
+        let img: Image<Mono8> = Image::generate(5, 5, |x, y| Mono8::new((x + y * 5) as u8));
         let from_method: Vec<_> = img.sliding_windows(Size::new(3, 3)).collect();
         let from_builder: Vec<_> = SlidingWindow::new(Size::new(3, 3)).iter(&img).collect();
         assert_eq!(from_method.len(), from_builder.len());
@@ -893,13 +909,13 @@ mod tests {
     #[test]
     fn test_sliding_window_row_major_order() {
         // Verify windows are yielded in row-major order
-        let img: Image<u8> = Image::generate(5, 5, |x, y| (x + y * 5) as u8);
+        let img: Image<Mono8> = Image::generate(5, 5, |x, y| Mono8::new((x + y * 5) as u8));
         let windows: Vec<_> = img.sliding_windows(Size::new(2, 2)).collect();
         // 4×4 = 16 windows. The top-left pixel of each window should
         // follow row-major: (0,0),(1,0),(2,0),(3,0),(0,1),(1,1),...
-        let origins: Vec<u8> = windows.iter().map(|w| w.pixel_at(0, 0)).collect();
-        let expected: Vec<u8> = (0..4)
-            .flat_map(|y| (0..4).map(move |x| (x + y * 5) as u8))
+        let origins: Vec<Mono8> = windows.iter().map(|w| w.pixel_at(0, 0)).collect();
+        let expected: Vec<Mono8> = (0..4)
+            .flat_map(|y| (0..4).map(move |x| Mono8::new((x + y * 5) as u8)))
             .collect();
         assert_eq!(origins, expected);
     }
@@ -910,20 +926,20 @@ mod tests {
 
     #[test]
     fn test_tiles_iter_basic() {
-        let img: Image<u8> = Image::generate(4, 4, |x, y| (x + y * 4) as u8 + 1);
-        let tiles: Vec<_> = img.into_tiles(Size::new(2, 2)).collect();
+        let img: Image<Mono8> = Image::generate(4, 4, |x, y| Mono8::new((x + y * 4) as u8 + 1));
+        let tiles: Vec<_> = img.tiles(Size::new(2, 2)).collect();
         // 4x4 image with 2x2 tiles = 4 tiles (2x2 grid of tiles)
         assert_eq!(tiles.len(), 4);
         // First tile should have correct data
-        assert_eq!(tiles[0].get(0, 0), Some(1));
+        assert_eq!(tiles[0].get(0, 0), Some(Mono8::new(1)));
         assert_eq!(tiles[0].size(), Size::new(2, 2));
     }
 
     #[test]
     fn test_tiles_iter_partial_edges() {
         // 10x10 image with 3x3 tiles should produce partial tiles at edges
-        let img: Image<u8> = Image::generate(10, 10, |x, y| (x + y * 10) as u8);
-        let tiles: Vec<_> = img.into_tiles(Size::new(3, 3)).collect();
+        let img: Image<Mono8> = Image::generate(10, 10, |x, y| Mono8::new((x + y * 10) as u8));
+        let tiles: Vec<_> = img.tiles(Size::new(3, 3)).collect();
 
         // Should have 4x4 = 16 tiles (at x: 0,3,6,9 and y: 0,3,6,9)
         assert_eq!(tiles.len(), 16);
@@ -944,31 +960,31 @@ mod tests {
     #[test]
     fn test_tiles_iter_partial_edges_data() {
         // Verify the data in partial tiles is correct
-        let img: Image<u8> = Image::generate(5, 5, |x, y| (x + y * 5) as u8);
-        let tiles: Vec<_> = img.into_tiles(Size::new(3, 3)).collect();
+        let img: Image<Mono8> = Image::generate(5, 5, |x, y| Mono8::new((x + y * 5) as u8));
+        let tiles: Vec<_> = img.tiles(Size::new(3, 3)).collect();
 
         // Should have 2x2 = 4 tiles
         assert_eq!(tiles.len(), 4);
 
         // Top-right tile at (3,0) should be 2x3
         assert_eq!(tiles[1].size(), Size::new(2, 3));
-        assert_eq!(tiles[1].get(0, 0), Some(3)); // pixel at (3,0) in original
-        assert_eq!(tiles[1].get(1, 0), Some(4)); // pixel at (4,0) in original
+        assert_eq!(tiles[1].get(0, 0), Some(Mono8::new(3))); // pixel at (3,0) in original
+        assert_eq!(tiles[1].get(1, 0), Some(Mono8::new(4))); // pixel at (4,0) in original
 
         // Bottom-left tile at (0,3) should be 3x2
         assert_eq!(tiles[2].size(), Size::new(3, 2));
-        assert_eq!(tiles[2].get(0, 0), Some(15)); // pixel at (0,3) in original
+        assert_eq!(tiles[2].get(0, 0), Some(Mono8::new(15))); // pixel at (0,3) in original
 
         // Bottom-right tile at (3,3) should be 2x2
         assert_eq!(tiles[3].size(), Size::new(2, 2));
-        assert_eq!(tiles[3].get(0, 0), Some(18)); // pixel at (3,3) in original
-        assert_eq!(tiles[3].get(1, 1), Some(24)); // pixel at (4,4) in original
+        assert_eq!(tiles[3].get(0, 0), Some(Mono8::new(18))); // pixel at (3,3) in original
+        assert_eq!(tiles[3].get(1, 1), Some(Mono8::new(24))); // pixel at (4,4) in original
     }
 
     #[test]
     fn test_tiles_iter_larger_than_image() {
-        let img: Image<u8> = Image::generate(2, 2, |x, y| (x + y * 2) as u8);
-        let tiles: Vec<_> = img.into_tiles(Size::new(5, 5)).collect();
+        let img: Image<Mono8> = Image::generate(2, 2, |x, y| Mono8::new((x + y * 2) as u8));
+        let tiles: Vec<_> = img.tiles(Size::new(5, 5)).collect();
         // Tile is larger than image, should get 1 tile clamped to image size (2x2)
         assert_eq!(tiles.len(), 1);
         assert_eq!(tiles[0].size(), Size::new(2, 2));
@@ -976,8 +992,9 @@ mod tests {
 
     #[test]
     fn test_tiles_iter_with_imagearray() {
-        let img: ImageArray<u8, 8, 8> = ImageArray::generate(|x, y| (x + y * 8) as u8);
-        let tiles: Vec<_> = img.into_tiles(Size::new(4, 4)).collect();
+        let img: ImageArray<Mono8, 8, 8> =
+            ImageArray::generate(|x, y| Mono8::new((x + y * 8) as u8));
+        let tiles: Vec<_> = img.tiles(Size::new(4, 4)).collect();
         // 8x8 image with 4x4 tiles = 4 tiles
         assert_eq!(tiles.len(), 4);
         assert_eq!(tiles[0].size(), Size::new(4, 4));
@@ -985,8 +1002,9 @@ mod tests {
 
     #[test]
     fn test_tiles_iter_imagearray_partial() {
-        let img: ImageArray<u8, 7, 7> = ImageArray::generate(|x, y| (x + y * 7) as u8);
-        let tiles: Vec<_> = img.into_tiles(Size::new(3, 3)).collect();
+        let img: ImageArray<Mono8, 7, 7> =
+            ImageArray::generate(|x, y| Mono8::new((x + y * 7) as u8));
+        let tiles: Vec<_> = img.tiles(Size::new(3, 3)).collect();
         // 7x7 image with 3x3 tiles: positions 0,3,6 in both dimensions = 9 tiles
         assert_eq!(tiles.len(), 9);
 
@@ -999,7 +1017,7 @@ mod tests {
 
     #[test]
     fn test_sub_view_trait() {
-        let img: Image<u8> = Image::generate(4, 4, |x, y| (x + y * 4) as u8);
+        let img: Image<Mono8> = Image::generate(4, 4, |x, y| Mono8::new((x + y * 4) as u8));
         let roi = img.roi(Rectangle::new((1, 1), (2, 2)));
         assert!(roi.is_some());
 
@@ -1009,7 +1027,7 @@ mod tests {
 
     #[test]
     fn test_sub_view_mut_trait() {
-        let mut img: Image<u8> = Image::generate(4, 4, |x, y| (x + y * 4) as u8);
+        let mut img: Image<Mono8> = Image::generate(4, 4, |x, y| Mono8::new((x + y * 4) as u8));
         let roi = img.roi_mut(Rectangle::new((1, 1), (2, 2)));
         assert!(roi.is_some());
 
@@ -1019,8 +1037,8 @@ mod tests {
 
     #[test]
     fn test_tiles_iter_exhaustion() {
-        let img: Image<u8> = Image::generate(4, 4, |x, y| (x + y * 4) as u8);
-        let mut iter = img.into_tiles(Size::new(2, 2));
+        let img: Image<Mono8> = Image::generate(4, 4, |x, y| Mono8::new((x + y * 4) as u8));
+        let mut iter = img.tiles(Size::new(2, 2));
 
         // Consume all tiles (should be exactly 4)
         let mut count = 0;
@@ -1037,8 +1055,8 @@ mod tests {
     #[test]
     fn test_tiles_single_pixel() {
         // Edge case: 1x1 tiles
-        let img: Image<u8> = Image::generate(3, 3, |x, y| (x + y * 3) as u8);
-        let tiles: Vec<_> = img.into_tiles(Size::new(1, 1)).collect();
+        let img: Image<Mono8> = Image::generate(3, 3, |x, y| Mono8::new((x + y * 3) as u8));
+        let tiles: Vec<_> = img.tiles(Size::new(1, 1)).collect();
         // Should get 9 tiles (3x3 grid of single pixels)
         assert_eq!(tiles.len(), 9);
         for tile in &tiles {
@@ -1049,8 +1067,8 @@ mod tests {
     #[test]
     fn test_tiles_single_row() {
         // Edge case: tiles that span full height
-        let img: Image<u8> = Image::generate(7, 4, |x, y| (x + y * 7) as u8);
-        let tiles: Vec<_> = img.into_tiles(Size::new(3, 4)).collect();
+        let img: Image<Mono8> = Image::generate(7, 4, |x, y| Mono8::new((x + y * 7) as u8));
+        let tiles: Vec<_> = img.tiles(Size::new(3, 4)).collect();
         // 7-wide with 3-wide tiles: positions 0, 3, 6 = 3 tiles
         assert_eq!(tiles.len(), 3);
         assert_eq!(tiles[0].size(), Size::new(3, 4));
@@ -1061,8 +1079,8 @@ mod tests {
     #[test]
     fn test_tiles_single_column() {
         // Edge case: tiles that span full width
-        let img: Image<u8> = Image::generate(4, 7, |x, y| (x + y * 4) as u8);
-        let tiles: Vec<_> = img.into_tiles(Size::new(4, 3)).collect();
+        let img: Image<Mono8> = Image::generate(4, 7, |x, y| Mono8::new((x + y * 4) as u8));
+        let tiles: Vec<_> = img.tiles(Size::new(4, 3)).collect();
         // 7-tall with 3-tall tiles: positions 0, 3, 6 = 3 tiles
         assert_eq!(tiles.len(), 3);
         assert_eq!(tiles[0].size(), Size::new(4, 3));
@@ -1080,7 +1098,7 @@ mod tests {
         use crate::pixel::Mono8;
         let img: ImageArray<Mono8, 6, 4> =
             ImageArray::generate(|x, y| Mono8::new((x + y * 6) as u8));
-        let tiles: Vec<_> = img.into_tiles(Size::new(3, 2)).collect();
+        let tiles: Vec<_> = img.tiles(Size::new(3, 2)).collect();
         assert_eq!(tiles.len(), 4);
         // Top-left tile
         assert_eq!(tiles[0].size(), Size::new(3, 2));
@@ -1228,10 +1246,10 @@ mod tests {
     #[test]
     fn test_tiles_mut_matches_immutable_sizes() {
         // Verify mutable and immutable iterators yield identical tile sizes
-        let mut img: Image<u8> = Image::generate(7, 5, |x, y| (x + y * 7) as u8);
+        let mut img: Image<Mono8> = Image::generate(7, 5, |x, y| Mono8::new((x + y * 7) as u8));
         let tile_size = Size::new(3, 2);
 
-        let immut_sizes: Vec<Size> = img.into_tiles(tile_size).map(|t| t.size()).collect();
+        let immut_sizes: Vec<Size> = img.tiles(tile_size).map(|t| t.size()).collect();
         let mut_sizes: Vec<Size> = tiles_mut(&mut img, tile_size).map(|t| t.size()).collect();
 
         assert_eq!(immut_sizes, mut_sizes);
@@ -1400,12 +1418,12 @@ mod tests {
     fn test_into_tiles_mut_symmetry_with_into_tiles() {
         // For same image and tile size, verify into_tiles and into_tiles_mut
         // yield tiles with identical sizes and pixel values.
-        let mut img: Image<u8> = Image::generate(7, 5, |x, y| (x + y * 7) as u8);
+        let mut img: Image<Mono8> = Image::generate(7, 5, |x, y| Mono8::new((x + y * 7) as u8));
         let tile_size = Size::new(3, 2);
 
-        let immut_sizes: Vec<Size> = img.into_tiles(tile_size).map(|t| t.size()).collect();
-        let immut_values: Vec<Vec<u8>> = img
-            .into_tiles(tile_size)
+        let immut_sizes: Vec<Size> = img.tiles(tile_size).map(|t| t.size()).collect();
+        let immut_values: Vec<Vec<Mono8>> = img
+            .tiles(tile_size)
             .map(|t| {
                 let mut vals = Vec::new();
                 for y in 0..t.height() {
@@ -1419,7 +1437,7 @@ mod tests {
 
         let mut_tiles: Vec<_> = (&mut img).into_tiles_mut(tile_size).collect();
         let mut_sizes: Vec<Size> = mut_tiles.iter().map(|t| t.size()).collect();
-        let mut_values: Vec<Vec<u8>> = mut_tiles
+        let mut_values: Vec<Vec<Mono8>> = mut_tiles
             .iter()
             .map(|t| {
                 let mut vals = Vec::new();
@@ -1475,12 +1493,13 @@ mod tests {
 
     #[test]
     fn test_into_tiles_mut_imagearray() {
-        // Same test with ImageArray<u8, 6, 4>
-        let mut img: ImageArray<u8, 6, 4> = ImageArray::generate(|x, y| (x + y * 6) as u8);
+        // Same test with ImageArray<Mono8, 6, 4>
+        let mut img: ImageArray<Mono8, 6, 4> =
+            ImageArray::generate(|x, y| Mono8::new((x + y * 6) as u8));
         let tile_size = Size::new(3, 2);
 
         // Verify sizes match immutable
-        let immut_sizes: Vec<Size> = img.into_tiles(tile_size).map(|t| t.size()).collect();
+        let immut_sizes: Vec<Size> = img.tiles(tile_size).map(|t| t.size()).collect();
 
         let tiles: Vec<_> = (&mut img).into_tiles_mut(tile_size).collect();
         let mut_sizes: Vec<Size> = tiles.iter().map(|t| t.size()).collect();
@@ -1488,10 +1507,10 @@ mod tests {
         assert_eq!(tiles.len(), 4);
 
         // Verify data
-        assert_eq!(tiles[0].get(0, 0), Some(0));
-        assert_eq!(tiles[1].get(0, 0), Some(3));
-        assert_eq!(tiles[2].get(0, 0), Some(12));
-        assert_eq!(tiles[3].get(0, 0), Some(15));
+        assert_eq!(tiles[0].get(0, 0), Some(Mono8::new(0)));
+        assert_eq!(tiles[1].get(0, 0), Some(Mono8::new(3)));
+        assert_eq!(tiles[2].get(0, 0), Some(Mono8::new(12)));
+        assert_eq!(tiles[3].get(0, 0), Some(Mono8::new(15)));
     }
 
     #[test]
@@ -1630,34 +1649,34 @@ mod tests {
 
     #[test]
     fn test_subview_into_tiles_called_on_owned_image() {
-        // into_tiles takes &self, so calling on an owned Image auto-borrows
-        let img: Image<u8> = Image::generate(6, 4, |x, y| (x + y * 6) as u8);
-        let tiles: Vec<_> = img.into_tiles(Size::new(3, 2)).collect();
+        // tiles takes &self, so calling on an owned Image auto-borrows
+        let img: Image<Mono8> = Image::generate(6, 4, |x, y| Mono8::new((x + y * 6) as u8));
+        let tiles: Vec<_> = img.tiles(Size::new(3, 2)).collect();
         assert_eq!(tiles.len(), 4);
         assert_eq!(tiles[0].size(), Size::new(3, 2));
-        assert_eq!(tiles[0].get(0, 0), Some(0));
-        assert_eq!(tiles[1].get(0, 0), Some(3));
-        assert_eq!(tiles[2].get(0, 0), Some(12));
-        assert_eq!(tiles[3].get(0, 0), Some(15));
+        assert_eq!(tiles[0].get(0, 0), Some(Mono8::new(0)));
+        assert_eq!(tiles[1].get(0, 0), Some(Mono8::new(3)));
+        assert_eq!(tiles[2].get(0, 0), Some(Mono8::new(12)));
+        assert_eq!(tiles[3].get(0, 0), Some(Mono8::new(15)));
     }
 
     #[test]
     fn test_subview_into_tiles_called_on_ref() {
         // Explicitly calling on a reference — same result
-        let img: Image<u8> = Image::generate(6, 4, |x, y| (x + y * 6) as u8);
+        let img: Image<Mono8> = Image::generate(6, 4, |x, y| Mono8::new((x + y * 6) as u8));
         let img_ref = &img;
-        let tiles: Vec<_> = img_ref.into_tiles(Size::new(3, 2)).collect();
+        let tiles: Vec<_> = img_ref.tiles(Size::new(3, 2)).collect();
         assert_eq!(tiles.len(), 4);
         assert_eq!(tiles[0].size(), Size::new(3, 2));
-        assert_eq!(tiles[0].get(0, 0), Some(0));
+        assert_eq!(tiles[0].get(0, 0), Some(Mono8::new(0)));
     }
 
     #[test]
     fn test_subview_into_tiles_does_not_consume() {
-        // into_tiles borrows, so the image is still usable afterwards
-        let img: Image<u8> = Image::generate(4, 4, |x, y| (x + y * 4) as u8);
-        let tiles1: Vec<_> = img.into_tiles(Size::new(2, 2)).collect();
-        let tiles2: Vec<_> = img.into_tiles(Size::new(2, 2)).collect();
+        // tiles borrows, so the image is still usable afterwards
+        let img: Image<Mono8> = Image::generate(4, 4, |x, y| Mono8::new((x + y * 4) as u8));
+        let tiles1: Vec<_> = img.tiles(Size::new(2, 2)).collect();
+        let tiles2: Vec<_> = img.tiles(Size::new(2, 2)).collect();
         // Both iterations yield identical results
         assert_eq!(tiles1.len(), tiles2.len());
         for (a, b) in tiles1.iter().zip(tiles2.iter()) {
@@ -1665,31 +1684,32 @@ mod tests {
             assert_eq!(a.get(0, 0), b.get(0, 0));
         }
         // Image is still accessible
-        assert_eq!(img.get(0, 0), Some(0));
+        assert_eq!(img.get(0, 0), Some(Mono8::new(0)));
     }
 
     #[test]
     fn test_subview_into_tiles_imagearray() {
         // Works on ImageArray without any trait import beyond SubView
-        let img: ImageArray<u8, 8, 6> = ImageArray::generate(|x, y| (x + y * 8) as u8);
-        let tiles: Vec<_> = img.into_tiles(Size::new(4, 3)).collect();
+        let img: ImageArray<Mono8, 8, 6> =
+            ImageArray::generate(|x, y| Mono8::new((x + y * 8) as u8));
+        let tiles: Vec<_> = img.tiles(Size::new(4, 3)).collect();
         assert_eq!(tiles.len(), 4);
         assert_eq!(tiles[0].size(), Size::new(4, 3));
         assert_eq!(tiles[1].size(), Size::new(4, 3));
         assert_eq!(tiles[2].size(), Size::new(4, 3));
         assert_eq!(tiles[3].size(), Size::new(4, 3));
         // Check data in each tile
-        assert_eq!(tiles[0].get(0, 0), Some(0)); // (0,0)
-        assert_eq!(tiles[1].get(0, 0), Some(4)); // (4,0)
-        assert_eq!(tiles[2].get(0, 0), Some(24)); // (0,3)
-        assert_eq!(tiles[3].get(0, 0), Some(28)); // (4,3)
+        assert_eq!(tiles[0].get(0, 0), Some(Mono8::new(0))); // (0,0)
+        assert_eq!(tiles[1].get(0, 0), Some(Mono8::new(4))); // (4,0)
+        assert_eq!(tiles[2].get(0, 0), Some(Mono8::new(24))); // (0,3)
+        assert_eq!(tiles[3].get(0, 0), Some(Mono8::new(28))); // (4,3)
     }
 
     #[test]
     fn test_subview_into_tiles_partial_edges() {
         // Non-divisible dimensions produce partial edge tiles
-        let img: Image<u8> = Image::generate(5, 5, |x, y| (x + y * 5) as u8);
-        let tiles: Vec<_> = img.into_tiles(Size::new(3, 3)).collect();
+        let img: Image<Mono8> = Image::generate(5, 5, |x, y| Mono8::new((x + y * 5) as u8));
+        let tiles: Vec<_> = img.tiles(Size::new(3, 3)).collect();
         assert_eq!(tiles.len(), 4);
         assert_eq!(tiles[0].size(), Size::new(3, 3)); // (0,0)
         assert_eq!(tiles[1].size(), Size::new(2, 3)); // (3,0) partial width
@@ -1699,10 +1719,10 @@ mod tests {
 
     #[test]
     fn test_subview_into_tiles_multiple_borrows_simultaneously() {
-        // Multiple tile iterators can coexist since into_tiles only borrows
-        let img: Image<u8> = Image::generate(4, 4, |x, y| (x + y * 4) as u8);
-        let tiles_2x2: Vec<_> = img.into_tiles(Size::new(2, 2)).collect();
-        let tiles_4x4: Vec<_> = img.into_tiles(Size::new(4, 4)).collect();
+        // Multiple tile iterators can coexist since tiles only borrows
+        let img: Image<Mono8> = Image::generate(4, 4, |x, y| Mono8::new((x + y * 4) as u8));
+        let tiles_2x2: Vec<_> = img.tiles(Size::new(2, 2)).collect();
+        let tiles_4x4: Vec<_> = img.tiles(Size::new(4, 4)).collect();
         assert_eq!(tiles_2x2.len(), 4);
         assert_eq!(tiles_4x4.len(), 1);
         // Both views see the same underlying data
@@ -1713,12 +1733,12 @@ mod tests {
     fn test_subview_into_tiles_symmetry_with_into_tiles_mut() {
         // Verify the unified into_tiles and separate IntoTilesMut
         // yield tiles with identical sizes and pixel values
-        let mut img: Image<u8> = Image::generate(7, 5, |x, y| (x + y * 7) as u8);
+        let mut img: Image<Mono8> = Image::generate(7, 5, |x, y| Mono8::new((x + y * 7) as u8));
         let tile_size = Size::new(3, 2);
 
-        let immut_sizes: Vec<Size> = img.into_tiles(tile_size).map(|t| t.size()).collect();
-        let immut_values: Vec<Vec<u8>> = img
-            .into_tiles(tile_size)
+        let immut_sizes: Vec<Size> = img.tiles(tile_size).map(|t| t.size()).collect();
+        let immut_values: Vec<Vec<Mono8>> = img
+            .tiles(tile_size)
             .map(|t| {
                 let mut vals = Vec::new();
                 for y in 0..t.height() {
@@ -1732,7 +1752,7 @@ mod tests {
 
         let mut_tiles: Vec<_> = (&mut img).into_tiles_mut(tile_size).collect();
         let mut_sizes: Vec<Size> = mut_tiles.iter().map(|t| t.size()).collect();
-        let mut_values: Vec<Vec<u8>> = mut_tiles
+        let mut_values: Vec<Vec<Mono8>> = mut_tiles
             .iter()
             .map(|t| {
                 let mut vals = Vec::new();
@@ -1754,21 +1774,21 @@ mod tests {
     #[test]
     #[should_panic(expected = "tile size must be non-zero")]
     fn tile_iter_rejects_zero_width() {
-        let img = Image::<u8>::zero(4, 4);
-        let _ = img.into_tiles(Size::new(0, 2)).count();
+        let img = Image::<Mono8>::zero(4, 4);
+        let _ = img.tiles(Size::new(0, 2)).count();
     }
 
     #[test]
     #[should_panic(expected = "tile size must be non-zero")]
     fn tile_iter_rejects_zero_height() {
-        let img = Image::<u8>::zero(4, 4);
-        let _ = img.into_tiles(Size::new(2, 0)).count();
+        let img = Image::<Mono8>::zero(4, 4);
+        let _ = img.tiles(Size::new(2, 0)).count();
     }
 
     #[test]
     #[should_panic(expected = "stride must be non-zero")]
     fn sliding_window_iter_rejects_zero_horizontal_stride() {
-        let img = Image::<u8>::zero(4, 4);
+        let img = Image::<Mono8>::zero(4, 4);
         let _ = SlidingWindow::new(Size::new(2, 2))
             .stride(Stride::new(0, 1))
             .iter(&img);
@@ -1777,7 +1797,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "stride must be non-zero")]
     fn sliding_window_iter_rejects_zero_vertical_stride() {
-        let img = Image::<u8>::zero(4, 4);
+        let img = Image::<Mono8>::zero(4, 4);
         let _ = SlidingWindow::new(Size::new(2, 2))
             .stride(Stride::new(1, 0))
             .iter(&img);

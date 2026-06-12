@@ -8,7 +8,7 @@
 //! - [`strategy`] — the [`BinningStrategy`] trait, the [`BinIndex`]
 //!   classification enum, and the concrete [`NaturalBins`], [`LinearBins`],
 //!   and [`CustomBins`] strategies.
-//! - [`histogram_mod`](mod@histogram) — the [`Histogram`] type itself.
+//! - [`engine`] — the [`Histogram`] type itself.
 //! - [`HistogramOutput`] — caller-driven output shape (single histogram,
 //!   `Vec`, or fixed-size array).
 //! - [`histogram`](self::histogram()) — the top-level entry point.
@@ -92,7 +92,38 @@
 //! [`NaturalBins`]: strategy::NaturalBins
 //! [`LinearBins`]: strategy::LinearBins
 //! [`CustomBins`]: strategy::CustomBins
-//! [`Histogram`]: histogram::Histogram
+//! [`Histogram`]: engine::Histogram
+//!
+//! # Recipe
+//!
+//! Compute a histogram and locate the mode (most common intensity value):
+//!
+//! ```
+//! use fovea::analyze::histogram::{Histogram, NaturalBins, histogram};
+//! use fovea::image::Image;
+//! use fovea::pixel::Mono8;
+//!
+//! let img = Image::from_vec(4, 2, vec![
+//!     Mono8::new(0),   Mono8::new(128), Mono8::new(128), Mono8::new(255),
+//!     Mono8::new(0),   Mono8::new(128), Mono8::new(128), Mono8::new(255),
+//! ])?;
+//!
+//! let hist: Histogram<NaturalBins, _> = histogram(&img, &NaturalBins)?;
+//! assert_eq!(hist.total_count, 8);
+//! assert_eq!(hist.count_at_bin(128), 4); // four mid-grey pixels
+//!
+//! // Mode bin: the intensity value that appears most often.
+//! let mode_bin = hist.bins().iter()
+//!     .enumerate()
+//!     .max_by_key(|(_i, count)| **count)
+//!     .map(|(i, _)| i)
+//!     .unwrap();
+//! assert_eq!(mode_bin, 128);
+//! # Ok::<(), fovea::Error>(())
+//! ```
+//!
+//! For a full example with display and log-scale overlay, see `show_histogram`
+//! in [fovea-examples](https://github.com/karhunen-loeve/fovea-examples).
 //!
 //! # Consumers
 //!
@@ -103,13 +134,13 @@
 //! - [`equalization_lut`] / [`equalize_image`] /
 //!   [`equalize_image_into`] — per-channel histogram equalization.
 
-pub mod histogram;
+pub mod engine;
 pub mod strategy;
 
 pub mod equalize;
 pub mod otsu;
 
-pub use histogram::Histogram;
+pub use engine::Histogram;
 pub use strategy::{BinIndex, BinningStrategy, CustomBins, LinearBins, NaturalBins};
 
 pub use equalize::{equalization_lut, equalize_image, equalize_image_into};

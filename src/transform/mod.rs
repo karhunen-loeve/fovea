@@ -1,9 +1,22 @@
-//! Image transformation primitives.
+//! Image-producing operations: conversion, resize, geometry, filters, morphology, and template matching.
 //!
-//! This module organises transforms into four conceptual levels,
-//! presented in increasing scope (a single coordinate → the whole image).
+//! Start with [`convert_image`](crate::transform::convert_image) when the pixel type changes, [`resize`](crate::transform::resize) when
+//! dimensions change, [`combine_images`](crate::transform::combine_images) when two same-sized images become one,
+//! and the filter/convolution APIs when each output pixel depends on a
+//! neighborhood.
 //!
-//! ## Level 0 — Coordinate-only transforms (`geometry`)
+//! ## Common choices
+//!
+//! | Task | Start with | Important constraint |
+//! |---|---|---|
+//! | Convert sRGB to linear light | [`convert_image`](crate::transform::convert_image) + [`SrgbGamma`](crate::transform::SrgbGamma) | The strategy names the transfer function. |
+//! | Resize by copying samples | [`resize`](crate::transform::resize) + [`NearestNeighbor`](crate::transform::NearestNeighbor) | Works for gamma-encoded pixels because no blending occurs. |
+//! | Resize smoothly | [`resize`](crate::transform::resize) + [`Bilinear`](crate::transform::Bilinear) | Requires [`crate::pixel::LinearSpace`]. Linearize sRGB first. |
+//! | Combine two images pixel-wise | [`combine_images`](crate::transform::combine_images) | Inputs must have the same size. |
+//! | Apply a convolution/filter | [`convolve`](crate::transform::convolve) or named filters | Choose an explicit border policy. |
+//! | Erode/dilate/median | [`map_neighborhood`](crate::transform::map_neighborhood) or morphology helpers | Use masks for active neighborhood positions. |
+//!
+//! ## Geometry and flips
 //!
 //! Pixel **positions** are rearranged without modifying pixel **values**.
 //! [`flip_h`](crate::transform::flip_h), [`flip_v`](crate::transform::flip_v),
@@ -19,7 +32,7 @@
 //! [`crate::pixel::Indexed8`]). These are physical operations rather
 //! than view wrappers, so the result is a normal image.
 //!
-//! ## Level 1 — Unary pixel transforms (`ConvertPixel` / `PixelMap`)
+//! ## Pixel conversion
 //!
 //! Apply a function to every pixel independently, potentially changing the
 //! pixel type.  The workhorse here is [`convert_image`](crate::transform::convert_image)
@@ -29,7 +42,7 @@
 //! [`Clamp`](crate::transform::Clamp) cover the most common conversions; the
 //! [`PixelMap`](crate::transform::PixelMap) wrapper lets you pass an arbitrary closure.
 //!
-//! ## Level 2 — Binary pixel transforms (`CombinePixels` / `combine_images`)
+//! ## Image arithmetic
 //!
 //! Combine two images of the same size pixel-wise, producing a third image.
 //! [`combine_images`](crate::transform::combine_images) is the generic engine;
@@ -49,7 +62,7 @@
 //! [`image_max`](crate::transform::image_max)) are provided as
 //! discoverability shortcuts.
 //!
-//! ## Level 3 — Neighbourhood transforms (`FoldOp` / `MapOp`)
+//! ## Neighbourhood transforms
 //!
 //! Each output pixel is computed from a window of input pixels centred at
 //! that position.  Two complementary primitives are provided:

@@ -71,12 +71,11 @@ where
     assert_eq!(out.width(), img.height());
     assert_eq!(out.height(), img.width());
     let h_out = out.height();
-    let w_out = out.width();
     for y_out in 0..h_out {
         let dst = out.row_mut(y_out);
         // out[x_out, y_out] = in[y_out, x_out]
-        for x_out in 0..w_out {
-            dst[x_out] = img.pixel_at(y_out, x_out);
+        for (x_out, pixel) in dst.iter_mut().enumerate() {
+            *pixel = img.pixel_at(y_out, x_out);
         }
     }
 }

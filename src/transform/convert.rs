@@ -8,7 +8,8 @@ use crate::pixel::{
     BgraF64, HomogeneousPixel, Indexed8, Mono, Mono8, Mono16, Mono32, Mono64, MonoA8, MonoA16,
     MonoA32, MonoA64, MonoAF32, MonoAF64, MonoF32, MonoF64, PlainChannel, Rgb8, Rgb16, Rgb32,
     Rgb64, RgbF32, RgbF64, Rgba8, Rgba16, Rgba32, Rgba64, RgbaF32, RgbaF64, Srgb8, Srgb16,
-    SrgbMono8, SrgbMono16, SrgbMonoA8, SrgbMonoA16, Srgba8, Srgba16, WhiteChannel, ZeroablePixel,
+    SrgbBgr8, SrgbBgr16, SrgbBgra8, SrgbBgra16, SrgbMono8, SrgbMono16, SrgbMonoA8, SrgbMonoA16,
+    Srgba8, Srgba16, WhiteChannel, ZeroablePixel,
 };
 
 // ───────────────────────────────────────────────────────────────────────────────
@@ -58,14 +59,30 @@ pub trait ConvertPixel<Src, Dst> {
 /// range of the destination type.  This preserves *intensity*: maximum
 /// brightness in the source stays maximum brightness in the destination.
 ///
-/// For floating-point ↔ integer conversions the floating-point range is
-/// assumed to be `[0.0, 1.0]`.
+/// For integer types the range is exactly defined by the bit width (e.g.
+/// `[0, 255]` for `u8`, `[0, 65535]` for `u16`).  For floating-point pixel
+/// types (`MonoF32`, `RgbF32`, etc.) the range is **assumed to be
+/// `[0.0, 1.0]`** — values outside that range are clamped.
+///
+/// # Caveat: float pixel types
+///
+/// `MonoF32` (and other float pixel types) have no defined maximum value —
+/// they can represent HDR data above `1.0` or negative values.  The
+/// `[0.0, 1.0]` range used by `FullRange` is therefore an implicit
+/// convention, not a type-level contract.  This makes `FullRange` a
+/// potentially surprising choice for float → integer conversions: a
+/// `MonoF32` value of `2.0` silently clamps to `Mono8(255)` just like
+/// `1.0` does.
+///
+/// If your `MonoF32` data may be outside `[0.0, 1.0]`, use
+/// [`PixelMap`] with an explicit normalization factor instead.
 ///
 /// # Examples
 /// - `Mono8(255)` → `Mono16(65535)` — white stays white
 /// - `Mono16(32768)` → `Mono8(128)` — mid-gray stays mid-gray
 /// - `Mono8(0)` → `Mono16(0)` — black stays black
-/// - `Mono8(255)` → `f32(1.0)` — max maps to 1.0
+/// - `MonoF32(1.0)` → `Mono8(255)` — `1.0` maps to max
+/// - `MonoF32(1.5)` → `Mono8(255)` — clamped (outside `[0.0, 1.0]`)
 ///
 /// ```
 /// # use fovea::pixel::{Mono8, Mono16};
@@ -1234,6 +1251,14 @@ impl_color_swap!(sat: Rgba64 [r, g, b, a] <=> Bgra64 [b, g, r, a]);
 impl_color_swap!(f32: RgbaF32 [r, g, b, a] <=> BgraF32 [b, g, r, a]);
 impl_color_swap!(f32: RgbaF64 [r, g, b, a] <=> BgraF64 [b, g, r, a]);
 
+// ── sRGB ColorSwap (gamma-encoded RGB ↔ BGR, gamma preserved) ────────────────
+// Bridges OpenCV-order sRGB buffers (`SrgbBgr*`) to the RGB-order sRGB family
+// without touching the gamma encoding.
+impl_color_swap!(sat: Srgb8   [r, g, b]    <=> SrgbBgr8   [b, g, r]);
+impl_color_swap!(sat: Srgb16  [r, g, b]    <=> SrgbBgr16  [b, g, r]);
+impl_color_swap!(sat: Srgba8  [r, g, b, a] <=> SrgbBgra8  [b, g, r, a]);
+impl_color_swap!(sat: Srgba16 [r, g, b, a] <=> SrgbBgra16 [b, g, r, a]);
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // AddAlpha implementations (3-channel → 4-channel, alpha = max)
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1268,6 +1293,10 @@ impl ConvertPixel<SrgbMono16, SrgbMonoA16> for AddAlpha {
         SrgbMonoA16::new(src.0.0, u16::MAX)
     }
 }
+
+// ── sRGB BGR-order AddAlpha (alpha = max, gamma preserved) ───────────────────
+impl_add_alpha!(sat: SrgbBgr8  => SrgbBgra8,  [b, g, r], u8::MAX);
+impl_add_alpha!(sat: SrgbBgr16 => SrgbBgra16, [b, g, r], u16::MAX);
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // MonoA family — FullRange + Narrow depth conversions
@@ -1575,6 +1604,111 @@ impl ConvertPixel<MonoAF32, SrgbMonoA16> for SrgbGamma {
     fn convert(&self, src: &MonoAF32) -> SrgbMonoA16 {
         SrgbMonoA16::new(
             srgb_encode_16(src.v),
+            (src.a.clamp(0.0, 1.0) * 65535.0 + 0.5) as u16, // alpha is always linear
+        )
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SrgbGamma implementations — BGR-order sRGB ↔ linear (OpenCV interop)
+//
+// Same transfer function as the RGB-order impls above; only the channel layout
+// differs.  Decoding an `SrgbBgr*` pixel yields linear-light `BgrF32` / `BgraF32`
+// in the same B, G, R order (the gamma curve is per-channel, order-agnostic).
+// For BGRA the alpha channel is always linear (scaled to [0,1], no gamma).
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── SrgbBgr8 ↔ BgrF32 ──────────────────────────────────────────────────────
+
+impl ConvertPixel<SrgbBgr8, BgrF32> for SrgbGamma {
+    #[inline]
+    fn convert(&self, src: &SrgbBgr8) -> BgrF32 {
+        BgrF32::new(
+            srgb_decode(src.b.0),
+            srgb_decode(src.g.0),
+            srgb_decode(src.r.0),
+        )
+    }
+}
+
+impl ConvertPixel<BgrF32, SrgbBgr8> for SrgbGamma {
+    #[inline]
+    fn convert(&self, src: &BgrF32) -> SrgbBgr8 {
+        SrgbBgr8::new(srgb_encode(src.b), srgb_encode(src.g), srgb_encode(src.r))
+    }
+}
+
+// ── SrgbBgra8 ↔ BgraF32 ────────────────────────────────────────────────────
+
+impl ConvertPixel<SrgbBgra8, BgraF32> for SrgbGamma {
+    #[inline]
+    fn convert(&self, src: &SrgbBgra8) -> BgraF32 {
+        BgraF32::new(
+            srgb_decode(src.b.0),
+            srgb_decode(src.g.0),
+            srgb_decode(src.r.0),
+            src.a.0 as f32 / 255.0, // alpha is always linear
+        )
+    }
+}
+
+impl ConvertPixel<BgraF32, SrgbBgra8> for SrgbGamma {
+    #[inline]
+    fn convert(&self, src: &BgraF32) -> SrgbBgra8 {
+        SrgbBgra8::new(
+            srgb_encode(src.b),
+            srgb_encode(src.g),
+            srgb_encode(src.r),
+            (src.a.clamp(0.0, 1.0) * 255.0 + 0.5) as u8, // alpha is always linear
+        )
+    }
+}
+
+// ── SrgbBgr16 ↔ BgrF32 ─────────────────────────────────────────────────────
+
+impl ConvertPixel<SrgbBgr16, BgrF32> for SrgbGamma {
+    #[inline]
+    fn convert(&self, src: &SrgbBgr16) -> BgrF32 {
+        BgrF32::new(
+            srgb_decode_16(src.b.0),
+            srgb_decode_16(src.g.0),
+            srgb_decode_16(src.r.0),
+        )
+    }
+}
+
+impl ConvertPixel<BgrF32, SrgbBgr16> for SrgbGamma {
+    #[inline]
+    fn convert(&self, src: &BgrF32) -> SrgbBgr16 {
+        SrgbBgr16::new(
+            srgb_encode_16(src.b),
+            srgb_encode_16(src.g),
+            srgb_encode_16(src.r),
+        )
+    }
+}
+
+// ── SrgbBgra16 ↔ BgraF32 ───────────────────────────────────────────────────
+
+impl ConvertPixel<SrgbBgra16, BgraF32> for SrgbGamma {
+    #[inline]
+    fn convert(&self, src: &SrgbBgra16) -> BgraF32 {
+        BgraF32::new(
+            srgb_decode_16(src.b.0),
+            srgb_decode_16(src.g.0),
+            srgb_decode_16(src.r.0),
+            src.a.0 as f32 / 65535.0, // alpha is always linear
+        )
+    }
+}
+
+impl ConvertPixel<BgraF32, SrgbBgra16> for SrgbGamma {
+    #[inline]
+    fn convert(&self, src: &BgraF32) -> SrgbBgra16 {
+        SrgbBgra16::new(
+            srgb_encode_16(src.b),
+            srgb_encode_16(src.g),
+            srgb_encode_16(src.r),
             (src.a.clamp(0.0, 1.0) * 65535.0 + 0.5) as u16, // alpha is always linear
         )
     }
@@ -4820,6 +4954,196 @@ mod tests {
                 );
             }
         }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // SrgbBgr family — OpenCV-order sRGB (ColorSwap / SrgbGamma / AddAlpha)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    // ─── ColorSwap: SrgbBgr ↔ Srgb (gamma preserved, R/B swapped) ──────────
+
+    #[test]
+    fn colorswap_srgbbgr8_to_srgb8() {
+        // SrgbBgr8 stores B, G, R; ColorSwap must reorder to R, G, B.
+        let src = SrgbBgr8::new(200, 100, 50); // b=200, g=100, r=50
+        let dst: Srgb8 = ColorSwap.convert(&src);
+        assert_eq!(dst, Srgb8::new(50, 100, 200)); // r=50, g=100, b=200
+    }
+
+    #[test]
+    fn colorswap_srgb8_to_srgbbgr8() {
+        let src = Srgb8::new(50, 100, 200); // r=50, g=100, b=200
+        let dst: SrgbBgr8 = ColorSwap.convert(&src);
+        assert_eq!(dst, SrgbBgr8::new(200, 100, 50)); // b=200, g=100, r=50
+    }
+
+    #[test]
+    fn colorswap_srgbbgr8_roundtrip() {
+        let src = SrgbBgr8::new(10, 20, 30);
+        let swapped: Srgb8 = ColorSwap.convert(&src);
+        let back: SrgbBgr8 = ColorSwap.convert(&swapped);
+        assert_eq!(src, back);
+    }
+
+    #[test]
+    fn colorswap_srgbbgra8_to_srgba8() {
+        let src = SrgbBgra8::new(200, 100, 50, 255); // b, g, r, a
+        let dst: Srgba8 = ColorSwap.convert(&src);
+        assert_eq!(dst, Srgba8::new(50, 100, 200, 255)); // r, g, b, a (alpha unchanged)
+    }
+
+    #[test]
+    fn colorswap_srgbbgr16_roundtrip() {
+        let src = SrgbBgr16::new(50000, 16384, 32768);
+        let swapped: Srgb16 = ColorSwap.convert(&src);
+        assert_eq!(swapped, Srgb16::new(32768, 16384, 50000));
+        let back: SrgbBgr16 = ColorSwap.convert(&swapped);
+        assert_eq!(src, back);
+    }
+
+    #[test]
+    fn colorswap_srgbbgra16_to_srgba16() {
+        let src = SrgbBgra16::new(50000, 16384, 32768, 65535);
+        let dst: Srgba16 = ColorSwap.convert(&src);
+        assert_eq!(dst, Srgba16::new(32768, 16384, 50000, 65535));
+    }
+
+    // ─── AddAlpha: SrgbBgr → SrgbBgra (alpha = max) ─────────────────────────
+
+    #[test]
+    fn addalpha_srgbbgr8_to_srgbbgra8() {
+        let src = SrgbBgr8::new(200, 100, 50);
+        let dst: SrgbBgra8 = AddAlpha.convert(&src);
+        assert_eq!(dst, SrgbBgra8::new(200, 100, 50, 255));
+    }
+
+    #[test]
+    fn addalpha_srgbbgr16_to_srgbbgra16() {
+        let src = SrgbBgr16::new(50000, 16384, 32768);
+        let dst: SrgbBgra16 = AddAlpha.convert(&src);
+        assert_eq!(dst, SrgbBgra16::new(50000, 16384, 32768, 65535));
+    }
+
+    // ─── SrgbGamma: SrgbBgr ↔ BgrF32 (decode/encode, BGR order kept) ───────
+
+    #[test]
+    fn srgbgamma_srgbbgr8_decode_matches_srgb8() {
+        // The same channel value must decode identically regardless of order.
+        let bgr = SrgbBgr8::new(200, 64, 128); // b=200, g=64, r=128
+        let linear: BgrF32 = SrgbGamma.convert(&bgr);
+        // r channel (128) of the BGR pixel equals r channel of an equivalent Srgb8.
+        let reference: RgbF32 = SrgbGamma.convert(&Srgb8::new(128, 64, 200));
+        assert!((linear.r - reference.r).abs() < 1e-6);
+        assert!((linear.g - reference.g).abs() < 1e-6);
+        assert!((linear.b - reference.b).abs() < 1e-6);
+    }
+
+    #[test]
+    fn srgbgamma_srgbbgr8_roundtrip() {
+        for &v in &[0u8, 1, 10, 64, 128, 200, 254, 255] {
+            let orig = SrgbBgr8::new(v, v.wrapping_add(5), v.wrapping_sub(7));
+            let linear: BgrF32 = SrgbGamma.convert(&orig);
+            let back: SrgbBgr8 = SrgbGamma.convert(&linear);
+            assert_eq!(orig, back, "roundtrip failed for {v}");
+        }
+    }
+
+    #[test]
+    fn srgbgamma_srgbbgra8_roundtrip() {
+        let orig = SrgbBgra8::new(200, 64, 128, 200);
+        let linear: BgraF32 = SrgbGamma.convert(&orig);
+        // Alpha is linear: 200/255 scaled back and forth.
+        let back: SrgbBgra8 = SrgbGamma.convert(&linear);
+        assert_eq!(orig, back);
+    }
+
+    #[test]
+    fn srgbgamma_srgbbgr16_roundtrip() {
+        for &v in &[0u16, 1, 1000, 16384, 32768, 50000, 65534, 65535] {
+            let orig = SrgbBgr16::new(v, v.saturating_add(13), v.saturating_sub(29));
+            let linear: BgrF32 = SrgbGamma.convert(&orig);
+            let back: SrgbBgr16 = SrgbGamma.convert(&linear);
+            assert_eq!(orig, back, "roundtrip failed for {v}");
+        }
+    }
+
+    #[test]
+    fn srgbgamma_srgbbgra16_roundtrip() {
+        let orig = SrgbBgra16::new(50000, 16384, 32768, 65535);
+        let linear: BgraF32 = SrgbGamma.convert(&orig);
+        let back: SrgbBgra16 = SrgbGamma.convert(&linear);
+        assert_eq!(orig, back);
+    }
+
+    // ─── Chained OpenCV bridge: SrgbBgr8 → RgbF32 (linear RGB) ─────────────
+
+    #[test]
+    fn opencv_srgbbgr8_to_linear_rgb_via_then() {
+        // OpenCV buffer (gamma BGR) → reorder to gamma RGB → decode to linear RGB.
+        let bgr = SrgbBgr8::new(200, 64, 128); // b=200, g=64, r=128
+        let linear: RgbF32 = ColorSwap.then::<Srgb8, _>(SrgbGamma).convert(&bgr);
+        let reference: RgbF32 = SrgbGamma.convert(&Srgb8::new(128, 64, 200));
+        assert!((linear.r - reference.r).abs() < 1e-6);
+        assert!((linear.g - reference.g).abs() < 1e-6);
+        assert!((linear.b - reference.b).abs() < 1e-6);
+    }
+
+    #[test]
+    fn linear_rgb_to_opencv_srgbbgr8_via_then() {
+        // linear RGB → encode to gamma RGB → reorder to OpenCV gamma BGR.
+        let linear = RgbF32::new(0.5, 0.1, 0.8);
+        let bgr: SrgbBgr8 = SrgbGamma.then::<Srgb8, _>(ColorSwap).convert(&linear);
+        let srgb: Srgb8 = SrgbGamma.convert(&linear);
+        // After ColorSwap the BGR pixel's r equals the sRGB r, etc.
+        assert_eq!(bgr.r.0, srgb.r.0);
+        assert_eq!(bgr.g.0, srgb.g.0);
+        assert_eq!(bgr.b.0, srgb.b.0);
+    }
+
+    // ─── Image-level SrgbBgr conversions ───────────────────────────────────
+
+    #[test]
+    fn convert_image_srgbbgr8_to_srgb8() {
+        let img: Image<SrgbBgr8> = Image::generate(4, 4, |x, y| {
+            SrgbBgr8::new((x * 60) as u8, (y * 60) as u8, 100)
+        });
+        let out: Image<Srgb8> = convert_image(&img, ColorSwap);
+        for y in 0..4 {
+            for x in 0..4 {
+                let s = img.pixel_at(x, y);
+                assert_eq!(out.pixel_at(x, y), Srgb8::new(s.r.0, s.g.0, s.b.0));
+            }
+        }
+    }
+
+    #[test]
+    fn convert_image_srgbbgr8_roundtrip_through_linear() {
+        let orig: Image<SrgbBgr8> = Image::generate(4, 4, |x, y| {
+            SrgbBgr8::new((x * 60) as u8, (y * 60) as u8, 128)
+        });
+        let linear: Image<BgrF32> = convert_image(&orig, SrgbGamma);
+        let back: Image<SrgbBgr8> = convert_image(&linear, SrgbGamma);
+        for y in 0..4 {
+            for x in 0..4 {
+                assert_eq!(orig.pixel_at(x, y), back.pixel_at(x, y));
+            }
+        }
+    }
+
+    // ─── Zero-copy wrap of OpenCV-style u8 data ────────────────────────────
+
+    #[test]
+    fn srgbbgr8_zero_copy_cast_from_u8_bytes() {
+        use crate::image::{ImageRef, ImageView};
+        // Raw bytes as an OpenCV CV_8UC3 buffer delivers them: B, G, R per pixel.
+        let raw: [u8; 12] = [200, 100, 50, 0, 0, 0, 255, 255, 255, 10, 20, 30];
+        // Zero-copy reinterpret: SrgbBgr8 is repr(C), align 1, 3 bytes — like Bgr8.
+        let pixels: &[SrgbBgr8] = SrgbBgr8::cast_slice(&raw).unwrap();
+        assert_eq!(pixels.len(), 4);
+        assert_eq!(pixels[0], SrgbBgr8::new(200, 100, 50));
+        let view = ImageRef::new(2, 2, pixels).unwrap();
+        assert_eq!(view.pixel_at(0, 0), SrgbBgr8::new(200, 100, 50));
+        assert_eq!(view.pixel_at(1, 1), SrgbBgr8::new(10, 20, 30));
     }
 
     // ─── SrgbGamma: nearest-neighbor resize works on sRGB ───────────────────

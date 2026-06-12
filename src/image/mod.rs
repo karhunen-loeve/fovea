@@ -1,3 +1,30 @@
+//! Image storage, views, ROIs, tiles, and neighborhood shapes.
+//!
+//! Start with [`Image`](crate::image::Image) when you own pixels, [`ImageRef`](crate::image::ImageRef) / [`ImageRefMut`](crate::image::ImageRefMut)
+//! when you borrow existing storage, and [`ImageView`](crate::image::ImageView) when you are writing an
+//! algorithm that only needs random access.
+//!
+//! ## Which access trait?
+//!
+//! | Trait | Guarantee | Reach for it when |
+//! |---|---|---|
+//! | [`ImageView`](crate::image::ImageView) | `pixel_at(x, y)` by value | You only need random access. |
+//! | [`ImageViewMut`](crate::image::ImageViewMut) | mutable random access | You need to edit individual pixels. |
+//! | [`RasterImage`](crate::image::RasterImage) | dense row slices | You scan rows or want cache-friendly loops. |
+//! | [`RasterImageMut`](crate::image::RasterImageMut) | mutable row slices | You mutate rows in place. |
+//! | [`ContiguousImage`](crate::image::ContiguousImage) | one dense pixel slice | You need the fastest whole-buffer path. |
+//! | [`PlainImage`](crate::image::PlainImage) | byte access to `PlainPixel` storage | You write camera, file, FFI, or GPU boundaries. |
+//!
+//! ## Views do not allocate
+//!
+//! [`SubView::roi`](crate::image::SubView::roi) returns a borrowed region of interest. [`SubView::tiles`](crate::image::SubView::tiles)
+//! splits an image into borrowed immutable tiles. [`IntoTilesMut`](crate::image::IntoTilesMut) yields
+//! disjoint mutable tiles for safe chunked in-place processing.
+//!
+//! Do not use this module for pixel semantics. If the question is "is this
+//! gamma-encoded?" or "can this be interpolated?", look in [`crate::pixel`].
+
+/// Border policies for out-of-bounds neighborhood access.
 pub mod border;
 mod image_view;
 mod neighborhood;
@@ -27,14 +54,16 @@ pub use zip::{ZipPixelsIter, zip_pixels};
 
 // ─── Binary image vocabulary ────────────────────────────────────
 //
-// Binary images are images whose pixel type is `bool`. The `bool` type
-// already rides the `T: Copy` pathway through `Image<T>`, `ImageView`,
-// `ImageRef`, `SubView`, tiles, sliding windows, zip, and the parallel
-// iteration machinery — all of which work today with no changes. `bool` is
-// also the pixel type that `map_neighborhood*` already consumes as its
-// topology mask parameter (`MI: ImageView<Pixel = bool>`), so morphology
-// and neighborhood operations natively accept binary images with no
-// bridging conversion.
+// Binary images are images whose pixel type is `bool`. `bool` rides the
+// `T: Copy` pathway through `Image<T>`, `ImageView`, `ImageRef`, zip, and the
+// parallel iteration machinery, and — because a boolean mask value means the
+// same thing wherever it sits — it also implements
+// [`OriginInvariantPixel`](crate::pixel::OriginInvariantPixel) (below), which
+// is what keeps ordinary `SubView` ROI, tiling, and sliding windows available
+// for binary images (ADR-0051). `bool` is also the pixel type that
+// `map_neighborhood*` already consumes as its topology mask parameter
+// (`MI: ImageView<Pixel = bool>`), so morphology and neighborhood operations
+// natively accept binary images with no bridging conversion.
 //
 // These aliases give that concept a first-class name. They are zero-cost
 // documentation: every `BinaryImage` is structurally identical to the
@@ -44,6 +73,13 @@ pub use zip::{ZipPixelsIter, zip_pixels};
 // this codebase for compile-time-sized structuring elements
 // (`Mask<KW, KH> = Neighborhood<bool, KW, KH>`). Reusing `Mask` for whole
 // images would be a three-way collision.
+
+// A boolean mask value carries no coordinate phase — `true` / `false` means
+// the same thing at any origin — so binary images keep ordinary
+// same-pixel-type ROI, tiling, and sliding windows. The impl lives here,
+// beside the `BinaryImage` aliases it exists to serve, rather than in a pixel
+// family module, because `bool` is a primitive and belongs to no pixel family.
+impl crate::pixel::OriginInvariantPixel for bool {}
 
 /// An image whose pixels are binary (`bool`).
 ///

@@ -67,7 +67,7 @@ pub enum BinIndex {
 ///
 /// `BinningStrategy` is the analytic engine of a histogram: given a channel
 /// value of type `V`, it answers "which bin?" and reports the value range
-/// covered by each bin. The histogram itself ([`super::histogram::Histogram`])
+/// covered by each bin. The histogram itself ([`super::engine::Histogram`])
 /// stores counts and the strategy instance; the strategy is the only
 /// component that knows how to classify a value or reproduce a bin's edges.
 ///

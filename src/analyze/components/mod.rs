@@ -2,7 +2,7 @@
 //!
 //! Two-pass union-find labeling on a [`BinaryImage`](crate::image::BinaryImage)
 //! (`ImageView<Pixel = bool>`), parameterised by a compile-time
-//! [`Connectivity`] strategy and a [`LabelPixel`](crate::pixel::LabelPixel)
+//! [`Connectivity`] strategy and a [`LabelPixel`]
 //! output pixel type.
 //!
 //! Entry points:

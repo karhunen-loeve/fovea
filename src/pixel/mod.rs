@@ -1,3 +1,26 @@
+//! Pixel types and the traits that make image operations type-safe.
+//!
+//! Start with concrete pixels such as [`Srgb8`](crate::pixel::Srgb8), [`RgbF32`](crate::pixel::RgbF32), [`Mono16`](crate::pixel::Mono16), or
+//! `Mono<12>`. Reach for traits when you are writing generic algorithms:
+//!
+//! | Trait | What it promises | Typical use |
+//! |---|---|---|
+//! | [`PlainPixel`](crate::pixel::PlainPixel) | stable byte layout, no padding, no invalid bit patterns | raw camera bytes, FFI, GPU upload |
+//! | [`HomogeneousPixel`](crate::pixel::HomogeneousPixel) | every channel has the same channel type | histograms and per-channel transforms |
+//! | [`LinearPixel`](crate::pixel::LinearPixel) | arithmetic support for interpolation/blending | filters, resize, combine operations |
+//! | [`LinearSpace`](crate::pixel::LinearSpace) | the values are in a linear space | prevents gamma-incorrect blending |
+//! | [`ZeroablePixel`](crate::pixel::ZeroablePixel) | an all-zero pixel exists | image allocation and output buffers |
+//!
+//! The most important distinction is semantic, not structural: [`Srgb8`](crate::pixel::Srgb8) is
+//! gamma-encoded display/file data, while [`Rgb8`](crate::pixel::Rgb8) is linear-light RGB. They may
+//! occupy similar bytes, but they are not the same pixel type.
+//!
+//! Do not use this module to choose storage access. For ownership, borrowing,
+//! rows, slices, ROIs, and tiles, use [`crate::image`].
+//!
+//! For conversion strategies and common paths between pixel types,
+//! see [`crate::guide::pixel_conversions`].
+
 mod indexed;
 mod label;
 mod mono;
@@ -56,7 +79,10 @@ pub use rgb::{
     Rgba64, RgbaF32, RgbaF64,
 };
 
-pub use srgb::{Srgb8, Srgb16, SrgbMono8, SrgbMono16, SrgbMonoA8, SrgbMonoA16, Srgba8, Srgba16};
+pub use srgb::{
+    Srgb8, Srgb16, SrgbBgr8, SrgbBgr16, SrgbBgra8, SrgbBgra16, SrgbMono8, SrgbMono16, SrgbMonoA8,
+    SrgbMonoA16, Srgba8, Srgba16,
+};
 
 pub use indexed::Indexed8;
 
@@ -64,10 +90,11 @@ pub use label::Label32;
 
 pub use pixel_traits::{
     Array, BoundedChannel, FromLinear, HomogeneousPixel, IntegralPixel, IntegralSquaredPixel,
-    LinearChannel, LinearPixel, LinearSpace, PlainChannel, PlainPixel, WhiteChannel, ZeroablePixel,
-    blend,
+    LinearChannel, LinearPixel, LinearSpace, OriginInvariantPixel, PlainChannel, PlainPixel,
+    WhiteChannel, ZeroablePixel, blend,
 };
 
 pub use pixel_traits::LabelPixel;
 
 pub(crate) use pixel_traits::MAX_PIXEL_SIZE;
+pub(crate) use pixel_traits::impl_origin_invariant_pixel;
