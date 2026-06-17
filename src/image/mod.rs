@@ -41,7 +41,9 @@ pub use neighborhood::{
     Neighborhood, PositionsIter,
 };
 pub use planar::ImagePlanes;
-pub use separable::SeparableKernel;
+pub use separable::{
+    GaussianKernel1D, MAX_RADIUS, SeparableKernel, gaussian_kernel_1d, gaussian_kernel_size,
+};
 pub use sequential::{
     ContiguousImage, ContiguousImageMut, Image, ImageArray, ImageRef, ImageRefMut, PlainImage,
     PlainImageMut,

@@ -492,6 +492,9 @@ mod tests {
         let full_kernel = Neighborhood::<f32, 3, 3>::gaussian_3x3();
         let full_result: Image<MonoF32> = convolve(&src, &full_kernel, &Clamp);
 
+        // `SeparableKernel::gaussian_3` is normalized (sum 1) while the raw
+        // `Neighborhood` kernel sums to 16, so the separable result equals
+        // the full result divided by 16.
         let sep = SeparableKernel::gaussian_3();
         let sep_result: Image<MonoF32> = convolve_separable(&src, &sep, &Clamp);
 
@@ -500,7 +503,8 @@ mod tests {
         for y in 0..full_result.height() {
             for x in 0..full_result.width() {
                 assert!(
-                    (full_result.pixel_at(x, y).0 - sep_result.pixel_at(x, y).0).abs() < 1e-3,
+                    (full_result.pixel_at(x, y).0 / 16.0 - sep_result.pixel_at(x, y).0).abs()
+                        < 1e-3,
                     "mismatch at ({x}, {y})",
                 );
             }
@@ -513,6 +517,9 @@ mod tests {
         let full_kernel = Neighborhood::<f32, 5, 5>::gaussian_5x5();
         let full_result: Image<MonoF32> = convolve(&src, &full_kernel, &Clamp);
 
+        // `SeparableKernel::gaussian_5` is normalized (sum 1) while the raw
+        // `Neighborhood` kernel sums to 256, so the separable result equals
+        // the full result divided by 256.
         let sep = SeparableKernel::gaussian_5();
         let sep_result: Image<MonoF32> = convolve_separable(&src, &sep, &Clamp);
 
@@ -521,7 +528,8 @@ mod tests {
         for y in 0..full_result.height() {
             for x in 0..full_result.width() {
                 assert!(
-                    (full_result.pixel_at(x, y).0 - sep_result.pixel_at(x, y).0).abs() < 1e-2,
+                    (full_result.pixel_at(x, y).0 / 256.0 - sep_result.pixel_at(x, y).0).abs()
+                        < 1e-3,
                     "mismatch at ({x}, {y})",
                 );
             }
@@ -639,7 +647,9 @@ mod tests {
         let sep = SeparableKernel::gaussian_3();
         let sep_result: Image<MonoF32> = convolve_separable(&src, &sep, &Clamp);
 
-        // Raw API (using the same weights)
+        // Raw API using the raw integer 1D weights (`gaussian_1d_3_*` is
+        // `[1, 2, 1]`, sum 4 per pass → 16 over both). The normalized
+        // `SeparableKernel::gaussian_3` therefore equals the raw result / 16.
         let h = Neighborhood::<f32, 3, 1>::gaussian_1d_3_h();
         let v = Neighborhood::<f32, 1, 3>::gaussian_1d_3_v();
         let raw_result: Image<MonoF32> = convolve_separable_raw(
@@ -656,10 +666,10 @@ mod tests {
         for y in 0..sep_result.height() {
             for x in 0..sep_result.width() {
                 assert!(
-                    (sep_result.pixel_at(x, y).0 - raw_result.pixel_at(x, y).0).abs() < 1e-4,
-                    "mismatch at ({x}, {y}): sep={}, raw={}",
+                    (sep_result.pixel_at(x, y).0 - raw_result.pixel_at(x, y).0 / 16.0).abs() < 1e-4,
+                    "mismatch at ({x}, {y}): sep={}, raw/16={}",
                     sep_result.pixel_at(x, y).0,
-                    raw_result.pixel_at(x, y).0,
+                    raw_result.pixel_at(x, y).0 / 16.0,
                 );
             }
         }

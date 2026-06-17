@@ -16,10 +16,14 @@
 //! pixel type by default (using [`FromLinear`] for the final conversion).
 
 use crate::border::BorderPolicy;
-use crate::image::{Image, Neighborhood, RasterImage, SeparableKernel};
+use crate::image::{
+    Image, Neighborhood, RasterImage, RasterImageMut, SeparableKernel, gaussian_kernel_1d,
+};
 use crate::pixel::{FromLinear, LinearPixel, ZeroablePixel};
 use crate::transform::convolve::convolve;
-use crate::transform::convolve_separable::convolve_separable;
+use crate::transform::convolve_separable::{
+    convolve_separable, convolve_separable_raw, convolve_separable_raw_into,
+};
 
 // ─── Box blur ────────────────────────────────────────────────────────────────
 
@@ -103,13 +107,14 @@ where
 
 /// 3×3 Gaussian blur using a separable two-pass implementation.
 ///
-/// Uses the `[1, 2, 1]` kernel in each direction, giving the standard
-/// discrete 3×3 Gaussian approximation. The combined kernel sums to 16,
-/// so this is the **un-normalised** Gaussian — identical to convolving
-/// with [`Neighborhood::gaussian_3x3`].
+/// Uses the **normalized** `[0.25, 0.5, 0.25]` kernel (`[1, 2, 1] / 4`) in
+/// each direction. The combined 2D kernel sums to 1, so the blur
+/// **preserves brightness** (a flat input is returned unchanged), matching
+/// every mainstream library and the sibling [`box_blur_3x3`].
 ///
-/// If you need a normalised blur (output ≈ input magnitude), divide the
-/// result by 16 or supply pre-normalised 1D kernels.
+/// If you instead need the raw integer `[1, 2, 1]` kernel (sum 16) — for
+/// example to reproduce a legacy ×16-scaled result — convolve directly
+/// with [`Neighborhood::gaussian_3x3`], where the caller owns the scale.
 ///
 /// # Example
 ///
@@ -124,10 +129,10 @@ where
 /// let src = Image::fill(8, 8, MonoF32::new(1.0));
 /// let result: Image<MonoF32> = gaussian_blur_3x3(&src, &Clamp);
 ///
-/// // Un-normalised: 1.0 × 16 = 16.0
+/// // Normalized: brightness preserved, 1.0 → 1.0.
 /// for y in 0..result.height() {
 ///     for x in 0..result.width() {
-///         assert!((result.pixel_at(x, y).0 - 16.0).abs() < 1e-4);
+///         assert!((result.pixel_at(x, y).0 - 1.0).abs() < 1e-4);
 ///     }
 /// }
 /// ```
@@ -149,10 +154,15 @@ where
 
 /// 5×5 Gaussian blur using a separable two-pass implementation.
 ///
-/// Uses the `[1, 4, 6, 4, 1]` kernel in each direction, giving the
-/// standard discrete 5×5 Gaussian approximation. The combined kernel
-/// sums to 256, so this is the **un-normalised** Gaussian — identical
-/// to convolving with [`Neighborhood::gaussian_5x5`].
+/// Uses the **normalized** `[0.0625, 0.25, 0.375, 0.25, 0.0625]` kernel
+/// (`[1, 4, 6, 4, 1] / 16`) in each direction. The combined 2D kernel sums
+/// to 1, so the blur **preserves brightness** (a flat input is returned
+/// unchanged), matching every mainstream library and the sibling
+/// [`box_blur_5x5`].
+///
+/// If you instead need the raw integer `[1, 4, 6, 4, 1]` kernel (sum 256),
+/// convolve directly with [`Neighborhood::gaussian_5x5`], where the caller
+/// owns the scale.
 ///
 /// # Example
 ///
@@ -166,10 +176,10 @@ where
 /// let src = Image::fill(10, 10, MonoF32::new(1.0));
 /// let result: Image<MonoF32> = gaussian_blur_5x5(&src, &Clamp);
 ///
-/// // Un-normalised: 1.0 × 256 = 256.0
+/// // Normalized: brightness preserved, 1.0 → 1.0.
 /// for y in 0..result.height() {
 ///     for x in 0..result.width() {
-///         assert!((result.pixel_at(x, y).0 - 256.0).abs() < 1e-2);
+///         assert!((result.pixel_at(x, y).0 - 1.0).abs() < 1e-4);
 ///     }
 /// }
 /// ```
@@ -187,6 +197,186 @@ where
     Out: ZeroablePixel + FromLinear<Acc>,
 {
     convolve_separable(image, &SeparableKernel::gaussian_5(), border)
+}
+
+// ─── Parameterized Gaussian blur ───────────────────────────────────────────────
+
+/// Default `truncate` for [`gaussian_blur`] / [`gaussian_blur_into`].
+///
+/// The kernel radius is `round(truncate * sigma)`. The value `4.0` matches
+/// SciPy (`scipy.ndimage.gaussian_filter`) and scikit-image
+/// (`filters.gaussian`), capturing the Gaussian out to 4σ. Use
+/// [`gaussian_blur_with`] to pick a smaller `truncate` (e.g. `3.0`) for
+/// faster, slightly tighter kernels.
+pub const DEFAULT_TRUNCATE: f32 = 4.0;
+
+/// Gaussian blur with a separable kernel derived from `sigma`.
+///
+/// The kernel radius is `round(`[`DEFAULT_TRUNCATE`]` * sigma)` and the
+/// weights are a normalized 1-D Gaussian (sum 1), applied separably, so
+/// the blur **preserves brightness**. Unlike the fixed [`gaussian_blur_3x3`]
+/// / [`gaussian_blur_5x5`] paths, this expresses an arbitrary blur amount;
+/// the derived odd kernel size is reported by
+/// [`gaussian_kernel_size`](crate::image::gaussian_kernel_size).
+///
+/// Use [`gaussian_blur_with`] to override `truncate`.
+///
+/// # Panics
+///
+/// Panics (Tier 3 precondition) if `sigma <= 0.0`, or if the derived radius
+/// exceeds [`MAX_RADIUS`](crate::image::MAX_RADIUS) (i.e. `sigma` is larger
+/// than `MAX_RADIUS / truncate`).
+///
+/// # Example
+///
+/// ```
+/// use fovea::image::{Image, ImageView};
+/// use fovea::border::Clamp;
+/// use fovea::pixel::MonoF32;
+/// use fovea::transform::gaussian_blur;
+///
+/// // A flat image is returned unchanged (brightness preserved).
+/// let src = Image::fill(16, 16, MonoF32::new(0.7));
+/// let result: Image<MonoF32> = gaussian_blur(&src, 2.0, &Clamp);
+/// for y in 0..result.height() {
+///     for x in 0..result.width() {
+///         assert!((result.pixel_at(x, y).0 - 0.7).abs() < 1e-4);
+///     }
+/// }
+/// ```
+#[must_use]
+pub fn gaussian_blur<I, B, P, Acc, Out>(image: &I, sigma: f32, border: &B) -> Image<Out>
+where
+    I: RasterImage<Pixel = P>,
+    P: Copy + LinearPixel<f32, Accumulator = Acc>,
+    Acc: Copy
+        + Default
+        + ZeroablePixel
+        + LinearPixel<f32, Accumulator = Acc>
+        + std::ops::Add<Output = Acc>,
+    B: BorderPolicy<I> + BorderPolicy<Image<Acc>>,
+    Out: ZeroablePixel + FromLinear<Acc>,
+{
+    gaussian_blur_with(image, sigma, DEFAULT_TRUNCATE, border)
+}
+
+/// Gaussian blur derived from `sigma` with an explicit `truncate`.
+///
+/// As [`gaussian_blur`], but the kernel radius is `round(truncate * sigma)`.
+/// A smaller `truncate` (e.g. `3.0`) yields a smaller, faster kernel
+/// capturing slightly less of the Gaussian tail; the default of `4.0`
+/// matches SciPy / scikit-image.
+///
+/// # Panics
+///
+/// Panics if `sigma <= 0.0` or `truncate <= 0.0`, or if the derived radius
+/// exceeds [`MAX_RADIUS`](crate::image::MAX_RADIUS).
+///
+/// # Example
+///
+/// ```
+/// use fovea::image::{Image, ImageView};
+/// use fovea::border::Clamp;
+/// use fovea::pixel::MonoF32;
+/// use fovea::transform::gaussian_blur_with;
+///
+/// let src = Image::fill(16, 16, MonoF32::new(0.5));
+/// let result: Image<MonoF32> = gaussian_blur_with(&src, 1.5, 3.0, &Clamp);
+/// assert_eq!(result.size(), src.size());
+/// ```
+#[must_use]
+pub fn gaussian_blur_with<I, B, P, Acc, Out>(
+    image: &I,
+    sigma: f32,
+    truncate: f32,
+    border: &B,
+) -> Image<Out>
+where
+    I: RasterImage<Pixel = P>,
+    P: Copy + LinearPixel<f32, Accumulator = Acc>,
+    Acc: Copy
+        + Default
+        + ZeroablePixel
+        + LinearPixel<f32, Accumulator = Acc>
+        + std::ops::Add<Output = Acc>,
+    B: BorderPolicy<I> + BorderPolicy<Image<Acc>>,
+    Out: ZeroablePixel + FromLinear<Acc>,
+{
+    let kernel = gaussian_kernel_1d(sigma, truncate);
+    let weights = kernel.weights();
+    let n = kernel.len();
+    let anchor = kernel.anchor();
+
+    // The kernel is symmetric ⇒ identical horizontal and vertical weights.
+    let h_img = Image::generate(n, 1, |x, _| weights[x]);
+    let v_img = Image::generate(1, n, |_, y| weights[y]);
+
+    convolve_separable_raw(image, &h_img, anchor, &v_img, anchor, border)
+}
+
+/// Gaussian blur derived from `sigma`, writing into a caller-owned output.
+///
+/// As [`gaussian_blur`], but writes into `output` instead of allocating.
+///
+/// # Panics
+///
+/// Panics if `sigma <= 0.0`, if the derived radius exceeds
+/// [`MAX_RADIUS`](crate::image::MAX_RADIUS), or if `output` is too small for
+/// the region produced by the border policy.
+pub fn gaussian_blur_into<I, B, O, P, Acc, Out>(image: &I, sigma: f32, border: &B, output: &mut O)
+where
+    I: RasterImage<Pixel = P>,
+    P: Copy + LinearPixel<f32, Accumulator = Acc>,
+    Acc: Copy
+        + Default
+        + ZeroablePixel
+        + LinearPixel<f32, Accumulator = Acc>
+        + std::ops::Add<Output = Acc>,
+    B: BorderPolicy<I> + BorderPolicy<Image<Acc>>,
+    O: RasterImageMut<Pixel = Out>,
+    Out: FromLinear<Acc>,
+{
+    gaussian_blur_with_into(image, sigma, DEFAULT_TRUNCATE, border, output);
+}
+
+/// Gaussian blur derived from `sigma` and an explicit `truncate`, writing
+/// into a caller-owned output.
+///
+/// As [`gaussian_blur_with`], but writes into `output` instead of
+/// allocating.
+///
+/// # Panics
+///
+/// Panics if `sigma <= 0.0` or `truncate <= 0.0`, if the derived radius
+/// exceeds [`MAX_RADIUS`](crate::image::MAX_RADIUS), or if `output` is too
+/// small for the region produced by the border policy.
+pub fn gaussian_blur_with_into<I, B, O, P, Acc, Out>(
+    image: &I,
+    sigma: f32,
+    truncate: f32,
+    border: &B,
+    output: &mut O,
+) where
+    I: RasterImage<Pixel = P>,
+    P: Copy + LinearPixel<f32, Accumulator = Acc>,
+    Acc: Copy
+        + Default
+        + ZeroablePixel
+        + LinearPixel<f32, Accumulator = Acc>
+        + std::ops::Add<Output = Acc>,
+    B: BorderPolicy<I> + BorderPolicy<Image<Acc>>,
+    O: RasterImageMut<Pixel = Out>,
+    Out: FromLinear<Acc>,
+{
+    let kernel = gaussian_kernel_1d(sigma, truncate);
+    let weights = kernel.weights();
+    let n = kernel.len();
+    let anchor = kernel.anchor();
+
+    let h_img = Image::generate(n, 1, |x, _| weights[x]);
+    let v_img = Image::generate(1, n, |_, y| weights[y]);
+
+    convolve_separable_raw_into(image, &h_img, anchor, &v_img, anchor, border, output);
 }
 
 // ─── Sobel ───────────────────────────────────────────────────────────────────
@@ -582,8 +772,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::border::{Clamp, Skip};
-    use crate::image::{ImageView, ImageViewMut};
+    use crate::border::{Clamp, Constant, Skip};
+    use crate::image::{ImageView, ImageViewMut, gaussian_kernel_1d};
     use crate::pixel::{Mono8, MonoF32};
     use crate::transform::convolve;
 
@@ -676,14 +866,15 @@ mod tests {
 
     #[test]
     fn gaussian_blur_3x3_uniform_f32() {
-        // gaussian_3x3 is un-normalised (sum=16), so uniform×16 is expected
+        // gaussian_blur_3x3 is now normalized (sum=1), so a flat input is
+        // returned unchanged (brightness preserved).
         let src = Image::fill(8, 8, MonoF32::new(1.0));
         let result: Image<MonoF32> = gaussian_blur_3x3(&src, &Clamp);
 
         for y in 0..result.height() {
             for x in 0..result.width() {
                 assert!(
-                    (result.pixel_at(x, y).0 - 16.0).abs() < 1e-3,
+                    (result.pixel_at(x, y).0 - 1.0).abs() < 1e-4,
                     "at ({x}, {y}): {}",
                     result.pixel_at(x, y).0,
                 );
@@ -693,6 +884,8 @@ mod tests {
 
     #[test]
     fn gaussian_blur_3x3_matches_full_convolution() {
+        // The normalized blur equals the raw 2D `Neighborhood` convolution
+        // (sum 16) divided by 16.
         let src = make_gradient_8x8();
         let full_kernel = Neighborhood::<f32, 3, 3>::gaussian_3x3();
         let full: Image<MonoF32> = convolve(&src, &full_kernel, &Clamp);
@@ -701,7 +894,7 @@ mod tests {
         for y in 0..full.height() {
             for x in 0..full.width() {
                 assert!(
-                    (full.pixel_at(x, y).0 - sep.pixel_at(x, y).0).abs() < 1e-2,
+                    (full.pixel_at(x, y).0 / 16.0 - sep.pixel_at(x, y).0).abs() < 1e-2,
                     "mismatch at ({x}, {y})",
                 );
             }
@@ -710,18 +903,21 @@ mod tests {
 
     #[test]
     fn gaussian_blur_5x5_uniform_f32() {
+        // Normalized (sum=1): a flat input is returned unchanged.
         let src = Image::fill(10, 10, MonoF32::new(1.0));
         let result: Image<MonoF32> = gaussian_blur_5x5(&src, &Clamp);
 
         for y in 0..result.height() {
             for x in 0..result.width() {
-                assert!((result.pixel_at(x, y).0 - 256.0).abs() < 1e-1);
+                assert!((result.pixel_at(x, y).0 - 1.0).abs() < 1e-4);
             }
         }
     }
 
     #[test]
     fn gaussian_blur_5x5_matches_full_convolution() {
+        // The normalized blur equals the raw 2D `Neighborhood` convolution
+        // (sum 256) divided by 256.
         let src = make_gradient_8x8();
         let full_kernel = Neighborhood::<f32, 5, 5>::gaussian_5x5();
         let full: Image<MonoF32> = convolve(&src, &full_kernel, &Clamp);
@@ -730,11 +926,197 @@ mod tests {
         for y in 0..full.height() {
             for x in 0..full.width() {
                 assert!(
-                    (full.pixel_at(x, y).0 - sep.pixel_at(x, y).0).abs() < 1e-1,
-                    "mismatch at ({x}, {y}): full={}, sep={}",
-                    full.pixel_at(x, y).0,
+                    (full.pixel_at(x, y).0 / 256.0 - sep.pixel_at(x, y).0).abs() < 1e-3,
+                    "mismatch at ({x}, {y}): full/256={}, sep={}",
+                    full.pixel_at(x, y).0 / 256.0,
                     sep.pixel_at(x, y).0,
                 );
+            }
+        }
+    }
+
+    // ── parameterized gaussian blur ─────────────────────────────────────
+
+    #[test]
+    fn gaussian_blur_uniform_image_preserved_f32() {
+        let src = Image::fill(16, 16, MonoF32::new(0.7));
+        let result: Image<MonoF32> = gaussian_blur(&src, 2.0, &Clamp);
+        assert_eq!(result.size(), src.size());
+        for y in 0..result.height() {
+            for x in 0..result.width() {
+                assert!(
+                    (result.pixel_at(x, y).0 - 0.7).abs() < 1e-4,
+                    "at ({x}, {y}): {}",
+                    result.pixel_at(x, y).0,
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn gaussian_blur_uniform_image_preserved_u8() {
+        let src = Image::fill(16, 16, Mono8::new(120));
+        let result: Image<Mono8> = gaussian_blur(&src, 1.5, &Clamp);
+        for y in 0..result.height() {
+            for x in 0..result.width() {
+                assert_eq!(result.pixel_at(x, y), Mono8::new(120));
+            }
+        }
+    }
+
+    #[test]
+    fn gaussian_blur_impulse_response_is_the_kernel() {
+        // A single bright pixel on a black field, blurred, should reproduce
+        // the 2-D Gaussian (outer product of the 1-D kernel) — interior
+        // only, with a zero border so nothing bleeds in.
+        let sigma = 1.0;
+        let truncate = 2.0; // radius 2, 5 taps
+        let kernel = gaussian_kernel_1d(sigma, truncate);
+        let w = kernel.weights();
+        let r = kernel.radius();
+
+        let c = 5usize;
+        let mut src = Image::fill(11, 11, MonoF32::new(0.0));
+        *src.pixel_at_mut(c, c) = MonoF32::new(1.0);
+
+        let out: Image<MonoF32> =
+            gaussian_blur_with(&src, sigma, truncate, &Constant(MonoF32(0.0)));
+
+        for dy in -(r as isize)..=(r as isize) {
+            for dx in -(r as isize)..=(r as isize) {
+                let expected = w[(r as isize + dx) as usize] * w[(r as isize + dy) as usize];
+                let got = out
+                    .pixel_at((c as isize + dx) as usize, (c as isize + dy) as usize)
+                    .0;
+                assert!(
+                    (got - expected).abs() < 1e-6,
+                    "impulse response at ({dx}, {dy}): got {got}, expected {expected}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn gaussian_blur_matches_full_2d_convolution() {
+        // Separability: the two-pass blur must equal a non-separable 2-D
+        // convolution with the outer-product kernel. Checked on interior
+        // pixels (where the border policy has no effect).
+        let sigma = 1.0;
+        let truncate = 2.0; // radius 2
+        let kernel = gaussian_kernel_1d(sigma, truncate);
+        let w = kernel.weights();
+        let r = kernel.radius();
+
+        let src = Image::generate(9, 9, |x, y| MonoF32::new((x * 3 + y * 5) as f32));
+        let out: Image<MonoF32> = gaussian_blur_with(&src, sigma, truncate, &Clamp);
+
+        for y in r..(9 - r) {
+            for x in r..(9 - r) {
+                let mut reference = 0.0f32;
+                for (j, &wj) in w.iter().enumerate() {
+                    for (i, &wi) in w.iter().enumerate() {
+                        let sx = x + i - r;
+                        let sy = y + j - r;
+                        reference += src.pixel_at(sx, sy).0 * wi * wj;
+                    }
+                }
+                let got = out.pixel_at(x, y).0;
+                assert!(
+                    (got - reference).abs() < 1e-3,
+                    "at ({x}, {y}): separable={got}, full2d={reference}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn gaussian_blur_larger_sigma_smooths_more() {
+        // A step edge blurred more (larger sigma) has a gentler maximum
+        // slope. Measure the steepest adjacent horizontal difference in the
+        // interior; it must shrink as sigma grows.
+        let src = Image::generate(41, 5, |x, _y| {
+            MonoF32::new(if x < 20 { 0.0 } else { 100.0 })
+        });
+
+        let max_slope = |sigma: f32| -> f32 {
+            let blurred: Image<MonoF32> = gaussian_blur(&src, sigma, &Clamp);
+            let mut m = 0.0f32;
+            for y in 0..blurred.height() {
+                for x in 1..blurred.width() {
+                    let d = (blurred.pixel_at(x, y).0 - blurred.pixel_at(x - 1, y).0).abs();
+                    if d > m {
+                        m = d;
+                    }
+                }
+            }
+            m
+        };
+
+        let slope_small = max_slope(1.0);
+        let slope_large = max_slope(3.0);
+        assert!(
+            slope_large < slope_small,
+            "larger sigma should reduce the max slope: sigma=1 → {slope_small}, sigma=3 → {slope_large}"
+        );
+    }
+
+    #[test]
+    fn gaussian_blur_into_matches_owned() {
+        let src = Image::generate(12, 12, |x, y| MonoF32::new((x + y) as f32));
+
+        let owned: Image<MonoF32> = gaussian_blur(&src, 1.5, &Clamp);
+
+        let mut into = Image::<MonoF32>::zero(owned.width(), owned.height());
+        gaussian_blur_into(&src, 1.5, &Clamp, &mut into);
+
+        for y in 0..owned.height() {
+            for x in 0..owned.width() {
+                assert!(
+                    (owned.pixel_at(x, y).0 - into.pixel_at(x, y).0).abs() < 1e-6,
+                    "mismatch at ({x}, {y})",
+                );
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "sigma must be > 0.0")]
+    fn gaussian_blur_zero_sigma_panics() {
+        let src = Image::fill(8, 8, MonoF32::new(1.0));
+        let _: Image<MonoF32> = gaussian_blur(&src, 0.0, &Clamp);
+    }
+
+    #[test]
+    #[should_panic(expected = "exceeds MAX_RADIUS")]
+    fn gaussian_blur_over_radius_sigma_panics() {
+        let src = Image::fill(8, 8, MonoF32::new(1.0));
+        // radius = round(4.0 * 20.0) = 80 > MAX_RADIUS (64).
+        let _: Image<MonoF32> = gaussian_blur(&src, 20.0, &Clamp);
+    }
+
+    #[test]
+    fn gaussian_blur_tiny_sigma_is_near_identity() {
+        // round(4 * 0.05) = 0 ⇒ 1-tap identity kernel ⇒ input unchanged.
+        let src = Image::generate(8, 8, |x, y| MonoF32::new((x * 2 + y) as f32));
+        let result: Image<MonoF32> = gaussian_blur(&src, 0.05, &Clamp);
+        for y in 0..result.height() {
+            for x in 0..result.width() {
+                assert!((result.pixel_at(x, y).0 - src.pixel_at(x, y).0).abs() < 1e-6);
+            }
+        }
+    }
+
+    #[test]
+    fn gaussian_blur_with_smaller_truncate_is_smaller_kernel() {
+        // Qualitative: a flat image is preserved regardless of truncate, and
+        // both truncate values run without panicking on the same input.
+        let src = Image::fill(20, 20, MonoF32::new(0.5));
+        let r4: Image<MonoF32> = gaussian_blur_with(&src, 2.0, 4.0, &Clamp);
+        let r3: Image<MonoF32> = gaussian_blur_with(&src, 2.0, 3.0, &Clamp);
+        for y in 0..src.height() {
+            for x in 0..src.width() {
+                assert!((r4.pixel_at(x, y).0 - 0.5).abs() < 1e-4);
+                assert!((r3.pixel_at(x, y).0 - 0.5).abs() < 1e-4);
             }
         }
     }

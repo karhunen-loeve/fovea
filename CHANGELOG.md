@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Parameterized Gaussian blur: `gaussian_blur(image, sigma, border)` and
+  `gaussian_blur_with(image, sigma, truncate, border)` (plus `_into`
+  variants writing to a caller-owned output) derive a normalized separable
+  kernel from `sigma`, matching the SciPy / scikit-image convention
+  (radius `= round(truncate · sigma)`, default `truncate = 4.0`). The kernel
+  is generated allocation-free into a bounded stack buffer; a `sigma` whose
+  radius exceeds `MAX_RADIUS` (64, i.e. `sigma > MAX_RADIUS / truncate`)
+  panics, as does `sigma <= 0`. The kernel generator is exposed at the image
+  layer as `gaussian_kernel_1d`, `gaussian_kernel_size`, `GaussianKernel1D`,
+  and the `MAX_RADIUS` bound. The fixed `gaussian_blur_3x3` /
+  `gaussian_blur_5x5` paths remain as fast const-sized convenience
+  functions.
 - `FullRange` conversions completing the const-generic `Mono<N>`
   (`Mono10` / `Mono12` / `Mono14`) coverage: `Mono8/16/32/64 → Mono<N>`
   (e.g. padding an 8-bit reference up to 12-bit) and `Mono<N1> → Mono<N2>`
@@ -17,6 +29,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Mono<N> → Mono8/16/32/64` direction is unchanged. Rounding is symmetric,
   so a widen-then-narrow round-trip is lossless when the wider depth is a
   superset of the narrower one.
+
+### Changed
+
+- **Breaking:** `gaussian_blur_3x3` and `gaussian_blur_5x5` are now
+  **normalized** (kernel sums to 1) and therefore **preserve brightness**,
+  matching `box_blur_3x3` / `box_blur_5x5` and every mainstream library.
+  Previously they convolved with the raw integer kernels `[1, 2, 1]`
+  (sum 16) and `[1, 4, 6, 4, 1]` (sum 256), scaling output brightness by
+  ×16 / ×256 and silently saturating into integer output types. Callers
+  that relied on the old scaling should divide by 16 / 256, or convolve
+  directly with `Neighborhood::gaussian_3x3` / `gaussian_5x5` (the raw
+  integer kernels are unchanged and remain available at that layer, where
+  the caller owns the scale). The `SeparableKernel::gaussian_3` /
+  `gaussian_5` factories are likewise normalized now (weights
+  `[0.25, 0.5, 0.25]` and `[0.0625, 0.25, 0.375, 0.25, 0.0625]`).
 
 ## [0.2.0] — 2026-06-12
 

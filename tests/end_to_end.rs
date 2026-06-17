@@ -16,10 +16,10 @@ use fovea::{Rectangle, Size};
 
 #[test]
 fn pipeline_create_blur_roi() {
-    // 1. Create an 8×8 gradient image with small values.
-    //    The un-normalised Gaussian 3×3 kernel weights sum to 16, so each
-    //    output pixel ≈ input × 16.  We keep source values in 0..=14 so
-    //    the blurred result (up to ~224) stays below u8 saturation.
+    // 1. Create an 8×8 gradient image.
+    //    The Gaussian 3×3 blur is normalized (kernel sums to 1), so it
+    //    preserves brightness: each output pixel ≈ the local average of its
+    //    neighbourhood, staying on the same scale as the input.
     let img = Image::<Mono8>::generate(8, 8, |x, y| Mono8::new((x + y) as u8));
     assert_eq!(img.size(), Size::new(8, 8));
 
@@ -32,8 +32,8 @@ fn pipeline_create_blur_roi() {
     assert_eq!(roi.size(), Size::new(4, 4));
 
     // 4. Verify that blurred interior pixels are in a reasonable range.
-    //    Source gradient spans 0..=14; after ×16 blur the max is ~224.
-    //    Interior pixels should be nonzero and below saturation.
+    //    Brightness is preserved, so interior values track the source
+    //    gradient (0..=14) — nonzero in the interior and below saturation.
     for y in 0..roi.height() {
         for x in 0..roi.width() {
             let v = roi.pixel_at(x, y).value();
@@ -47,13 +47,12 @@ fn pipeline_create_blur_roi() {
 
     // Verify a specific smoothing property: the centre of the ROI
     // corresponds to position (4,4) in the blurred image.  The source
-    // value there is (4+4) = 8.  With un-normalised kernel (×16) the
-    // expected output is ~128, and the symmetric neighbourhood keeps it
-    // close to that.
+    // value there is (4+4) = 8.  The normalized blur preserves brightness,
+    // and the symmetric gradient neighbourhood averages back to ~8.
     let center = roi.pixel_at(2, 2).value(); // blurred (4,4)
     assert!(
-        (center as i32 - 128).unsigned_abs() <= 16,
-        "centre pixel {center} should be close to 128 after blur"
+        (center as i32 - 8).unsigned_abs() <= 2,
+        "centre pixel {center} should be close to 8 after normalized blur"
     );
 }
 
@@ -389,17 +388,11 @@ fn pipeline_single_pixel() {
     // Gaussian blur on 1×1 with Clamp — all neighbours are the same pixel
     let blurred: Image<Mono8> = gaussian_blur_3x3(&img, &Clamp);
     assert_eq!(blurred.size(), Size::new(1, 1));
-    // The blurred value should be close to the original (kernel sums to 1
-    // in normalised form, but these are un-normalised integer kernels;
-    // the derive rounds back from the f32 accumulator)
+    // The blur is normalized (kernel sums to 1) and preserves brightness.
+    // For a uniform 1×1 image under Clamp every neighbour equals 42, so the
+    // weighted average is 42 (modulo f32→u8 rounding through FromLinear).
     let bv = blurred.pixel_at(0, 0).value();
-    // For a uniform 1×1 image with Clamp, all 9 neighbours = 42.
-    // gaussian_3x3 unnormalised sum = 42 * 16 = 672, then FromLinear
-    // rounds and clamps. With separable: row pass gives 42*4=168 (as f32 acc),
-    // then col pass gives 168*4=672... the kernel weights sum to 16 for
-    // unnormalised Gaussian 3x3, so result = 672. FromLinear clamps to 255.
-    // Actually let's just check it's non-zero and deterministic.
-    assert!(bv > 0, "blurred single pixel should be > 0, got {bv}");
+    assert_eq!(bv, 42, "normalized blur of a flat pixel should preserve it");
 
     // Convert to Mono16
     let wide: Image<Mono16> = convert_image(&blurred, FullRange);

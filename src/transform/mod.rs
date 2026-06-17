@@ -111,7 +111,8 @@ pub use convert::{
 pub use convolve::{convolve, convolve_into, correlate, correlate_into};
 pub use convolve_separable::{convolve_separable, convolve_separable_into};
 pub use filters::{
-    box_blur_3x3, box_blur_5x5, emboss, gaussian_blur_3x3, gaussian_blur_5x5, laplacian,
+    DEFAULT_TRUNCATE, box_blur_3x3, box_blur_5x5, emboss, gaussian_blur, gaussian_blur_3x3,
+    gaussian_blur_5x5, gaussian_blur_into, gaussian_blur_with, gaussian_blur_with_into, laplacian,
     laplacian_8, prewitt_x, prewitt_y, scharr_x, scharr_y, sharpen, sobel_x, sobel_y,
 };
 pub use fold::{

@@ -259,10 +259,16 @@ impl<const K: usize> SeparableKernel<K, K> {
 // ─── Factory methods: 3×3 ───────────────────────────────────────────────
 
 impl SeparableKernel<3, 3> {
-    /// 3×3 Gaussian kernel: `[1, 2, 1]` in both directions.
+    /// 3×3 Gaussian kernel: the **normalized** `[1, 2, 1] / 4` weights
+    /// `[0.25, 0.5, 0.25]` in both directions.
     ///
-    /// This is the **un-normalised** separable Gaussian. The combined 2D
-    /// kernel sums to 16 (matching [`Neighborhood::gaussian_3x3`](crate::image::Neighborhood::gaussian_3x3)).
+    /// Each 1D pass sums to 1, so the combined 2D kernel sums to 1 and the
+    /// blur **preserves brightness** — consistent with
+    /// [`SeparableKernel::box_blur_3`]. The raw integer `[1, 2, 1]` kernel
+    /// (sum 16) lives at the lower layer as
+    /// [`Neighborhood::gaussian_3x3`](crate::image::Neighborhood::gaussian_3x3)
+    /// / [`Neighborhood::gaussian_1d_3_h`](crate::image::Neighborhood::gaussian_1d_3_h),
+    /// where the caller owns the scale.
     ///
     /// # Example
     ///
@@ -270,11 +276,11 @@ impl SeparableKernel<3, 3> {
     /// use fovea::image::SeparableKernel;
     ///
     /// let k = SeparableKernel::gaussian_3();
-    /// assert_eq!(k.h_weights(), &[1.0, 2.0, 1.0]);
-    /// assert_eq!(k.v_weights(), &[1.0, 2.0, 1.0]);
+    /// assert_eq!(k.h_weights(), &[0.25, 0.5, 0.25]);
+    /// assert_eq!(k.v_weights(), &[0.25, 0.5, 0.25]);
     /// ```
     pub fn gaussian_3() -> Self {
-        Self::symmetric([1.0, 2.0, 1.0])
+        Self::symmetric([0.25, 0.5, 0.25])
     }
 
     /// 3×3 box blur kernel: `[1/3, 1/3, 1/3]` in both directions.
@@ -300,10 +306,16 @@ impl SeparableKernel<3, 3> {
 // ─── Factory methods: 5×5 ───────────────────────────────────────────────
 
 impl SeparableKernel<5, 5> {
-    /// 5×5 Gaussian kernel: `[1, 4, 6, 4, 1]` in both directions.
+    /// 5×5 Gaussian kernel: the **normalized** `[1, 4, 6, 4, 1] / 16`
+    /// weights `[0.0625, 0.25, 0.375, 0.25, 0.0625]` in both directions.
     ///
-    /// This is the **un-normalised** separable Gaussian. The combined 2D
-    /// kernel sums to 256 (matching [`Neighborhood::gaussian_5x5`](crate::image::Neighborhood::gaussian_5x5)).
+    /// Each 1D pass sums to 1, so the combined 2D kernel sums to 1 and the
+    /// blur **preserves brightness** — consistent with
+    /// [`SeparableKernel::box_blur_5`]. The raw integer `[1, 4, 6, 4, 1]`
+    /// kernel (sum 256) lives at the lower layer as
+    /// [`Neighborhood::gaussian_5x5`](crate::image::Neighborhood::gaussian_5x5)
+    /// / [`Neighborhood::gaussian_1d_5_h`](crate::image::Neighborhood::gaussian_1d_5_h),
+    /// where the caller owns the scale.
     ///
     /// # Example
     ///
@@ -311,10 +323,10 @@ impl SeparableKernel<5, 5> {
     /// use fovea::image::SeparableKernel;
     ///
     /// let k = SeparableKernel::gaussian_5();
-    /// assert_eq!(k.h_weights(), &[1.0, 4.0, 6.0, 4.0, 1.0]);
+    /// assert_eq!(k.h_weights(), &[0.0625, 0.25, 0.375, 0.25, 0.0625]);
     /// ```
     pub fn gaussian_5() -> Self {
-        Self::symmetric([1.0, 4.0, 6.0, 4.0, 1.0])
+        Self::symmetric([0.0625, 0.25, 0.375, 0.25, 0.0625])
     }
 
     /// 5×5 box blur kernel: `[1/5, 1/5, 1/5, 1/5, 1/5]` in both
@@ -335,6 +347,187 @@ impl SeparableKernel<5, 5> {
     pub fn box_blur_5() -> Self {
         let w = 1.0 / 5.0;
         Self::symmetric([w, w, w, w, w])
+    }
+}
+
+// ─── Parameterized Gaussian kernel ──────────────────────────────────────
+
+/// Maximum supported radius for a [`gaussian_kernel_1d`] kernel.
+///
+/// The generated 1-D kernel lives in a fixed stack buffer of
+/// `2 * MAX_RADIUS + 1` taps (129 weights, ~516 bytes), so generation is
+/// allocation-free. A `sigma` whose derived radius exceeds this bound is a
+/// caller precondition violation and panics. At the default `truncate` of
+/// [`DEFAULT_TRUNCATE`](crate::transform::DEFAULT_TRUNCATE) (4.0) this
+/// supports `sigma` up to `MAX_RADIUS / truncate` ≈ 16.
+pub const MAX_RADIUS: usize = 64;
+
+/// Length of the stack buffer backing [`GaussianKernel1D`].
+const MAX_GAUSSIAN_TAPS: usize = 2 * MAX_RADIUS + 1;
+
+/// A normalized 1-D Gaussian kernel held in a bounded, stack-allocated
+/// buffer.
+///
+/// Produced by [`gaussian_kernel_1d`]. The active weights (the first
+/// [`len`](Self::len) taps) sum to 1, so convolving with this kernel
+/// preserves brightness. Because a 1-D Gaussian is symmetric, the same
+/// kernel is used for both the horizontal and vertical passes of a
+/// separable blur, and the anchor sits at the centre tap
+/// ([`anchor`](Self::anchor) == [`radius`](Self::radius)).
+#[derive(Clone)]
+pub struct GaussianKernel1D {
+    weights: [f32; MAX_GAUSSIAN_TAPS],
+    len: usize,
+    anchor: usize,
+}
+
+impl GaussianKernel1D {
+    /// The active weights, a slice of [`len`](Self::len) taps summing to 1.
+    pub fn weights(&self) -> &[f32] {
+        &self.weights[..self.len]
+    }
+
+    /// The number of active taps (`2 * radius + 1`, always odd, always ≥ 1).
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    /// Whether the kernel has no taps. Always `false` — a Gaussian kernel
+    /// has at least the single centre tap — but provided for API
+    /// completeness alongside [`len`](Self::len).
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    /// The anchor (centre) tap index, equal to the [`radius`](Self::radius).
+    pub fn anchor(&self) -> usize {
+        self.anchor
+    }
+
+    /// The kernel radius: `(len - 1) / 2`.
+    pub fn radius(&self) -> usize {
+        self.anchor
+    }
+}
+
+impl core::fmt::Debug for GaussianKernel1D {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("GaussianKernel1D")
+            .field("len", &self.len)
+            .field("anchor", &self.anchor)
+            .field("weights", &self.weights())
+            .finish()
+    }
+}
+
+/// Computes the radius of a Gaussian kernel for `(sigma, truncate)`,
+/// validating both arguments.
+///
+/// Uses the SciPy / scikit-image convention `radius = floor(truncate *
+/// sigma + 0.5)` (round-to-nearest), which is what those libraries
+/// actually compute and is the parity this kernel targets. For very small
+/// `sigma` the radius rounds down to 0, yielding a 1-tap identity kernel.
+///
+/// # Panics
+///
+/// Panics if `sigma <= 0.0` or `truncate <= 0.0` (Tier 3 precondition).
+fn gaussian_radius(sigma: f32, truncate: f32) -> usize {
+    assert!(
+        sigma > 0.0,
+        "gaussian kernel: sigma must be > 0.0 (got {sigma})"
+    );
+    assert!(
+        truncate > 0.0,
+        "gaussian kernel: truncate must be > 0.0 (got {truncate})"
+    );
+    (truncate * sigma + 0.5).floor() as usize
+}
+
+/// Returns the odd tap count of the Gaussian kernel derived from `sigma`
+/// and `truncate`: `2 * floor(truncate * sigma + 0.5) + 1`.
+///
+/// This reports the derived size without building the kernel, so callers
+/// can size buffers or reason about cost up front (PHILOSOPHY §8 — the
+/// derived size is surfaced, not hidden).
+///
+/// # Panics
+///
+/// Panics if `sigma <= 0.0` or `truncate <= 0.0`.
+///
+/// # Example
+///
+/// ```
+/// use fovea::image::gaussian_kernel_size;
+///
+/// // radius = round(4.0 * 1.0) = 4 → 9 taps
+/// assert_eq!(gaussian_kernel_size(1.0, 4.0), 9);
+/// // tiny sigma rounds down to radius 0 → 1 tap (identity)
+/// assert_eq!(gaussian_kernel_size(0.05, 4.0), 1);
+/// ```
+#[must_use]
+pub fn gaussian_kernel_size(sigma: f32, truncate: f32) -> usize {
+    2 * gaussian_radius(sigma, truncate) + 1
+}
+
+/// Builds a normalized 1-D Gaussian kernel for the given `sigma`.
+///
+/// The radius is `floor(truncate * sigma + 0.5)` and the tap count is
+/// `2 * radius + 1`. Weights are `w_i = exp(-(i - radius)^2 / (2 sigma^2))`
+/// normalized to sum 1, so convolving with the kernel preserves
+/// brightness. The kernel is symmetric, so the same weights serve both the
+/// horizontal and vertical passes of a separable blur.
+///
+/// # Panics
+///
+/// - `sigma <= 0.0` or `truncate <= 0.0` — undefined for a Gaussian.
+/// - radius exceeds [`MAX_RADIUS`] — the kernel would not fit the bounded
+///   stack buffer; the message names the largest supported `sigma`.
+///
+/// # Example
+///
+/// ```
+/// use fovea::image::gaussian_kernel_1d;
+///
+/// let k = gaussian_kernel_1d(1.0, 4.0);
+/// assert_eq!(k.len(), 9);
+/// assert_eq!(k.anchor(), 4);
+/// // Normalized: the weights sum to 1.
+/// let sum: f32 = k.weights().iter().sum();
+/// assert!((sum - 1.0).abs() < 1e-6);
+/// // Symmetric about the centre.
+/// assert!((k.weights()[0] - k.weights()[8]).abs() < 1e-7);
+/// ```
+#[must_use]
+pub fn gaussian_kernel_1d(sigma: f32, truncate: f32) -> GaussianKernel1D {
+    let radius = gaussian_radius(sigma, truncate);
+    assert!(
+        radius <= MAX_RADIUS,
+        "gaussian kernel: sigma {sigma} (truncate {truncate}) needs radius {radius}, \
+         which exceeds MAX_RADIUS ({MAX_RADIUS}); the largest supported sigma is {}",
+        MAX_RADIUS as f32 / truncate
+    );
+
+    let n = 2 * radius + 1;
+    let mut weights = [0.0f32; MAX_GAUSSIAN_TAPS];
+    let inv_two_sigma_sq = 1.0 / (2.0 * sigma * sigma);
+
+    let mut sum = 0.0f32;
+    for (i, w) in weights[..n].iter_mut().enumerate() {
+        let d = i as f32 - radius as f32;
+        let value = (-d * d * inv_two_sigma_sq).exp();
+        *w = value;
+        sum += value;
+    }
+
+    let inv_sum = 1.0 / sum;
+    for w in weights[..n].iter_mut() {
+        *w *= inv_sum;
+    }
+
+    GaussianKernel1D {
+        weights,
+        len: n,
+        anchor: radius,
     }
 }
 
@@ -449,7 +642,7 @@ mod tests {
     fn flipped_gaussian_5_symmetric() {
         let k = SeparableKernel::gaussian_5();
         let f = k.flipped();
-        // [1,4,6,4,1] is symmetric
+        // [0.0625, 0.25, 0.375, 0.25, 0.0625] is symmetric
         assert_eq!(k, f);
     }
 
@@ -458,19 +651,23 @@ mod tests {
     #[test]
     fn gaussian_3_weights() {
         let k = SeparableKernel::gaussian_3();
-        assert_eq!(k.h_weights(), &[1.0, 2.0, 1.0]);
-        assert_eq!(k.v_weights(), &[1.0, 2.0, 1.0]);
+        assert_eq!(k.h_weights(), &[0.25, 0.5, 0.25]);
+        assert_eq!(k.v_weights(), &[0.25, 0.5, 0.25]);
         assert_eq!(k.h_anchor(), 1);
         assert_eq!(k.v_anchor(), 1);
+        // Normalized: each 1D pass sums to 1 (brightness-preserving).
+        assert!((k.h_weights().iter().sum::<f32>() - 1.0).abs() < 1e-7);
     }
 
     #[test]
     fn gaussian_5_weights() {
         let k = SeparableKernel::gaussian_5();
-        assert_eq!(k.h_weights(), &[1.0, 4.0, 6.0, 4.0, 1.0]);
-        assert_eq!(k.v_weights(), &[1.0, 4.0, 6.0, 4.0, 1.0]);
+        assert_eq!(k.h_weights(), &[0.0625, 0.25, 0.375, 0.25, 0.0625]);
+        assert_eq!(k.v_weights(), &[0.0625, 0.25, 0.375, 0.25, 0.0625]);
         assert_eq!(k.h_anchor(), 2);
         assert_eq!(k.v_anchor(), 2);
+        // Normalized: each 1D pass sums to 1 (brightness-preserving).
+        assert!((k.h_weights().iter().sum::<f32>() - 1.0).abs() < 1e-7);
     }
 
     #[test]
@@ -501,13 +698,16 @@ mod tests {
 
     #[test]
     fn gaussian_3_outer_product_matches_neighborhood() {
+        // The separable kernel is now normalized (sum 1), while the raw
+        // `Neighborhood` kernel sums to 16, so the outer product equals the
+        // raw 2D kernel divided by 16 (same shape, normalized scale).
         let sep = SeparableKernel::gaussian_3();
         let full = crate::image::Neighborhood::<f32, 3, 3>::gaussian_3x3();
 
         for y in 0..3 {
             for x in 0..3 {
                 let outer = sep.h_weights()[x] * sep.v_weights()[y];
-                let expected = full.weights().pixel_at(x, y);
+                let expected = full.weights().pixel_at(x, y) / 16.0;
                 assert!(
                     (outer - expected).abs() < 1e-6,
                     "mismatch at ({x}, {y}): outer={outer}, expected={expected}"
@@ -518,15 +718,17 @@ mod tests {
 
     #[test]
     fn gaussian_5_outer_product_matches_neighborhood() {
+        // Normalized separable kernel (sum 1) vs raw `Neighborhood` kernel
+        // (sum 256): the outer product equals the raw 2D kernel / 256.
         let sep = SeparableKernel::gaussian_5();
         let full = crate::image::Neighborhood::<f32, 5, 5>::gaussian_5x5();
 
         for y in 0..5 {
             for x in 0..5 {
                 let outer = sep.h_weights()[x] * sep.v_weights()[y];
-                let expected = full.weights().pixel_at(x, y);
+                let expected = full.weights().pixel_at(x, y) / 256.0;
                 assert!(
-                    (outer - expected).abs() < 1e-4,
+                    (outer - expected).abs() < 1e-6,
                     "mismatch at ({x}, {y}): outer={outer}, expected={expected}"
                 );
             }
@@ -575,9 +777,9 @@ mod tests {
         let arr = k.to_h_image();
         assert_eq!(arr.width(), 3);
         assert_eq!(arr.height(), 1);
-        assert_eq!(arr.pixel_at(0, 0), 1.0);
-        assert_eq!(arr.pixel_at(1, 0), 2.0);
-        assert_eq!(arr.pixel_at(2, 0), 1.0);
+        assert_eq!(arr.pixel_at(0, 0), 0.25);
+        assert_eq!(arr.pixel_at(1, 0), 0.5);
+        assert_eq!(arr.pixel_at(2, 0), 0.25);
     }
 
     #[test]
@@ -586,9 +788,9 @@ mod tests {
         let arr = k.to_v_image();
         assert_eq!(arr.width(), 1);
         assert_eq!(arr.height(), 3);
-        assert_eq!(arr.pixel_at(0, 0), 1.0);
-        assert_eq!(arr.pixel_at(0, 1), 2.0);
-        assert_eq!(arr.pixel_at(0, 2), 1.0);
+        assert_eq!(arr.pixel_at(0, 0), 0.25);
+        assert_eq!(arr.pixel_at(0, 1), 0.5);
+        assert_eq!(arr.pixel_at(0, 2), 0.25);
     }
 
     #[test]
@@ -597,11 +799,11 @@ mod tests {
         let arr = k.to_h_image();
         assert_eq!(arr.width(), 5);
         assert_eq!(arr.height(), 1);
-        assert_eq!(arr.pixel_at(0, 0), 1.0);
-        assert_eq!(arr.pixel_at(1, 0), 4.0);
-        assert_eq!(arr.pixel_at(2, 0), 6.0);
-        assert_eq!(arr.pixel_at(3, 0), 4.0);
-        assert_eq!(arr.pixel_at(4, 0), 1.0);
+        assert_eq!(arr.pixel_at(0, 0), 0.0625);
+        assert_eq!(arr.pixel_at(1, 0), 0.25);
+        assert_eq!(arr.pixel_at(2, 0), 0.375);
+        assert_eq!(arr.pixel_at(3, 0), 0.25);
+        assert_eq!(arr.pixel_at(4, 0), 0.0625);
     }
 
     #[test]
@@ -610,11 +812,11 @@ mod tests {
         let arr = k.to_v_image();
         assert_eq!(arr.width(), 1);
         assert_eq!(arr.height(), 5);
-        assert_eq!(arr.pixel_at(0, 0), 1.0);
-        assert_eq!(arr.pixel_at(0, 1), 4.0);
-        assert_eq!(arr.pixel_at(0, 2), 6.0);
-        assert_eq!(arr.pixel_at(0, 3), 4.0);
-        assert_eq!(arr.pixel_at(0, 4), 1.0);
+        assert_eq!(arr.pixel_at(0, 0), 0.0625);
+        assert_eq!(arr.pixel_at(0, 1), 0.25);
+        assert_eq!(arr.pixel_at(0, 2), 0.375);
+        assert_eq!(arr.pixel_at(0, 3), 0.25);
+        assert_eq!(arr.pixel_at(0, 4), 0.0625);
     }
 
     // ── Clone / Debug / PartialEq ───────────────────────────────────────
@@ -682,5 +884,119 @@ mod tests {
 
         let f = k.flipped();
         assert_eq!(f, k);
+    }
+
+    // ── parameterized Gaussian kernel ───────────────────────────────────
+
+    #[test]
+    fn gaussian_kernel_weights_sum_to_one() {
+        // The DC / normalization invariant — the single most important
+        // property (brightness preservation).
+        for &sigma in &[0.5f32, 0.8, 1.0, 1.7, 3.0, 8.0] {
+            let k = gaussian_kernel_1d(sigma, 4.0);
+            let sum: f32 = k.weights().iter().sum();
+            assert!(
+                (sum - 1.0).abs() < 1e-6,
+                "sigma {sigma}: weights sum to {sum}, expected 1.0"
+            );
+        }
+    }
+
+    #[test]
+    fn gaussian_kernel_weights_symmetric() {
+        let k = gaussian_kernel_1d(1.5, 4.0);
+        let w = k.weights();
+        let n = w.len();
+        for i in 0..n {
+            assert!(
+                (w[i] - w[n - 1 - i]).abs() < 1e-7,
+                "asymmetry at tap {i}: {} vs {}",
+                w[i],
+                w[n - 1 - i]
+            );
+        }
+    }
+
+    #[test]
+    fn gaussian_kernel_matches_reference_formula() {
+        // Compare to an independent brute-force normalized reference.
+        let sigma = 1.3f32;
+        let truncate = 4.0f32;
+        let k = gaussian_kernel_1d(sigma, truncate);
+        let radius = k.radius();
+        let n = k.len();
+
+        let mut reference = vec![0.0f32; n];
+        let mut sum = 0.0f32;
+        for (i, r) in reference.iter_mut().enumerate() {
+            let d = i as f32 - radius as f32;
+            *r = (-(d * d) / (2.0 * sigma * sigma)).exp();
+            sum += *r;
+        }
+        for r in &mut reference {
+            *r /= sum;
+        }
+
+        for (i, (&got, &want)) in k.weights().iter().zip(&reference).enumerate() {
+            assert!((got - want).abs() < 1e-6, "tap {i}: got {got}, want {want}");
+        }
+    }
+
+    #[test]
+    fn gaussian_kernel_size_follows_truncate() {
+        // size = 2 * round(truncate * sigma) + 1
+        assert_eq!(gaussian_kernel_size(1.0, 4.0), 9); // radius 4
+        assert_eq!(gaussian_kernel_size(2.0, 3.0), 13); // radius 6
+        assert_eq!(gaussian_kernel_size(1.0, 3.0), 7); // radius 3
+        // size() agrees with the built kernel's tap count.
+        assert_eq!(
+            gaussian_kernel_1d(1.0, 4.0).len(),
+            gaussian_kernel_size(1.0, 4.0)
+        );
+    }
+
+    #[test]
+    fn gaussian_kernel_tiny_sigma_is_identity() {
+        // sigma small enough that round(truncate * sigma) == 0 ⇒ 1 tap [1.0].
+        let k = gaussian_kernel_1d(0.05, 4.0);
+        assert_eq!(k.len(), 1);
+        assert_eq!(k.radius(), 0);
+        assert_eq!(k.anchor(), 0);
+        assert!((k.weights()[0] - 1.0).abs() < 1e-7);
+    }
+
+    #[test]
+    #[should_panic(expected = "sigma must be > 0.0")]
+    fn gaussian_kernel_zero_sigma_panics() {
+        let _ = gaussian_kernel_1d(0.0, 4.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "sigma must be > 0.0")]
+    fn gaussian_kernel_negative_sigma_panics() {
+        let _ = gaussian_kernel_1d(-1.0, 4.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "truncate must be > 0.0")]
+    fn gaussian_kernel_zero_truncate_panics() {
+        let _ = gaussian_kernel_1d(1.0, 0.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "exceeds MAX_RADIUS")]
+    fn gaussian_kernel_over_radius_panics() {
+        // radius = round(4.0 * 20.0) = 80 > MAX_RADIUS (64).
+        let _ = gaussian_kernel_1d(20.0, 4.0);
+    }
+
+    #[test]
+    fn gaussian_kernel_at_max_radius_is_ok() {
+        // radius exactly MAX_RADIUS must succeed: round(4.0 * 16.0) = 64.
+        let k = gaussian_kernel_1d(16.0, 4.0);
+        assert_eq!(k.radius(), MAX_RADIUS);
+        assert_eq!(k.len(), 2 * MAX_RADIUS + 1);
+        let sum: f32 = k.weights().iter().sum();
+        assert!((sum - 1.0).abs() < 1e-5);
     }
 }
