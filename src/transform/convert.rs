@@ -1029,6 +1029,70 @@ impl<const BITS: usize> ConvertPixel<Mono<BITS>, Mono64> for Narrow {
     }
 }
 
+// ── FullRange: Mono8/16/32/64 → Mono<BITS> (concrete → const-generic) ────────
+//
+// The reverse of the `Mono<BITS> → Mono8/16/32/64` impls above: rescale a
+// fixed-width source onto the full `[0, 2^BITS - 1]` range of the target.
+// Rounding is symmetric (`+ max_src / 2`), matching the narrowing direction,
+// so a value at the source midpoint maps to the target midpoint and the
+// pair round-trips as closely as the bit budgets allow. `Mono::new` clamps,
+// so the result can never exceed the target maximum even with rounding.
+
+impl<const BITS: usize> ConvertPixel<Mono8, Mono<BITS>> for FullRange {
+    #[inline]
+    fn convert(&self, src: &Mono8) -> Mono<BITS> {
+        let max_dst = (1u32 << BITS) - 1;
+        let v = src.value() as u32;
+        Mono::new(((v * max_dst + 255 / 2) / 255) as u16)
+    }
+}
+
+impl<const BITS: usize> ConvertPixel<Mono16, Mono<BITS>> for FullRange {
+    #[inline]
+    fn convert(&self, src: &Mono16) -> Mono<BITS> {
+        let max_dst = (1u64 << BITS) - 1;
+        let max_src = u16::MAX as u64;
+        let v = src.value() as u64;
+        Mono::new(((v * max_dst + max_src / 2) / max_src) as u16)
+    }
+}
+
+impl<const BITS: usize> ConvertPixel<Mono32, Mono<BITS>> for FullRange {
+    #[inline]
+    fn convert(&self, src: &Mono32) -> Mono<BITS> {
+        let max_dst = (1u64 << BITS) - 1;
+        let max_src = u32::MAX as u64;
+        let v = src.value() as u64;
+        Mono::new(((v * max_dst + max_src / 2) / max_src) as u16)
+    }
+}
+
+impl<const BITS: usize> ConvertPixel<Mono64, Mono<BITS>> for FullRange {
+    #[inline]
+    fn convert(&self, src: &Mono64) -> Mono<BITS> {
+        let max_dst = (1u128 << BITS) - 1;
+        let max_src = u64::MAX as u128;
+        let v = src.value() as u128;
+        Mono::new(((v * max_dst + max_src / 2) / max_src) as u16)
+    }
+}
+
+// ── FullRange: Mono<SRC> → Mono<DST> (const-generic rescale) ─────────────────
+//
+// Covers every const-generic pair, e.g. `Mono10 → Mono12` for mixed-camera
+// pipelines. When `SRC == DST` this is the identity (`v * max / max == v`).
+// Both bit depths are ≤ 14, so `u32` cannot overflow.
+
+impl<const SRC: usize, const DST: usize> ConvertPixel<Mono<SRC>, Mono<DST>> for FullRange {
+    #[inline]
+    fn convert(&self, src: &Mono<SRC>) -> Mono<DST> {
+        let max_src = (1u32 << SRC) - 1;
+        let max_dst = (1u32 << DST) - 1;
+        let v = src.value() as u32;
+        Mono::new(((v * max_dst + max_src / 2) / max_src) as u16)
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // FullRange + Narrow — Mono32 / Mono64 / f64 depth conversions (macro-generated)
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -2941,6 +3005,136 @@ mod tests {
         let b: Mono16 = FullRange.convert(&Mono12::new(4095));
         assert_eq!(a, Mono16::new(0));
         assert_eq!(b, Mono16::new(65535));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // FullRange — Mono8 / Mono16 / Mono32 / Mono64 → Mono<BITS>
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn fullrange_mono8_to_mono10_extremes() {
+        let a: Mono10 = FullRange.convert(&Mono8::new(0));
+        let b: Mono10 = FullRange.convert(&Mono8::new(255));
+        assert_eq!(a, Mono10::new(0));
+        assert_eq!(b, Mono10::new(1023));
+    }
+
+    #[test]
+    fn fullrange_mono8_to_mono12_extremes() {
+        let a: Mono12 = FullRange.convert(&Mono8::new(0));
+        let b: Mono12 = FullRange.convert(&Mono8::new(255));
+        assert_eq!(a, Mono12::new(0));
+        assert_eq!(b, Mono12::new(4095));
+    }
+
+    #[test]
+    fn fullrange_mono8_to_mono14_extremes() {
+        let a: Mono14 = FullRange.convert(&Mono8::new(0));
+        let b: Mono14 = FullRange.convert(&Mono8::new(255));
+        assert_eq!(a, Mono14::new(0));
+        assert_eq!(b, Mono14::new(16383));
+    }
+
+    #[test]
+    fn fullrange_mono8_to_mono12_midpoint() {
+        // 128 * 4095 / 255 ≈ 2055.5 → 2056 with symmetric rounding
+        let mid: Mono12 = FullRange.convert(&Mono8::new(128));
+        assert_eq!(mid, Mono12::new(2056));
+    }
+
+    #[test]
+    fn fullrange_mono16_to_mono14_extremes() {
+        let a: Mono14 = FullRange.convert(&Mono16::new(0));
+        let b: Mono14 = FullRange.convert(&Mono16::new(65535));
+        assert_eq!(a, Mono14::new(0));
+        assert_eq!(b, Mono14::new(16383));
+    }
+
+    #[test]
+    fn fullrange_mono32_to_mono10_extremes() {
+        let a: Mono10 = FullRange.convert(&Mono32::new(0));
+        let b: Mono10 = FullRange.convert(&Mono32::new(u32::MAX));
+        assert_eq!(a, Mono10::new(0));
+        assert_eq!(b, Mono10::new(1023));
+    }
+
+    #[test]
+    fn fullrange_mono64_to_mono12_extremes() {
+        let a: Mono12 = FullRange.convert(&Mono64::new(0));
+        let b: Mono12 = FullRange.convert(&Mono64::new(u64::MAX));
+        assert_eq!(a, Mono12::new(0));
+        assert_eq!(b, Mono12::new(4095));
+    }
+
+    #[test]
+    fn fullrange_mono8_mono12_roundtrip() {
+        // Widening then narrowing back is lossless for every 8-bit value:
+        // the 12-bit range is a strict superset of the 8-bit range.
+        for v in 0u16..=255 {
+            let wide: Mono12 = FullRange.convert(&Mono8::new(v as u8));
+            let back: Mono8 = FullRange.convert(&wide);
+            assert_eq!(back, Mono8::new(v as u8), "roundtrip failed at {v}");
+        }
+    }
+
+    #[test]
+    fn fullrange_mono16_mono14_widen_narrow_is_near_identity() {
+        // 16-bit → 14-bit drops two bits, so the round-trip is lossy but must
+        // never drift by more than the quantisation step.
+        for v in [0u16, 1, 12345, 40000, 65535] {
+            let narrow: Mono14 = FullRange.convert(&Mono16::new(v));
+            let back: Mono16 = FullRange.convert(&narrow);
+            let diff = (back.value() as i32 - v as i32).abs();
+            assert!(diff <= 4, "roundtrip drift {diff} too large at {v}");
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // FullRange — Mono<SRC> → Mono<DST> (const-generic rescale)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn fullrange_mono10_to_mono12_extremes() {
+        let a: Mono12 = FullRange.convert(&Mono10::new(0));
+        let b: Mono12 = FullRange.convert(&Mono10::new(1023));
+        assert_eq!(a, Mono12::new(0));
+        assert_eq!(b, Mono12::new(4095));
+    }
+
+    #[test]
+    fn fullrange_mono14_to_mono10_extremes() {
+        let a: Mono10 = FullRange.convert(&Mono14::new(0));
+        let b: Mono10 = FullRange.convert(&Mono14::new(16383));
+        assert_eq!(a, Mono10::new(0));
+        assert_eq!(b, Mono10::new(1023));
+    }
+
+    #[test]
+    fn fullrange_mono12_to_mono14_midpoint() {
+        // 2048 * 16383 / 4095 ≈ 8194.0 → 8194
+        let mid: Mono14 = FullRange.convert(&Mono12::new(2048));
+        assert_eq!(mid, Mono14::new(8194));
+    }
+
+    #[test]
+    fn fullrange_mono_bits_to_same_bits_is_identity() {
+        for v in [0u16, 1, 500, 1023] {
+            let out: Mono10 = FullRange.convert(&Mono10::new(v));
+            assert_eq!(out, Mono10::new(v), "identity failed at {v}");
+        }
+        let out: Mono14 = FullRange.convert(&Mono14::new(16383));
+        assert_eq!(out, Mono14::new(16383));
+    }
+
+    #[test]
+    fn fullrange_mono10_mono14_roundtrip_is_lossless() {
+        // Widening 10 → 14 then narrowing back recovers every value, since the
+        // 14-bit range is a strict superset of the 10-bit range.
+        for v in 0u16..=1023 {
+            let wide: Mono14 = FullRange.convert(&Mono10::new(v));
+            let back: Mono10 = FullRange.convert(&wide);
+            assert_eq!(back, Mono10::new(v), "roundtrip failed at {v}");
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

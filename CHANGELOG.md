@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `FullRange` conversions completing the const-generic `Mono<N>`
+  (`Mono10` / `Mono12` / `Mono14`) coverage: `Mono8/16/32/64 → Mono<N>`
+  (e.g. padding an 8-bit reference up to 12-bit) and `Mono<N1> → Mono<N2>`
+  (e.g. `Mono10 → Mono12` for mixed-camera pipelines, including the
+  equal-depth identity case). The previously shipped
+  `Mono<N> → Mono8/16/32/64` direction is unchanged. Rounding is symmetric,
+  so a widen-then-narrow round-trip is lossless when the wider depth is a
+  superset of the narrower one.
+
 ## [0.2.0] — 2026-06-12
 
 ### Added
