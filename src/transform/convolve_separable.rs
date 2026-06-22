@@ -16,42 +16,26 @@
 //! - [`convolve_separable`] — allocates the output
 //! - [`convolve_separable_into`] — writes into an existing output
 //!
-//! ## Low-level API
+//! These perform true **convolution**: the kernel is flipped via
+//! [`SeparableKernel::flipped`], which is entirely stack-based, and the
+//! flipped weights are handed to the correlation core through borrowed
+//! [`ImageRef`] views — so the kernel never touches the heap (ADR-0023).
+//! For symmetric 1D kernels the flip is a no-op.
 //!
-//! Accepts raw `ImageView` weights and scalar anchors separately:
+//! ## Correlation core (internal)
 //!
-//! - [`convolve_separable_raw`] — allocates the output
-//! - [`convolve_separable_raw_into`] — writes into an existing output
-//!
-//! Both perform true **convolution** (kernel is flipped). For symmetric
-//! 1D kernels the flip is a no-op.
+//! [`correlate_separable_raw`] / [`correlate_separable_raw_into`] apply raw
+//! `ImageView<Pixel = f32>` weights directly at their kernel offsets (no
+//! flip). They are the allocation-free engine the ergonomic API and the
+//! blur filters delegate to; callers that need true convolution flip first.
 //!
 //! The intermediate image between the two passes uses the pixel's
 //! [`LinearPixel::Accumulator`] type, avoiding premature quantisation.
 
 use crate::border::BorderPolicy;
-use crate::image::{Image, ImageView, RasterImage, RasterImageMut, SeparableKernel};
+use crate::image::{Image, ImageRef, ImageView, RasterImage, RasterImageMut, SeparableKernel};
 use crate::pixel::{FromLinear, LinearPixel, ZeroablePixel};
 use crate::transform::fold::{FoldItem, FoldOp, fold_neighborhood, fold_neighborhood_into};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Internal: flip a 1D kernel stored as a raw ImageView
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Create a 180°-rotated copy of a 1D kernel stored as an `ImageView<Pixel = f32>`.
-///
-/// Used by the raw (low-level) separable API which accepts `ImageView`
-/// weights rather than a `SeparableKernel`.
-fn flip_1d(
-    weights: &impl ImageView<Pixel = f32>,
-    anchor: (usize, usize),
-) -> (Image<f32>, (usize, usize)) {
-    let w = weights.width();
-    let h = weights.height();
-    let flipped = Image::generate(w, h, |x, y| weights.pixel_at(w - 1 - x, h - 1 - y));
-    let flipped_anchor = (w - 1 - anchor.0, h - 1 - anchor.1);
-    (flipped, flipped_anchor)
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // FoldOp implementations for separable passes
@@ -199,17 +183,19 @@ pub fn convolve_separable_into<I, B, O, P, Acc, Out, const HK: usize, const VK: 
     O: RasterImageMut<Pixel = Out>,
     Out: FromLinear<Acc>,
 {
-    // Delegate to the raw API using heap-allocated 1D Image views.
-    // The allocation is tiny (HK or VK floats) and avoids exposing
-    // private _Array2D trait bounds in the public signature.
-    let h_img = kernel.to_h_image();
-    let v_img = kernel.to_v_image();
-    convolve_separable_raw_into(
+    // True convolution = correlation with the 180°-flipped kernel.
+    // `SeparableKernel::flipped()` is allocation-free (stack arrays), and the
+    // flipped weights are fed to the correlation core through borrowed
+    // `ImageRef` views — so the kernel never touches the heap (ADR-0023).
+    let flipped = kernel.flipped();
+    let h = ImageRef::new(HK, 1, flipped.h_weights()).expect("h kernel view: len == HK");
+    let v = ImageRef::new(1, VK, flipped.v_weights()).expect("v kernel view: len == VK");
+    correlate_separable_raw_into(
         image,
-        &h_img,
-        kernel.h_anchor(),
-        &v_img,
-        kernel.v_anchor(),
+        &h,
+        flipped.h_anchor(),
+        &v,
+        flipped.v_anchor(),
         border,
         output,
     );
@@ -258,48 +244,38 @@ where
     B: BorderPolicy<I> + BorderPolicy<Image<Acc>>,
     Out: ZeroablePixel + FromLinear<Acc>,
 {
-    // Delegate to the raw API using heap-allocated 1D Image views.
-    let h_img = kernel.to_h_image();
-    let v_img = kernel.to_v_image();
-    convolve_separable_raw(
+    // Flip on the stack, borrow the weights as `ImageRef` views, correlate.
+    // No heap allocation for the kernel (ADR-0023).
+    let flipped = kernel.flipped();
+    let h = ImageRef::new(HK, 1, flipped.h_weights()).expect("h kernel view: len == HK");
+    let v = ImageRef::new(1, VK, flipped.v_weights()).expect("v kernel view: len == VK");
+    correlate_separable_raw(
         image,
-        &h_img,
-        kernel.h_anchor(),
-        &v_img,
-        kernel.v_anchor(),
+        &h,
+        flipped.h_anchor(),
+        &v,
+        flipped.v_anchor(),
         border,
     )
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// Low-level API: raw weights + anchor
+// Correlation core (no flip) — the allocation-free engine
 // ═════════════════════════════════════════════════════════════════════════════
 
-/// Write the result of a separable convolution into `output` (low-level
-/// API accepting raw weights and anchors).
+/// Separable **correlation** into a caller-owned output — the no-flip core.
 ///
-/// Prefer the [`convolve_separable_into`] overload that takes a
-/// [`SeparableKernel`] for ergonomic use. This function is available for
-/// dynamic or runtime-sized kernels.
+/// The weights are applied directly at their kernel offsets (no 180° flip),
+/// so this is correlation, not convolution. It performs **no kernel-shaped
+/// heap allocation**: both passes consume the `ImageView` weights as-is. The
+/// flipping `convolve_separable_*` functions are thin wrappers that arrange
+/// the flip — on the stack for [`SeparableKernel`], via [`flip_1d`] for raw
+/// borrowed weights — and delegate here.
 ///
-/// # Arguments
-///
-/// - `image` — source image
-/// - `h_weights` — horizontal 1D kernel, shape `(width, 1)`.
-///   The anchor is at `(h_anchor, 0)`.
-/// - `h_anchor` — x-position of the anchor within `h_weights`
-/// - `v_weights` — vertical 1D kernel, shape `(1, height)`.
-///   The anchor is at `(0, v_anchor)`.
-/// - `v_anchor` — y-position of the anchor within `v_weights`
-/// - `border` — border policy applied in **both** passes
-/// - `output` — destination; must be large enough for the output region
-///
-/// # Panics
-///
-/// Panics if `output` is too small for the region produced by the border
-/// policy after both passes.
-///
-pub(crate) fn convolve_separable_raw_into<I, HW, VW, B, O, P, Acc, Out>(
+/// (The inter-pass intermediate image and the per-row accumulator inside
+/// [`fold_neighborhood`] are still allocated; eliminating *those* is a
+/// separate, deferred concern — see the allocation-free separable blur plan.)
+pub(crate) fn correlate_separable_raw_into<I, HW, VW, B, O, P, Acc, Out>(
     image: &I,
     h_weights: &HW,
     h_anchor: usize,
@@ -321,37 +297,31 @@ pub(crate) fn convolve_separable_raw_into<I, HW, VW, B, O, P, Acc, Out>(
     O: RasterImageMut<Pixel = Out>,
     Out: FromLinear<Acc>,
 {
-    // ── Pass 1: horizontal ───────────────────────────────────────────
-    let (h_flipped, h_flipped_anchor) = flip_1d(h_weights, (h_anchor, 0));
-
+    // ── Pass 1: horizontal correlation (weights used directly) ───────────
     let intermediate: Image<Acc> = fold_neighborhood(
         image,
-        &h_flipped,
-        h_flipped_anchor,
+        h_weights,
+        (h_anchor, 0),
         border,
         HFold::<P, Acc>::new(),
     );
 
-    // ── Pass 2: vertical ─────────────────────────────────────────────
-    let (v_flipped, v_flipped_anchor) = flip_1d(v_weights, (0, v_anchor));
-
+    // ── Pass 2: vertical correlation ─────────────────────────────────────
     fold_neighborhood_into(
         &intermediate,
-        &v_flipped,
-        v_flipped_anchor,
+        v_weights,
+        (0, v_anchor),
         border,
         output,
         VFold::<Acc, Out>::new(),
     );
 }
 
-/// Perform a separable convolution and return a newly allocated output
-/// [`Image`] (low-level API accepting raw weights and anchors).
+/// Separable correlation returning a newly allocated output (no-flip core).
 ///
-/// Prefer the [`convolve_separable`] overload that takes a
-/// [`SeparableKernel`] for ergonomic use.
-///
-pub(crate) fn convolve_separable_raw<I, HW, VW, B, P, Acc, Out>(
+/// See [`correlate_separable_raw_into`]. The region sizing uses the anchors
+/// directly (no flip), with no kernel-shaped allocation.
+pub(crate) fn correlate_separable_raw<I, HW, VW, B, P, Acc, Out>(
     image: &I,
     h_weights: &HW,
     h_anchor: usize,
@@ -372,28 +342,23 @@ where
     B: BorderPolicy<I> + BorderPolicy<Image<Acc>>,
     Out: ZeroablePixel + FromLinear<Acc>,
 {
-    let (_, h_flipped_anchor) = flip_1d(h_weights, (h_anchor, 0));
     let intermediate_region = <B as BorderPolicy<I>>::output_region(
         border,
         image.size(),
         h_weights.size(),
-        h_flipped_anchor,
+        (h_anchor, 0),
     );
-
-    let (_, v_flipped_anchor) = flip_1d(v_weights, (0, v_anchor));
     let output_region = <B as BorderPolicy<Image<Acc>>>::output_region(
         border,
         intermediate_region.size,
         v_weights.size(),
-        v_flipped_anchor,
+        (0, v_anchor),
     );
 
     let mut out = Image::<Out>::zero(output_region.size.width, output_region.size.height);
-
-    convolve_separable_raw_into(
+    correlate_separable_raw_into(
         image, h_weights, h_anchor, v_weights, v_anchor, border, &mut out,
     );
-
     out
 }
 
@@ -652,7 +617,7 @@ mod tests {
         // `SeparableKernel::gaussian_3` therefore equals the raw result / 16.
         let h = Neighborhood::<f32, 3, 1>::gaussian_1d_3_h();
         let v = Neighborhood::<f32, 1, 3>::gaussian_1d_3_v();
-        let raw_result: Image<MonoF32> = convolve_separable_raw(
+        let raw_result: Image<MonoF32> = correlate_separable_raw(
             &src,
             h.weights(),
             h.anchor().0,
@@ -683,10 +648,14 @@ mod tests {
         let sep = SeparableKernel::with_anchors([1.0, 0.0, 0.0], 1, [0.0, 0.0, 1.0], 1);
         let result: Image<MonoF32> = convolve_separable(&src, &sep, &Clamp);
 
-        // Same with raw API
-        let h = Neighborhood::<f32, 3, 1>::with_anchor([1.0, 0.0, 0.0], (1, 0));
-        let v = Neighborhood::<f32, 1, 3>::with_anchor([0.0, 0.0, 1.0], (0, 1));
-        let raw: Image<MonoF32> = convolve_separable_raw(
+        // The correlation core does not flip, so to match the (flipping)
+        // `convolve_separable` for asymmetric weights we pre-flip the kernel
+        // by hand: convolution ≡ correlation with the 180°-rotated kernel.
+        // h = [1, 0, 0]/anchor 1 → flipped [0, 0, 1]/anchor 1;
+        // v = [0, 0, 1]/anchor 1 → flipped [1, 0, 0]/anchor 1.
+        let h = Neighborhood::<f32, 3, 1>::with_anchor([0.0, 0.0, 1.0], (1, 0));
+        let v = Neighborhood::<f32, 1, 3>::with_anchor([1.0, 0.0, 0.0], (0, 1));
+        let raw: Image<MonoF32> = correlate_separable_raw(
             &src,
             h.weights(),
             h.anchor().0,
@@ -706,8 +675,43 @@ mod tests {
     }
 
     // ═════════════════════════════════════════════════════════════════════
-    // Tests for raw (low-level) API — preserved from original
+    // Tests for the correlation core (no-flip engine) with raw weights
     // ═════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn correlate_separable_matches_convolve_for_symmetric() {
+        // For a symmetric kernel the 180° flip is a no-op, so the flipping
+        // `convolve_separable` (SeparableKernel) and the no-flip correlation
+        // core must agree exactly.
+        let src = Image::generate(7, 7, |x, y| MonoF32((x * 5 + y * 2) as f32));
+
+        let sep = SeparableKernel::gaussian_5();
+        let convolved: Image<MonoF32> = convolve_separable(&src, &sep, &Clamp);
+
+        let h = Neighborhood::<f32, 5, 1>::gaussian_1d_5_h();
+        let v = Neighborhood::<f32, 1, 5>::gaussian_1d_5_v();
+        // Divide the raw integer kernel (sum 256 over both passes) to match
+        // the normalized SeparableKernel.
+        let correlated: Image<MonoF32> = correlate_separable_raw(
+            &src,
+            h.weights(),
+            h.anchor().0,
+            v.weights(),
+            v.anchor().1,
+            &Clamp,
+        );
+
+        assert_eq!(convolved.width(), correlated.width());
+        assert_eq!(convolved.height(), correlated.height());
+        for y in 0..convolved.height() {
+            for x in 0..convolved.width() {
+                assert!(
+                    (convolved.pixel_at(x, y).0 - correlated.pixel_at(x, y).0 / 256.0).abs() < 1e-3,
+                    "mismatch at ({x}, {y})",
+                );
+            }
+        }
+    }
 
     #[test]
     fn separable_identity_preserves_image() {
@@ -716,7 +720,7 @@ mod tests {
         let h = Neighborhood::<f32, 1, 1>::new([1.0]);
         let v = Neighborhood::<f32, 1, 1>::new([1.0]);
 
-        let result: Image<MonoF32> = convolve_separable_raw(
+        let result: Image<MonoF32> = correlate_separable_raw(
             &src,
             h.weights(),
             h.anchor().0,
@@ -748,7 +752,7 @@ mod tests {
 
         let h = Neighborhood::<f32, 3, 1>::box_1d_3_h();
         let v = Neighborhood::<f32, 1, 3>::box_1d_3_v();
-        let sep_result: Image<MonoF32> = convolve_separable_raw(
+        let sep_result: Image<MonoF32> = correlate_separable_raw(
             &src,
             h.weights(),
             h.anchor().0,
@@ -781,7 +785,7 @@ mod tests {
 
         let h = Neighborhood::<f32, 5, 1>::box_1d_5_h();
         let v = Neighborhood::<f32, 1, 5>::box_1d_5_v();
-        let sep_result: Image<MonoF32> = convolve_separable_raw(
+        let sep_result: Image<MonoF32> = correlate_separable_raw(
             &src,
             h.weights(),
             h.anchor().0,
@@ -814,7 +818,7 @@ mod tests {
 
         let h = Neighborhood::<f32, 3, 1>::gaussian_1d_3_h();
         let v = Neighborhood::<f32, 1, 3>::gaussian_1d_3_v();
-        let sep_result: Image<MonoF32> = convolve_separable_raw(
+        let sep_result: Image<MonoF32> = correlate_separable_raw(
             &src,
             h.weights(),
             h.anchor().0,
@@ -847,7 +851,7 @@ mod tests {
 
         let h = Neighborhood::<f32, 5, 1>::gaussian_1d_5_h();
         let v = Neighborhood::<f32, 1, 5>::gaussian_1d_5_v();
-        let sep_result: Image<MonoF32> = convolve_separable_raw(
+        let sep_result: Image<MonoF32> = correlate_separable_raw(
             &src,
             h.weights(),
             h.anchor().0,
@@ -878,7 +882,7 @@ mod tests {
         let h = Neighborhood::<f32, 3, 1>::box_1d_3_h();
         let v = Neighborhood::<f32, 1, 3>::box_1d_3_v();
 
-        let result: Image<MonoF32> = convolve_separable_raw(
+        let result: Image<MonoF32> = correlate_separable_raw(
             &src,
             h.weights(),
             h.anchor().0,
@@ -905,7 +909,7 @@ mod tests {
         let h = Neighborhood::<f32, 3, 1>::box_1d_3_h();
         let v = Neighborhood::<f32, 1, 3>::box_1d_3_v();
 
-        let result: Image<Mono8> = convolve_separable_raw(
+        let result: Image<Mono8> = correlate_separable_raw(
             &src,
             h.weights(),
             h.anchor().0,
@@ -928,7 +932,7 @@ mod tests {
         let h = Neighborhood::<f32, 3, 1>::gaussian_1d_3_h();
         let v = Neighborhood::<f32, 1, 3>::gaussian_1d_3_v();
 
-        let alloc_result: Image<MonoF32> = convolve_separable_raw(
+        let alloc_result: Image<MonoF32> = correlate_separable_raw(
             &src,
             h.weights(),
             h.anchor().0,
@@ -938,7 +942,7 @@ mod tests {
         );
 
         let mut into_result = Image::<MonoF32>::zero(alloc_result.width(), alloc_result.height());
-        convolve_separable_raw_into(
+        correlate_separable_raw_into(
             &src,
             h.weights(),
             h.anchor().0,
@@ -965,7 +969,7 @@ mod tests {
         let h = Neighborhood::<f32, 3, 1>::box_1d_3_h();
         let v = Neighborhood::<f32, 1, 3>::box_1d_3_v();
 
-        let result: Image<MonoF32> = convolve_separable_raw(
+        let result: Image<MonoF32> = correlate_separable_raw(
             &src,
             h.weights(),
             h.anchor().0,
@@ -986,7 +990,7 @@ mod tests {
         let h = Neighborhood::<f32, 3, 1>::box_1d_3_h();
         let v = Neighborhood::<f32, 1, 3>::box_1d_3_v();
 
-        let result: Image<MonoF32> = convolve_separable_raw(
+        let result: Image<MonoF32> = correlate_separable_raw(
             &src,
             h.weights(),
             h.anchor().0,
@@ -1012,7 +1016,7 @@ mod tests {
         let h = Neighborhood::<f32, 3, 1>::box_1d_3_h();
         let v = Neighborhood::<f32, 1, 3>::box_1d_3_v();
 
-        let result: Image<MonoF32> = convolve_separable_raw(
+        let result: Image<MonoF32> = correlate_separable_raw(
             &src,
             h.weights(),
             h.anchor().0,
@@ -1031,7 +1035,7 @@ mod tests {
         let h = Neighborhood::<f32, 5, 1>::gaussian_1d_5_h();
         let v = Neighborhood::<f32, 1, 5>::gaussian_1d_5_v();
 
-        let result: Image<MonoF32> = convolve_separable_raw(
+        let result: Image<MonoF32> = correlate_separable_raw(
             &src,
             h.weights(),
             h.anchor().0,
@@ -1051,7 +1055,7 @@ mod tests {
         let h = Neighborhood::<f32, 3, 1>::with_anchor([1.0, 0.0, 0.0], (1, 0));
         let v = Neighborhood::<f32, 1, 3>::with_anchor([0.0, 0.0, 1.0], (0, 1));
 
-        let result_hv: Image<MonoF32> = convolve_separable_raw(
+        let result_hv: Image<MonoF32> = correlate_separable_raw(
             &src,
             h.weights(),
             h.anchor().0,
@@ -1063,7 +1067,7 @@ mod tests {
         let h2 = Neighborhood::<f32, 3, 1>::with_anchor([0.0, 0.0, 1.0], (1, 0));
         let v2 = Neighborhood::<f32, 1, 3>::with_anchor([1.0, 0.0, 0.0], (0, 1));
 
-        let result_vh: Image<MonoF32> = convolve_separable_raw(
+        let result_vh: Image<MonoF32> = correlate_separable_raw(
             &src,
             h2.weights(),
             h2.anchor().0,

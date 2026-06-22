@@ -26,8 +26,6 @@
 //! assert_eq!(kernel.v_anchor(), 1);
 //! ```
 
-use crate::image::Image;
-
 /// A separable convolution kernel: two 1D weight arrays (horizontal and
 /// vertical) plus their anchor positions.
 ///
@@ -211,22 +209,6 @@ impl<const HK: usize, const VK: usize> SeparableKernel<HK, VK> {
             v_weights: v,
             v_anchor: VK - 1 - self.v_anchor,
         }
-    }
-
-    /// Returns the horizontal weights as a heap-allocated `Image<f32>`
-    /// with shape `(HK, 1)`.
-    ///
-    /// This is used by the `convolve_separable` functions to pass
-    /// weights to `fold_neighborhood` without requiring private trait
-    /// bounds in the public API.
-    pub(crate) fn to_h_image(&self) -> Image<f32> {
-        Image::generate(HK, 1, |x, _y| self.h_weights[x])
-    }
-
-    /// Returns the vertical weights as a heap-allocated `Image<f32>`
-    /// with shape `(1, VK)`.
-    pub(crate) fn to_v_image(&self) -> Image<f32> {
-        Image::generate(1, VK, |_x, y| self.v_weights[y])
     }
 }
 
@@ -767,56 +749,6 @@ mod tests {
                 );
             }
         }
-    }
-
-    // ── to_h_image / to_v_image helpers ─────────────────────────────────
-
-    #[test]
-    fn to_h_image_shape_and_content() {
-        let k = SeparableKernel::gaussian_3();
-        let arr = k.to_h_image();
-        assert_eq!(arr.width(), 3);
-        assert_eq!(arr.height(), 1);
-        assert_eq!(arr.pixel_at(0, 0), 0.25);
-        assert_eq!(arr.pixel_at(1, 0), 0.5);
-        assert_eq!(arr.pixel_at(2, 0), 0.25);
-    }
-
-    #[test]
-    fn to_v_image_shape_and_content() {
-        let k = SeparableKernel::gaussian_3();
-        let arr = k.to_v_image();
-        assert_eq!(arr.width(), 1);
-        assert_eq!(arr.height(), 3);
-        assert_eq!(arr.pixel_at(0, 0), 0.25);
-        assert_eq!(arr.pixel_at(0, 1), 0.5);
-        assert_eq!(arr.pixel_at(0, 2), 0.25);
-    }
-
-    #[test]
-    fn to_h_image_5() {
-        let k = SeparableKernel::gaussian_5();
-        let arr = k.to_h_image();
-        assert_eq!(arr.width(), 5);
-        assert_eq!(arr.height(), 1);
-        assert_eq!(arr.pixel_at(0, 0), 0.0625);
-        assert_eq!(arr.pixel_at(1, 0), 0.25);
-        assert_eq!(arr.pixel_at(2, 0), 0.375);
-        assert_eq!(arr.pixel_at(3, 0), 0.25);
-        assert_eq!(arr.pixel_at(4, 0), 0.0625);
-    }
-
-    #[test]
-    fn to_v_image_5() {
-        let k = SeparableKernel::gaussian_5();
-        let arr = k.to_v_image();
-        assert_eq!(arr.width(), 1);
-        assert_eq!(arr.height(), 5);
-        assert_eq!(arr.pixel_at(0, 0), 0.0625);
-        assert_eq!(arr.pixel_at(0, 1), 0.25);
-        assert_eq!(arr.pixel_at(0, 2), 0.375);
-        assert_eq!(arr.pixel_at(0, 3), 0.25);
-        assert_eq!(arr.pixel_at(0, 4), 0.0625);
     }
 
     // ── Clone / Debug / PartialEq ───────────────────────────────────────

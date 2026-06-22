@@ -44,6 +44,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the caller owns the scale). The `SeparableKernel::gaussian_3` /
   `gaussian_5` factories are likewise normalized now (weights
   `[0.25, 0.5, 0.25]` and `[0.0625, 0.25, 0.375, 0.25, 0.0625]`).
+- Internal (no public behaviour change): the separable convolution path no
+  longer materializes its 1-D kernel weights onto the heap. Weights are now
+  borrowed as `ImageRef` views and fed to a new no-flip correlation core, with
+  true convolution flipping the kernel on the stack via
+  `SeparableKernel::flipped`. This removes ~6–8 small per-call allocations from
+  `gaussian_blur*`, `box_blur_*`, and `convolve_separable*`, closing the
+  kernel-allocation half of the ADR-0023 deviation. The image-sized working-set
+  buffers (intermediate + accumulator + output) are unchanged; reusing those
+  across calls is the deferred follow-up (see ADR-0054 / OPT-004). The
+  `SeparableKernel::to_h_image` / `to_v_image` helpers were removed.
 
 ## [0.2.0] — 2026-06-12
 

@@ -17,12 +17,12 @@
 
 use crate::border::BorderPolicy;
 use crate::image::{
-    Image, Neighborhood, RasterImage, RasterImageMut, SeparableKernel, gaussian_kernel_1d,
+    Image, ImageRef, Neighborhood, RasterImage, RasterImageMut, SeparableKernel, gaussian_kernel_1d,
 };
 use crate::pixel::{FromLinear, LinearPixel, ZeroablePixel};
 use crate::transform::convolve::convolve;
 use crate::transform::convolve_separable::{
-    convolve_separable, convolve_separable_raw, convolve_separable_raw_into,
+    convolve_separable, correlate_separable_raw, correlate_separable_raw_into,
 };
 
 // ─── Box blur ────────────────────────────────────────────────────────────────
@@ -307,11 +307,13 @@ where
     let n = kernel.len();
     let anchor = kernel.anchor();
 
-    // The kernel is symmetric ⇒ identical horizontal and vertical weights.
-    let h_img = Image::generate(n, 1, |x, _| weights[x]);
-    let v_img = Image::generate(1, n, |_, y| weights[y]);
+    // The kernel is symmetric ⇒ correlation == convolution (no flip needed),
+    // and identical horizontal/vertical weights. Borrow the stack-resident
+    // weights as `ImageRef` views: the kernel never touches the heap.
+    let h = ImageRef::new(n, 1, weights).expect("h kernel view: len == n");
+    let v = ImageRef::new(1, n, weights).expect("v kernel view: len == n");
 
-    convolve_separable_raw(image, &h_img, anchor, &v_img, anchor, border)
+    correlate_separable_raw(image, &h, anchor, &v, anchor, border)
 }
 
 /// Gaussian blur derived from `sigma`, writing into a caller-owned output.
@@ -373,10 +375,12 @@ pub fn gaussian_blur_with_into<I, B, O, P, Acc, Out>(
     let n = kernel.len();
     let anchor = kernel.anchor();
 
-    let h_img = Image::generate(n, 1, |x, _| weights[x]);
-    let v_img = Image::generate(1, n, |_, y| weights[y]);
+    // Symmetric kernel ⇒ correlate directly; borrow the stack weights as
+    // `ImageRef` views with no heap kernel copy.
+    let h = ImageRef::new(n, 1, weights).expect("h kernel view: len == n");
+    let v = ImageRef::new(1, n, weights).expect("v kernel view: len == n");
 
-    convolve_separable_raw_into(image, &h_img, anchor, &v_img, anchor, border, output);
+    correlate_separable_raw_into(image, &h, anchor, &v, anchor, border, output);
 }
 
 // ─── Sobel ───────────────────────────────────────────────────────────────────
