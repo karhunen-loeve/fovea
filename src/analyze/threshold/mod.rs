@@ -1,0 +1,23 @@
+//! Threshold-based segmentation.
+//!
+//! Operations that turn a single-channel image into a
+//! [`BinaryImage`](crate::image::BinaryImage) by comparing pixel values
+//! against one or more explicit thresholds.
+//!
+//! Each threshold is a named caller argument — this module never *infers*
+//! a cut point from the data (Philosophy §8). The data-driven counterpart
+//! is [`otsu_threshold`](crate::analyze::histogram::otsu_threshold), which
+//! lives in [`histogram`](crate::analyze::histogram) because it consumes a
+//! histogram to *choose* its threshold; the functions here take the
+//! threshold as given.
+//!
+//! ## Which threshold?
+//!
+//! | Question | Reach for |
+//! |---|---|
+//! | "Keep weak edges only if they connect to a strong one." | [`hysteresis_threshold`] |
+//! | "Pick the threshold for me from the histogram." | [`otsu_binary_mask`](crate::analyze::histogram::otsu_binary_mask) |
+
+mod hysteresis;
+
+pub use hysteresis::{hysteresis_threshold, hysteresis_threshold_into};

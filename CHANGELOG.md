@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `analyze::threshold::hysteresis_threshold` (and `_into`): double-threshold
+  segmentation that keeps a **weak** pixel (`value >= low`) only when its
+  8-connected component contains a **strong** pixel (`value >= high`),
+  returning a `BinaryImage`. Both comparisons are inclusive (matching the
+  Canny literature / OpenCV, and intentionally differing from Otsu's
+  exclusive `>`). Accepts any single-channel pixel, including the `MonoF32`
+  gradient-magnitude image of a Canny pipeline; built by composition over
+  `connected_components` rather than new machinery. The strong mask is never
+  materialized. Panics (Tier 3) on a multi-channel pixel, an `out`/input size
+  mismatch, or `!(low <= high)`.
 - Parameterized Gaussian blur: `gaussian_blur(image, sigma, border)` and
   `gaussian_blur_with(image, sigma, truncate, border)` (plus `_into`
   variants writing to a caller-owned output) derive a normalized separable
