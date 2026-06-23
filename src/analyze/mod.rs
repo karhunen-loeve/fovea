@@ -12,6 +12,7 @@
 //! | "How are channel values distributed?" | [`histogram`](crate::analyze::histogram) | Counts per bin, per channel. |
 //! | "What threshold separates foreground?" | [`histogram::otsu_threshold`](crate::analyze::histogram::otsu_threshold) / [`histogram::otsu_binary_mask`](crate::analyze::histogram::otsu_binary_mask) | Threshold value or binary mask. |
 //! | "Keep weak edges only if connected to a strong one?" | [`threshold::hysteresis_threshold`](crate::analyze::threshold::hysteresis_threshold) | Binary mask. |
+//! | "Threshold each pixel against its local neighbourhood (uneven lighting)?" | [`threshold::adaptive_threshold`](crate::analyze::threshold::adaptive_threshold) | Binary mask. |
 //! | "What is the sum of this rectangle?" | [`integral`](crate::analyze::integral) | Summed-area table with explicit accumulator pixels. |
 //! | "How many foreground blobs are in this mask?" | [`components`](crate::analyze::components) | Label image and optional component stats. |
 //!

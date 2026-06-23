@@ -16,8 +16,11 @@
 //! | Question | Reach for |
 //! |---|---|
 //! | "Keep weak edges only if they connect to a strong one." | [`hysteresis_threshold`] |
+//! | "Threshold each pixel against its own local neighbourhood (uneven lighting)." | [`adaptive_threshold`] |
 //! | "Pick the threshold for me from the histogram." | [`otsu_binary_mask`](crate::analyze::histogram::otsu_binary_mask) |
 
+mod adaptive;
 mod hysteresis;
 
+pub use adaptive::{AdaptiveAccumulator, Bias, adaptive_threshold, adaptive_threshold_into};
 pub use hysteresis::{hysteresis_threshold, hysteresis_threshold_into};

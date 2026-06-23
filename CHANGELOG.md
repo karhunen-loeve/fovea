@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `analyze::threshold::adaptive_threshold` (and `_into`): local-mean
+  adaptive thresholding for uneven illumination — a pixel is foreground iff
+  `pixel > local_mean(window) − bias`, returning a `BinaryImage`. Built by
+  composition over the integral-image engine, so the per-pixel window mean
+  is `O(1)` and the whole pass is `O(n)` regardless of `window` size. The
+  accumulator is named explicitly (`Mono32` / `Mono64` / `MonoF64`) exactly
+  as for `integral_image`, and fixes the offset domain via the new `Bias<A>`
+  newtype (`i64` for integer accumulators, `f64` for `MonoF64`); positive
+  bias biases toward foreground. The decision `(pixel + offset) · area > sum`
+  is evaluated in an exact `i128` (integer) / `f64` (float) domain — no
+  per-pixel division or rounding. Edges use a **clipped** window (exact,
+  allocation-free; matches scikit-image's `threshold_local`, differs from
+  OpenCV's replicate border). The boundary is strict `>` (equality is
+  background, matching Otsu). Single-channel-ness is enforced at compile time
+  (the accepted accumulators are only valid for monochrome sources).
+  Inherits `Error::AccumulatorOverflow` (Tier 2) from the integral
+  pre-flight; panics (Tier 3) on an even/zero `window` or an `out`/input size
+  mismatch. New public items: `adaptive_threshold`, `adaptive_threshold_into`,
+  `Bias`, and the sealed `AdaptiveAccumulator` trait. Design recorded in
+  ADR-0055.
 - `analyze::threshold::hysteresis_threshold` (and `_into`): double-threshold
   segmentation that keeps a **weak** pixel (`value >= low`) only when its
   8-connected component contains a **strong** pixel (`value >= high`),
