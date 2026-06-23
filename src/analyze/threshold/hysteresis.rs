@@ -114,7 +114,7 @@ pub fn hysteresis_threshold_into<I, P>(
         out.size(),
         image.size()
     );
-    // Decision 2 (ADR-0025 Tier 3): misordered thresholds are a caller
+    // Decision 2 (Tier 3): misordered thresholds are a caller
     // bug, not a data failure. Panic with both values named. `!(low <=
     // high)` also rejects a NaN threshold on float inputs.
     assert!(

@@ -248,7 +248,7 @@ fn pipeline_sobel_edge_detection_on_step() {
     });
 
     // Sobel X detects vertical edges (gradient in the x direction).
-    // ADR-0045 Phase C: `Mono8::Accumulator = MonoF32`, so the output
+    // `Mono8::Accumulator = MonoF32`, so the output
     // pixel type is `MonoF32` rather than raw `f32`. The magnitude
     // semantics are unchanged — `MonoF32::abs()` mirrors `f32::abs`
     // and `.0` extracts the scalar at the comparison boundary.

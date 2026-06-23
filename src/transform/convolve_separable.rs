@@ -19,7 +19,7 @@
 //! These perform true **convolution**: the kernel is flipped via
 //! [`SeparableKernel::flipped`], which is entirely stack-based, and the
 //! flipped weights are handed to the correlation core through borrowed
-//! [`ImageRef`] views — so the kernel never touches the heap (ADR-0023).
+//! [`ImageRef`] views — so the kernel never touches the heap.
 //! For symmetric 1D kernels the flip is a no-op.
 //!
 //! ## Correlation core (internal)
@@ -186,7 +186,7 @@ pub fn convolve_separable_into<I, B, O, P, Acc, Out, const HK: usize, const VK: 
     // True convolution = correlation with the 180°-flipped kernel.
     // `SeparableKernel::flipped()` is allocation-free (stack arrays), and the
     // flipped weights are fed to the correlation core through borrowed
-    // `ImageRef` views — so the kernel never touches the heap (ADR-0023).
+    // `ImageRef` views — so the kernel never touches the heap.
     let flipped = kernel.flipped();
     let h = ImageRef::new(HK, 1, flipped.h_weights()).expect("h kernel view: len == HK");
     let v = ImageRef::new(1, VK, flipped.v_weights()).expect("v kernel view: len == VK");
@@ -245,7 +245,7 @@ where
     Out: ZeroablePixel + FromLinear<Acc>,
 {
     // Flip on the stack, borrow the weights as `ImageRef` views, correlate.
-    // No heap allocation for the kernel (ADR-0023).
+    // No heap allocation for the kernel.
     let flipped = kernel.flipped();
     let h = ImageRef::new(HK, 1, flipped.h_weights()).expect("h kernel view: len == HK");
     let v = ImageRef::new(1, VK, flipped.v_weights()).expect("v kernel view: len == VK");

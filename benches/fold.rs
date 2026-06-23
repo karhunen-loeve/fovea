@@ -24,7 +24,7 @@ use std::hint::black_box;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-// ADR-0045 Phase S4: channel primitives no longer implement `LinearPixel`.
+// Channel primitives no longer implement `LinearPixel`.
 // The bench inputs migrated from `Image<u8>` to `Image<Mono8>`; `Mono8` is
 // `#[repr(transparent)]` over `Saturating<u8>`, so the bench layout and
 // numerical path are unchanged.
@@ -37,7 +37,7 @@ fn make_u8_image(width: usize, height: usize) -> Image<Mono8> {
 /// Identity fold: returns the anchor pixel value as f32.
 /// Uses a weight-1 identity kernel; the anchor pixel comes through as the
 /// sole item with weight == 1.0.
-// ADR-0044 Phase E: `f32` no longer implements `ZeroablePixel`, so
+// `f32` no longer implements `ZeroablePixel`, so
 // `fold_neighborhood`'s output pixel type migrated from `f32` to
 // `MonoF32`. `MonoF32` is `#[repr(transparent)]` over `f32`, so the
 // numerical path is unchanged. Closure accumulator remains scalar `f32`.
@@ -79,7 +79,7 @@ struct DirectSumFold;
 
 impl FoldOp<Mono8, f32> for DirectSumFold {
     type Accumulator = f32;
-    // ADR-0044 Phase E: pixel-role output type must be a real pixel.
+    // Pixel-role output type must be a real pixel.
     // `MonoF32` is `#[repr(transparent)]` over `f32`; codegen unchanged.
     type Output = MonoF32;
 

@@ -480,7 +480,7 @@ test_pixel_family!(indexed8, Indexed8, name: "Indexed8",
     sample: Indexed8(42), different: Indexed8(100),
     channels: [42u8], other_ch: 99u8, align: 1);
 
-// ── OriginInvariantPixel coverage (ADR-0051) ──────────────────────────────────
+// ── OriginInvariantPixel coverage ─────────────────────────────────────────────
 //
 // Compile-time proof that every shipped pixel family implements the
 // `OriginInvariantPixel` marker, keeping ordinary `SubView` ROI / tiling /
@@ -490,7 +490,7 @@ test_pixel_family!(indexed8, Indexed8, name: "Indexed8",
 // `bool` is included because `BinaryImage = Image<bool>` relies on the marker
 // for ROI. Raw channel primitives (`u8`, `u16`, `f32`, …) are deliberately
 // absent — they are channels, not pixels (Philosophy §9) — and a
-// coordinate-dependent Bayer CFA pixel would be absent too (ADR-0037).
+// coordinate-dependent Bayer CFA pixel would be absent too.
 #[test]
 fn origin_invariant_marker_covers_all_families() {
     fn assert_marker<P: OriginInvariantPixel>() {}

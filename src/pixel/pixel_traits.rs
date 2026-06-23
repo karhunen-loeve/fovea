@@ -333,15 +333,12 @@ pub trait ZeroablePixel: Sized + Copy {
 ///
 /// It is **not** implemented for raw channel primitives (`u8`, `u16`,
 /// `f32`, …): those are channels, not pixels (Philosophy §9). It is also the
-/// opt-out point for coordinate-dependent pixels such as Bayer CFA mosaics
-/// (ADR-0037): an ROI at an odd origin shifts the 2×2 mosaic phase, so
+/// opt-out point for coordinate-dependent pixels such as Bayer CFA mosaics:
+/// an ROI at an odd origin shifts the 2×2 mosaic phase, so
 /// returning the same pattern type would lie about the data. Such pixels
 /// remain usable as [`ImageView`](crate::image::ImageView) /
 /// [`RasterImage`](crate::image::RasterImage) storage and reach for named,
 /// phase-aware ROI APIs instead.
-///
-/// The design is recorded in ADR-0051; the ROI/tiling split it builds on is
-/// ADR-0017.
 ///
 /// # Examples
 ///
@@ -384,7 +381,7 @@ pub trait OriginInvariantPixel: Copy {}
 /// into ordinary [`SubView`](crate::image::SubView) /
 /// [`SubViewMut`](crate::image::SubViewMut) access without repeating the
 /// empty impl by hand. Membership is the whole specification: a
-/// coordinate-dependent pixel (e.g. a future Bayer CFA type, ADR-0037) is
+/// coordinate-dependent pixel (e.g. a future Bayer CFA type) is
 /// simply left off the list and therefore never gains ordinary `roi()`.
 ///
 /// Const-generic families (`Mono<BITS>`, `Rgb<BITS>`, …) implement the

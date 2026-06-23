@@ -265,7 +265,7 @@ struct PrimitiveStruct {
     a: u8,
     b: u16,
     c: u32,
-    // ADR-0044 Phase E: `f32` no longer implements `ZeroablePixel`
+    // `f32` no longer implements `ZeroablePixel`
     // (it is a channel, not a pixel). Use `#[zero(default)]` to
     // zero-initialize via `<f32 as Default>::default()` instead of
     // the (now-removed) `<f32 as ZeroablePixel>::zero()`.

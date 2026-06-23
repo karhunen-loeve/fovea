@@ -599,7 +599,7 @@ where
     K: Kernel<Weight = bool>,
     // Composite morphology subtracts `opening(image)` from `image` pixel-wise,
     // so both must have the same dimensions. `FullFrameBorder` excludes
-    // `Skip` (which shrinks the output) at compile time — see ADR/P1-5.
+    // `Skip` (which shrinks the output) at compile time.
     B: FullFrameBorder<I> + BorderPolicy<Image<P>>,
 {
     let opened = opening(image, kernel, border);

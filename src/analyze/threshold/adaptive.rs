@@ -7,7 +7,7 @@
 //!
 //! The design — `Bias<A>` keyed on the integral *accumulator* (not its
 //! unsigned channel), integer-exact `i128` comparison, clipped-window
-//! edges, strict `>` boundary — is recorded in ADR-0055.
+//! edges, strict `>` boundary — is explained inline with each item below.
 
 use std::ops::Sub;
 
@@ -20,7 +20,7 @@ use crate::{Coordinate, Rectangle, Size};
 mod sealed {
     /// Seals [`AdaptiveAccumulator`](super::AdaptiveAccumulator): the set
     /// of accumulators adaptive threshold accepts is closed, mirroring the
-    /// sealed capacity traits of the integral engine (ADR-0032 / ADR-0055).
+    /// sealed capacity traits of the integral engine.
     pub trait Sealed {}
     impl Sealed for crate::pixel::Mono32 {}
     impl Sealed for crate::pixel::Mono64 {}
@@ -41,8 +41,8 @@ mod sealed {
 ///
 /// The associated [`Offset`](Self::Offset) is the signed bias domain:
 /// `i64` for the integer accumulators (`Mono32`, `Mono64`) and `f64` for
-/// `MonoF64`. See ADR-0055 for why the offset is keyed on the accumulator
-/// and not on its (unsigned) channel type.
+/// `MonoF64`. The offset is keyed on the accumulator rather than on its
+/// (unsigned) channel type, which could not represent a negative bias.
 pub trait AdaptiveAccumulator: sealed::Sealed + Copy + Sub<Output = Self> {
     /// Signed offset domain for [`Bias<Self>`](Bias): `i64` for integer
     /// accumulators, `f64` for `MonoF64`.
@@ -110,7 +110,7 @@ impl AdaptiveAccumulator for Mono64 {
     #[inline]
     fn exceeds_local_mean(pixel: Self, sum: Self, area: u64, offset: i64) -> bool {
         // i128 is mandatory here: pixel.value() can reach u64::MAX, whose
-        // product with `area` overflows i64 (ADR-0055).
+        // product with `area` overflows i64.
         let p = pixel.value() as i128;
         let s = sum.value() as i128;
         (p + offset as i128) * (area as i128) > s
@@ -149,8 +149,7 @@ impl AdaptiveAccumulator for MonoF64 {
 /// The wrapped value is `A::Offset` — `i64` for the integer accumulators
 /// (`Mono32`, `Mono64`) and `f64` for `MonoF64`. The newtype exists to
 /// keep the sign explicit and to stop the offset being accidentally
-/// transposed with `adaptive_threshold`'s `window: usize` argument
-/// (ADR-0055, Decision 2).
+/// transposed with `adaptive_threshold`'s `window: usize` argument.
 ///
 /// # Examples
 ///
@@ -418,7 +417,7 @@ mod tests {
         // so every pixel clears it. (The plan's TDD list mislabels this as
         // "negative_offset"; that contradicts the plan's own formula
         // `(pixel + offset) * area > sum` and prose "positive offset biases
-        // toward foreground". ADR-0055 follows the formula.)
+        // toward foreground". This implementation follows the formula.)
         let img = Image::fill(5, 5, Mono8::new(100));
         let out = adaptive_threshold::<_, Mono32>(&img, 3, Bias::new(1)).unwrap();
         for y in 0..out.height() {

@@ -27,8 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Inherits `Error::AccumulatorOverflow` (Tier 2) from the integral
   pre-flight; panics (Tier 3) on an even/zero `window` or an `out`/input size
   mismatch. New public items: `adaptive_threshold`, `adaptive_threshold_into`,
-  `Bias`, and the sealed `AdaptiveAccumulator` trait. Design recorded in
-  ADR-0055.
+  `Bias`, and the sealed `AdaptiveAccumulator` trait.
 - `analyze::threshold::hysteresis_threshold` (and `_into`): double-threshold
   segmentation that keeps a **weak** pixel (`value >= low`) only when its
   8-connected component contains a **strong** pixel (`value >= high`),
@@ -80,9 +79,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   true convolution flipping the kernel on the stack via
   `SeparableKernel::flipped`. This removes ~6–8 small per-call allocations from
   `gaussian_blur*`, `box_blur_*`, and `convolve_separable*`, closing the
-  kernel-allocation half of the ADR-0023 deviation. The image-sized working-set
-  buffers (intermediate + accumulator + output) are unchanged; reusing those
-  across calls is the deferred follow-up (see ADR-0054 / OPT-004). The
+  kernel-allocation half of the previously documented separable-convolution
+  allocation deviation. The image-sized working-set buffers (intermediate +
+  accumulator + output) are unchanged; reusing those across calls is the
+  deferred follow-up (tracked in OPT-004). The
   `SeparableKernel::to_h_image` / `to_v_image` helpers were removed.
 
 ## [0.2.0] — 2026-06-12
