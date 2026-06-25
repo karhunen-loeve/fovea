@@ -641,6 +641,83 @@ where
     }
 }
 
+// ─── Direction ─────────────────────────────────────────────────────────────────
+
+/// Sealing module for [`DirectionChannel`].
+mod direction_sealed {
+    pub trait Sealed: Copy {}
+}
+
+/// Channel types that support `atan2(b, a)`.
+///
+/// Implemented for `f32` and `f64`.  This trait is **sealed**: it cannot be
+/// implemented outside this crate.
+pub trait DirectionChannel: direction_sealed::Sealed + Copy {
+    /// Compute `atan2(b, a)`, the direction of the vector `(a, b)` in radians
+    /// on `(-π, π]`.
+    fn direction(a: Self, b: Self) -> Self;
+}
+
+impl direction_sealed::Sealed for f32 {}
+impl DirectionChannel for f32 {
+    #[inline(always)]
+    fn direction(a: f32, b: f32) -> f32 {
+        b.atan2(a)
+    }
+}
+
+impl direction_sealed::Sealed for f64 {}
+impl DirectionChannel for f64 {
+    #[inline(always)]
+    fn direction(a: f64, b: f64) -> f64 {
+        b.atan2(a)
+    }
+}
+
+/// Channel-wise gradient direction `atan2(b, a)`, in radians on `(-π, π]`.
+///
+/// The directional companion to [`Magnitude`]: given X- and Y-gradient images
+/// (e.g. from [`scharr_x`] / [`scharr_y`]), `Direction.combine(&gx, &gy)`
+/// yields the angle of the gradient vector at each pixel. Because the
+/// arguments follow image coordinates (`y` increases downward), a pure `+x`
+/// gradient maps to `0` and a pure `+y` gradient to `π/2`.
+///
+/// Only defined for float-channel pixel types (`MonoF32`, `MonoF64`, …), via
+/// the sealed [`DirectionChannel`] trait.
+///
+/// [`scharr_x`]: crate::transform::scharr_x
+/// [`scharr_y`]: crate::transform::scharr_y
+///
+/// # Example
+///
+/// ```
+/// use fovea::transform::{CombinePixels, Direction};
+/// use fovea::pixel::MonoF32;
+/// use std::f32::consts::FRAC_PI_2;
+///
+/// // Pure +y gradient → π/2.
+/// let dir = Direction.combine(&MonoF32::new(0.0), &MonoF32::new(1.0));
+/// assert!((dir.value() - FRAC_PI_2).abs() < 1e-6);
+/// ```
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Direction;
+
+impl<P> CombinePixels<P, P> for Direction
+where
+    P: HomogeneousPixel,
+    P::Channel: DirectionChannel,
+{
+    type Output = P;
+
+    fn combine(&self, a: &P, b: &P) -> P {
+        let mut result = *a;
+        for i in 0..P::CHANNEL_COUNT {
+            result.set_channel(i, DirectionChannel::direction(a.channel(i), b.channel(i)));
+        }
+        result
+    }
+}
+
 // ─── Convenience free functions ──────────────────────────────────────────────
 
 /// Add two images pixel-wise and return the result, or `Err(Error::SizeMismatch)` if sizes differ.

@@ -54,7 +54,12 @@
 //! [`Max`](crate::transform::Max),
 //! [`LinearCombine`](crate::transform::LinearCombine),
 //! [`Blend`](crate::transform::Blend),
-//! [`Magnitude`](crate::transform::Magnitude)) cover everyday arithmetic.
+//! [`Magnitude`](crate::transform::Magnitude),
+//! [`Direction`](crate::transform::Direction)) cover everyday arithmetic.
+//! The gradient-fusion helpers [`gradient_magnitude`](crate::transform::gradient_magnitude)
+//! and [`gradient_direction`](crate::transform::gradient_direction) wrap the
+//! last two for edge pipelines, and [`non_maximum_suppression`](crate::transform::non_maximum_suppression)
+//! thins the resulting ridge.
 //! Thin free-function wrappers ([`add`](crate::transform::add),
 //! [`subtract`](crate::transform::subtract),
 //! [`abs_diff`](crate::transform::abs_diff),
@@ -98,9 +103,10 @@ mod template_match;
 
 pub use crate::pixel::blend;
 pub use combine::{
-    AbsDiff, Blend, ClosureCombine, CombinePixels, LinearCombine, Magnitude, MagnitudeChannel, Max,
-    Min, PixelAdd, PixelMultiply, PixelSubtract, abs_diff, add, combine_images, combine_images_fn,
-    combine_images_fn_into, combine_images_into, image_max, image_min, subtract,
+    AbsDiff, Blend, ClosureCombine, CombinePixels, Direction, DirectionChannel, LinearCombine,
+    Magnitude, MagnitudeChannel, Max, Min, PixelAdd, PixelMultiply, PixelSubtract, abs_diff, add,
+    combine_images, combine_images_fn, combine_images_fn_into, combine_images_into, image_max,
+    image_min, subtract,
 };
 pub use convert::{
     AddAlpha, BinaryMask, BinaryThreshold, BinaryThresholdInv, BrightnessContrast, Broadcast,
@@ -112,8 +118,9 @@ pub use convolve::{convolve, convolve_into, correlate, correlate_into};
 pub use convolve_separable::{convolve_separable, convolve_separable_into};
 pub use filters::{
     DEFAULT_TRUNCATE, box_blur_3x3, box_blur_5x5, emboss, gaussian_blur, gaussian_blur_3x3,
-    gaussian_blur_5x5, gaussian_blur_into, gaussian_blur_with, gaussian_blur_with_into, laplacian,
-    laplacian_8, prewitt_x, prewitt_y, scharr_x, scharr_y, sharpen, sobel_x, sobel_y,
+    gaussian_blur_5x5, gaussian_blur_into, gaussian_blur_with, gaussian_blur_with_into,
+    gradient_direction, gradient_magnitude, laplacian, laplacian_8, non_maximum_suppression,
+    prewitt_x, prewitt_y, scharr_x, scharr_y, sharpen, sobel_x, sobel_y,
 };
 pub use fold::{
     ClosureFold, FoldItem, FoldOp, fold_neighborhood, fold_neighborhood_fn,

@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `analyze::edge::canny`: single-scale Canny edge detector composing the full
+  pipeline — `gaussian_blur(sigma)` → Scharr `Gx`/`Gy` → gradient magnitude +
+  direction → non-maximum suppression → `hysteresis_threshold` — and returning
+  a `BinaryImage`. `sigma` is a true Gaussian standard deviation; `low`/`high`
+  are absolute, kernel-independent gradient-magnitude thresholds (stable
+  because the blur preserves brightness). Generic over any single-channel
+  input whose linear accumulator is a float pixel: `Mono8`/`MonoF32` accumulate
+  in `MonoF32`, `Mono16`/`Mono32`/`Mono64`/`MonoF64` in `MonoF64`. Every stage
+  is a public function, so callers can swap operators or inspect intermediates
+  by composing the pipeline by hand. Demo: `fovea-examples/src/canny.rs`.
+- `transform::gradient_magnitude` and `transform::gradient_direction`: named
+  wrappers over `combine_images` with the `Magnitude` (L2, `hypot`) and the new
+  `Direction` (`atan2`) strategies, fusing an `Gx`/`Gy` pair into an
+  edge-strength map or a gradient-angle map. Both are generic over the
+  float-channel pixel types the strategies support (`MonoF32`, `MonoF64`, …)
+  and return `Err(Error::SizeMismatch)` on differing input sizes.
+- `transform::non_maximum_suppression`: thins a gradient-magnitude ridge to
+  single-pixel width by zeroing any pixel that is not a local maximum along its
+  quantised gradient direction (sectors 0°/45°/90°/135°). Ties are kept
+  (inclusive `>=`, OpenCV-compatible); border pixels whose along-gradient
+  neighbour is out of bounds are suppressed. Generic over single-channel float
+  pixels; panics on a magnitude/direction size mismatch.
+- `transform::Direction` (and the sealed `transform::DirectionChannel` trait):
+  a `CombinePixels` strategy computing channel-wise `atan2(b, a)` in radians on
+  `(-π, π]`, the directional companion to the existing `Magnitude` strategy.
+  Defined for `f32` / `f64` channels.
 - `analyze::threshold::adaptive_threshold` (and `_into`): local-mean
   adaptive thresholding for uneven illumination — a pixel is foreground iff
   `pixel > local_mean(window) − bias`, returning a `BinaryImage`. Built by

@@ -16,10 +16,15 @@
 //! pixel type by default (using [`FromLinear`] for the final conversion).
 
 use crate::border::BorderPolicy;
+use crate::error::Error;
 use crate::image::{
-    Image, ImageRef, Neighborhood, RasterImage, RasterImageMut, SeparableKernel, gaussian_kernel_1d,
+    Image, ImageRef, ImageView, Neighborhood, RasterImage, RasterImageMut, SeparableKernel,
+    gaussian_kernel_1d,
 };
-use crate::pixel::{FromLinear, LinearPixel, ZeroablePixel};
+use crate::pixel::{FromLinear, HomogeneousPixel, LinearPixel, ZeroablePixel};
+use crate::transform::combine::{
+    Direction, DirectionChannel, Magnitude, MagnitudeChannel, combine_images,
+};
 use crate::transform::convolve::convolve;
 use crate::transform::convolve_separable::{
     convolve_separable, correlate_separable_raw, correlate_separable_raw_into,
@@ -769,6 +774,216 @@ where
     convolve(image, &Neighborhood::<f32, 3, 3>::emboss(), border)
 }
 
+// ─── Gradient magnitude / direction ───────────────────────────────────────────
+
+/// Pixel-wise L2 gradient magnitude `sqrt(gx² + gy²)`.
+///
+/// Fuses a pair of gradient images — typically [`scharr_x`] / [`scharr_y`]
+/// (or [`sobel_x`] / [`sobel_y`]) — into a single unsigned edge-strength map.
+/// This is the magnitude pre-stage of a Canny pipeline and a thin, named
+/// wrapper over [`combine_images`] with the [`Magnitude`] strategy (which uses
+/// [`f32::hypot`] / [`f64::hypot`], avoiding intermediate overflow).
+///
+/// Generic over the same float-channel pixel types as [`Magnitude`] (e.g.
+/// `MonoF32`, `MonoF64`, `RgbF32`), so it follows whichever accumulator the
+/// upstream gradient operator produced. The output is a raw float container:
+/// values are `>= 0` but otherwise unbounded — thresholding is the caller's
+/// responsibility.
+///
+/// # Errors
+///
+/// Returns [`Error::SizeMismatch`] if `gx` and `gy` differ in dimensions.
+///
+/// # Example
+///
+/// ```
+/// use fovea::image::{Image, ImageView};
+/// use fovea::pixel::MonoF32;
+/// use fovea::transform::gradient_magnitude;
+///
+/// // Classic 3-4-5 triple, pixel-wise.
+/// let gx = Image::fill(2, 2, MonoF32::new(3.0));
+/// let gy = Image::fill(2, 2, MonoF32::new(4.0));
+/// let mag = gradient_magnitude(&gx, &gy).unwrap();
+/// assert!((mag.pixel_at(0, 0).value() - 5.0).abs() < 1e-5);
+/// ```
+pub fn gradient_magnitude<IA, IB, P>(gx: &IA, gy: &IB) -> Result<Image<P>, Error>
+where
+    IA: RasterImage<Pixel = P>,
+    IB: RasterImage<Pixel = P>,
+    P: HomogeneousPixel + ZeroablePixel,
+    P::Channel: MagnitudeChannel,
+{
+    combine_images(gx, gy, Magnitude)
+}
+
+/// Pixel-wise gradient direction `atan2(gy, gx)`, in radians on `(-π, π]`.
+///
+/// The companion to [`gradient_magnitude`]: the angle of the gradient vector
+/// `(gx, gy)` at each pixel, as produced by [`scharr_x`] / [`scharr_y`]. Feed
+/// both into [`non_maximum_suppression`] to thin the edge ridge. A thin,
+/// named wrapper over [`combine_images`] with the [`Direction`] strategy.
+///
+/// The angle follows image coordinates (`y` increases downward), so a pure
+/// `+x` gradient is `0`, a pure `+y` gradient is `π/2`. Generic over the same
+/// float-channel pixel types as [`Direction`] (`MonoF32`, `MonoF64`, …).
+///
+/// # Errors
+///
+/// Returns [`Error::SizeMismatch`] if `gx` and `gy` differ in dimensions.
+///
+/// # Example
+///
+/// ```
+/// use fovea::image::{Image, ImageView};
+/// use fovea::pixel::MonoF32;
+/// use fovea::transform::gradient_direction;
+/// use std::f32::consts::FRAC_PI_2;
+///
+/// // Pure +y gradient → π/2.
+/// let gx = Image::fill(1, 1, MonoF32::new(0.0));
+/// let gy = Image::fill(1, 1, MonoF32::new(1.0));
+/// let dir = gradient_direction(&gx, &gy).unwrap();
+/// assert!((dir.pixel_at(0, 0).value() - FRAC_PI_2).abs() < 1e-6);
+/// ```
+pub fn gradient_direction<IA, IB, P>(gx: &IA, gy: &IB) -> Result<Image<P>, Error>
+where
+    IA: RasterImage<Pixel = P>,
+    IB: RasterImage<Pixel = P>,
+    P: HomogeneousPixel + ZeroablePixel,
+    P::Channel: DirectionChannel,
+{
+    combine_images(gx, gy, Direction)
+}
+
+// ─── Non-maximum suppression ──────────────────────────────────────────────────
+
+/// Quantise a gradient direction (radians) to one of four edge sectors and
+/// return the `(dx, dy)` step toward the neighbour along the gradient.
+///
+/// The gradient and its opposite describe the same edge, so the angle is
+/// folded into `[0, π)` before quantising. The four returned steps are:
+/// `(1, 0)` horizontal, `(1, 1)` main diagonal, `(0, 1)` vertical, and
+/// `(-1, 1)` anti-diagonal.
+#[inline]
+fn nms_sector(theta: f64) -> (isize, isize) {
+    use core::f64::consts::PI;
+    // Fold (-π, π] onto [0, π): opposite gradients share an edge orientation.
+    let mut a = theta;
+    if a < 0.0 {
+        a += PI;
+    }
+    const SEG: f64 = PI / 8.0; // 22.5°
+    if a < SEG {
+        (1, 0) // gradient ≈ horizontal → compare left / right
+    } else if a < 3.0 * SEG {
+        (1, 1) // gradient ≈ +45° → compare the main diagonal
+    } else if a < 5.0 * SEG {
+        (0, 1) // gradient ≈ vertical → compare up / down
+    } else if a < 7.0 * SEG {
+        (-1, 1) // gradient ≈ −45° → compare the anti-diagonal
+    } else {
+        (1, 0) // [157.5°, 180°] wraps back to horizontal
+    }
+}
+
+/// Magnitude channel of the neighbour at `(x + dx, y + dy)`, or `None` if it
+/// falls outside the image.
+#[inline]
+fn nms_neighbour<I, P>(
+    magnitude: &I,
+    x: usize,
+    y: usize,
+    dx: isize,
+    dy: isize,
+) -> Option<P::Channel>
+where
+    I: ImageView<Pixel = P>,
+    P: HomogeneousPixel,
+{
+    let nx = x as isize + dx;
+    let ny = y as isize + dy;
+    if nx < 0 || ny < 0 {
+        return None;
+    }
+    magnitude
+        .get(nx as usize, ny as usize)
+        .map(|p| p.channel(0))
+}
+
+/// Non-maximum suppression: thin a gradient-magnitude ridge to single-pixel
+/// width along the (quantised) gradient direction.
+///
+/// For each pixel, the gradient direction is quantised to one of four sectors
+/// (0°, 45°, 90°, 135°); the pixel is kept only when its magnitude is `>=`
+/// **both** neighbours along that direction, otherwise it is set to zero. The
+/// inclusive `>=` (ties kept) matches the common OpenCV convention and avoids
+/// erasing genuine flat-topped ridges.
+///
+/// Border pixels whose along-gradient neighbour lies outside the image are
+/// suppressed to zero (their local maximality cannot be established).
+///
+/// `magnitude` and `direction` are the outputs of [`gradient_magnitude`] and
+/// [`gradient_direction`] over the same gradient pair. Operates on the first
+/// channel (intended for single-channel gradient images such as `MonoF32` /
+/// `MonoF64`); the result is a raw float container suitable as input to a
+/// hysteresis threshold.
+///
+/// # Panics
+///
+/// Panics if `magnitude` and `direction` differ in dimensions.
+///
+/// # Example
+///
+/// ```
+/// use fovea::image::{Image, ImageView};
+/// use fovea::pixel::MonoF32;
+/// use fovea::transform::non_maximum_suppression;
+///
+/// // Horizontal gradient (θ = 0): a [1, 2, 1] ridge thins to [0, 2, 0].
+/// let mag = Image::from_vec(
+///     3,
+///     1,
+///     vec![MonoF32::new(1.0), MonoF32::new(2.0), MonoF32::new(1.0)],
+/// )
+/// .unwrap();
+/// let dir = Image::fill(3, 1, MonoF32::new(0.0));
+/// let thin = non_maximum_suppression(&mag, &dir);
+/// assert_eq!(thin.pixel_at(0, 0).value(), 0.0); // left border → suppressed
+/// assert_eq!(thin.pixel_at(1, 0).value(), 2.0); // local maximum kept
+/// assert_eq!(thin.pixel_at(2, 0).value(), 0.0); // right border → suppressed
+/// ```
+#[must_use]
+pub fn non_maximum_suppression<IM, IA, P>(magnitude: &IM, direction: &IA) -> Image<P>
+where
+    IM: RasterImage<Pixel = P>,
+    IA: RasterImage<Pixel = P>,
+    P: HomogeneousPixel + ZeroablePixel,
+    P::Channel: PartialOrd,
+    f64: From<P::Channel>,
+{
+    assert_eq!(
+        magnitude.size(),
+        direction.size(),
+        "non_maximum_suppression: magnitude and direction must have the same size",
+    );
+
+    let zero = P::zero();
+    Image::generate(magnitude.width(), magnitude.height(), |x, y| {
+        let m = magnitude.pixel_at(x, y);
+        let m_channel = m.channel(0);
+        let theta = f64::from(direction.pixel_at(x, y).channel(0));
+        let (dx, dy) = nms_sector(theta);
+        match (
+            nms_neighbour(magnitude, x, y, dx, dy),
+            nms_neighbour(magnitude, x, y, -dx, -dy),
+        ) {
+            (Some(a), Some(b)) if m_channel >= a && m_channel >= b => m,
+            _ => zero,
+        }
+    })
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1423,5 +1638,170 @@ mod tests {
         // `Mono8` input path produces an `Image<MonoF32>` output.
         let _: Image<crate::pixel::MonoF32> = sobel_x(&src_u8, &Clamp);
         let _: Image<crate::pixel::MonoF32> = sobel_y(&src_u8, &Clamp);
+    }
+
+    // ── gradient magnitude / direction ──────────────────────────────────
+
+    #[test]
+    fn magnitude_of_axis_gradients() {
+        // gx = 3, gy = 4 ⇒ hypot = 5 everywhere.
+        let gx = Image::fill(4, 3, MonoF32::new(3.0));
+        let gy = Image::fill(4, 3, MonoF32::new(4.0));
+        let mag = gradient_magnitude(&gx, &gy).unwrap();
+        for y in 0..mag.height() {
+            for x in 0..mag.width() {
+                assert!((mag.pixel_at(x, y).0 - 5.0).abs() < 1e-5);
+            }
+        }
+    }
+
+    #[test]
+    fn magnitude_size_mismatch_err() {
+        let gx = Image::fill(2, 2, MonoF32::new(1.0));
+        let gy = Image::fill(3, 3, MonoF32::new(1.0));
+        assert!(gradient_magnitude(&gx, &gy).is_err());
+        assert!(gradient_direction(&gx, &gy).is_err());
+    }
+
+    #[test]
+    fn direction_cardinal_angles() {
+        use std::f32::consts::{FRAC_PI_2, PI};
+        let cases = [
+            // (gx, gy, expected angle)
+            (1.0, 0.0, 0.0),         // pure +x
+            (0.0, 1.0, FRAC_PI_2),   // pure +y
+            (-1.0, 0.0, PI),         // pure -x
+            (0.0, -1.0, -FRAC_PI_2), // pure -y
+        ];
+        for (gx_v, gy_v, expected) in cases {
+            let gx = Image::fill(1, 1, MonoF32::new(gx_v));
+            let gy = Image::fill(1, 1, MonoF32::new(gy_v));
+            let dir = gradient_direction(&gx, &gy).unwrap();
+            assert!(
+                (dir.pixel_at(0, 0).0 - expected).abs() < 1e-6,
+                "gx={gx_v}, gy={gy_v}: got {}, expected {expected}",
+                dir.pixel_at(0, 0).0,
+            );
+        }
+    }
+
+    #[test]
+    fn magnitude_direction_generic_over_mono_f64() {
+        use crate::pixel::MonoF64;
+
+        // The same wrappers operate on `MonoF64` (the accumulator for
+        // `Mono16`/`Mono32`/`Mono64`/`MonoF64` inputs), not just `MonoF32`.
+        let gx = Image::fill(2, 2, MonoF64::new(3.0));
+        let gy = Image::fill(2, 2, MonoF64::new(4.0));
+        let mag = gradient_magnitude(&gx, &gy).unwrap();
+        let dir = gradient_direction(&gx, &gy).unwrap();
+        assert!((mag.pixel_at(0, 0).0 - 5.0).abs() < 1e-12);
+        // f64 atan2 is exercised: atan2(4, 3) ≈ 0.9272952180016122.
+        assert!((dir.pixel_at(0, 0).0 - 4.0_f64.atan2(3.0)).abs() < 1e-12);
+    }
+
+    // ── non-maximum suppression ─────────────────────────────────────────
+
+    /// Build a `MonoF32` magnitude image from a row-major `f32` grid.
+    fn mag_grid(width: usize, height: usize, vals: &[f32]) -> Image<MonoF32> {
+        Image::from_vec(
+            width,
+            height,
+            vals.iter().map(|&v| MonoF32::new(v)).collect(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn ridge_thins_to_one_pixel() {
+        // Horizontal gradient (θ = 0): a [1,2,3,2,1] ridge keeps only the peak.
+        let mag = mag_grid(5, 1, &[1.0, 2.0, 3.0, 2.0, 1.0]);
+        let dir = Image::fill(5, 1, MonoF32::new(0.0));
+        let thin = non_maximum_suppression(&mag, &dir);
+        let row: Vec<f32> = (0..5).map(|x| thin.pixel_at(x, 0).0).collect();
+        assert_eq!(row, vec![0.0, 0.0, 3.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn uniform_magnitude_plateau_kept() {
+        // Equal along-gradient neighbours: inclusive `>=` keeps the centre
+        // (a strict `>` would erase this flat ridge — pins Decision 4).
+        let mag = mag_grid(3, 1, &[2.0, 2.0, 2.0]);
+        let dir = Image::fill(3, 1, MonoF32::new(0.0));
+        let thin = non_maximum_suppression(&mag, &dir);
+        assert_eq!(thin.pixel_at(1, 0).0, 2.0);
+    }
+
+    #[test]
+    fn border_pixels_suppressed() {
+        // θ = 0 compares left/right; the left and right columns have an
+        // out-of-bounds neighbour and are suppressed; the centre survives.
+        let mag = Image::fill(3, 3, MonoF32::new(5.0));
+        let dir = Image::fill(3, 3, MonoF32::new(0.0));
+        let thin = non_maximum_suppression(&mag, &dir);
+        for y in 0..3 {
+            assert_eq!(thin.pixel_at(0, y).0, 0.0, "left border at y={y}");
+            assert_eq!(thin.pixel_at(2, y).0, 0.0, "right border at y={y}");
+            assert_eq!(thin.pixel_at(1, y).0, 5.0, "interior at y={y}");
+        }
+    }
+
+    #[test]
+    fn each_sector_picks_correct_neighbours() {
+        use std::f32::consts::PI;
+        // For each quantised sector: the two cells *along* the gradient and
+        // the two *off* it. A higher along-gradient neighbour must suppress
+        // the centre; a higher off-gradient neighbour must not.
+        struct Case {
+            theta: f32,
+            along: [(usize, usize); 2],
+            off: [(usize, usize); 2],
+        }
+        let cases = [
+            // 0° → left/right; off = main diagonal.
+            Case {
+                theta: 0.0,
+                along: [(0, 1), (2, 1)],
+                off: [(0, 0), (2, 2)],
+            },
+            // 45° → main diagonal; off = left/right.
+            Case {
+                theta: PI / 4.0,
+                along: [(0, 0), (2, 2)],
+                off: [(0, 1), (2, 1)],
+            },
+            // 90° → up/down; off = main diagonal.
+            Case {
+                theta: PI / 2.0,
+                along: [(1, 0), (1, 2)],
+                off: [(0, 0), (2, 2)],
+            },
+            // 135° → anti-diagonal; off = up/down.
+            Case {
+                theta: 3.0 * PI / 4.0,
+                along: [(2, 0), (0, 2)],
+                off: [(1, 0), (1, 2)],
+            },
+        ];
+
+        for (i, case) in cases.iter().enumerate() {
+            let dir = Image::fill(3, 3, MonoF32::new(case.theta));
+
+            // Higher neighbour ALONG the gradient ⇒ centre suppressed.
+            let mut mag = Image::fill(3, 3, MonoF32::new(0.0));
+            *mag.pixel_at_mut(1, 1) = MonoF32::new(5.0);
+            *mag.pixel_at_mut(case.along[0].0, case.along[0].1) = MonoF32::new(9.0);
+            let thin = non_maximum_suppression(&mag, &dir);
+            assert_eq!(thin.pixel_at(1, 1).0, 0.0, "case {i}: should suppress");
+
+            // Higher neighbours only OFF the gradient ⇒ centre kept.
+            let mut mag = Image::fill(3, 3, MonoF32::new(0.0));
+            *mag.pixel_at_mut(1, 1) = MonoF32::new(5.0);
+            for &(x, y) in &case.off {
+                *mag.pixel_at_mut(x, y) = MonoF32::new(9.0);
+            }
+            let thin = non_maximum_suppression(&mag, &dir);
+            assert_eq!(thin.pixel_at(1, 1).0, 5.0, "case {i}: should keep");
+        }
     }
 }
