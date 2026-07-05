@@ -44,6 +44,7 @@
 
 mod connectivity;
 mod engine;
+mod measurements;
 mod stats;
 mod union_find;
 

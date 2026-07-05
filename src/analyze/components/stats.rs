@@ -10,7 +10,7 @@
 //! Euler number, orientation, convexity, and intensity measurements
 //! are deferred to follow-up work.
 
-use crate::{Coordinate, Rectangle, Size};
+use crate::{Coordinate, CoordinateF64, Rectangle, Size};
 
 /// Bounded per-component statistics, accumulated inline during pass 2.
 ///
@@ -48,46 +48,44 @@ impl ComponentStats {
     /// Seed a new stats record from the first foreground pixel of a
     /// component.
     #[inline]
-    pub(super) fn from_seed(x: usize, y: usize) -> Self {
-        let c = Coordinate::new(x, y);
+    pub(super) fn from_seed(at: Coordinate) -> Self {
         Self {
             area: 1,
-            bbox_min: c,
-            bbox_max_inclusive: c,
-            sum_x: x as u64,
-            sum_y: y as u64,
+            bbox_min: at,
+            bbox_max_inclusive: at,
+            sum_x: at.x as u64,
+            sum_y: at.y as u64,
         }
     }
 
     /// Extend an existing stats record with another pixel of the same
     /// component.
     #[inline]
-    pub(super) fn extend(&mut self, x: usize, y: usize) {
+    pub(super) fn extend(&mut self, at: Coordinate) {
         self.area += 1;
-        if x < self.bbox_min.x {
-            self.bbox_min.x = x;
+        if at.x < self.bbox_min.x {
+            self.bbox_min.x = at.x;
         }
-        if y < self.bbox_min.y {
-            self.bbox_min.y = y;
+        if at.y < self.bbox_min.y {
+            self.bbox_min.y = at.y;
         }
-        if x > self.bbox_max_inclusive.x {
-            self.bbox_max_inclusive.x = x;
+        if at.x > self.bbox_max_inclusive.x {
+            self.bbox_max_inclusive.x = at.x;
         }
-        if y > self.bbox_max_inclusive.y {
-            self.bbox_max_inclusive.y = y;
+        if at.y > self.bbox_max_inclusive.y {
+            self.bbox_max_inclusive.y = at.y;
         }
-        self.sum_x += x as u64;
-        self.sum_y += y as u64;
+        self.sum_x += at.x as u64;
+        self.sum_y += at.y as u64;
     }
 
-    /// Centroid (centre of mass) in `(x, y)` pixel coordinates.
+    /// Centroid (centre of mass) as a sub-pixel [`CoordinateF64`].
     ///
-    /// Returns `(sum_x / area, sum_y / area)` as `f64`. `area` is
-    /// always `>= 1` for stats produced by the engine, so the division
-    /// is safe.
-    pub fn centroid(&self) -> (f64, f64) {
+    /// Returns `(sum_x / area, sum_y / area)`. `area` is always `>= 1`
+    /// for stats produced by the engine, so the division is safe.
+    pub fn centroid(&self) -> CoordinateF64 {
         let inv = 1.0 / self.area as f64;
-        (self.sum_x as f64 * inv, self.sum_y as f64 * inv)
+        CoordinateF64::new(self.sum_x as f64 * inv, self.sum_y as f64 * inv)
     }
 
     /// Axis-aligned bounding box as a half-open [`Rectangle`].
@@ -179,9 +177,9 @@ pub(super) mod sink {
                 // new label appears exactly once with `first = true`
                 // and `compact_label == out.len() + 1`.
                 debug_assert_eq!(self.out.len() as u64, compact_label - 1);
-                self.out.push(ComponentStats::from_seed(at.x, at.y));
+                self.out.push(ComponentStats::from_seed(at));
             } else {
-                self.out[(compact_label - 1) as usize].extend(at.x, at.y);
+                self.out[(compact_label - 1) as usize].extend(at);
             }
         }
     }
@@ -193,13 +191,13 @@ mod tests {
 
     #[test]
     fn from_seed_single_pixel() {
-        let s = ComponentStats::from_seed(3, 5);
+        let s = ComponentStats::from_seed(Coordinate::new(3, 5));
         assert_eq!(s.area, 1);
         assert_eq!(s.bbox_min, Coordinate::new(3, 5));
         assert_eq!(s.bbox_max_inclusive, Coordinate::new(3, 5));
         assert_eq!(s.sum_x, 3);
         assert_eq!(s.sum_y, 5);
-        assert_eq!(s.centroid(), (3.0, 5.0));
+        assert_eq!(s.centroid(), CoordinateF64::new(3.0, 5.0));
         assert_eq!(
             s.bbox(),
             Rectangle::new(Coordinate::new(3, 5), Size::new(1, 1))
@@ -209,9 +207,9 @@ mod tests {
 
     #[test]
     fn extend_grows_area_and_bbox() {
-        let mut s = ComponentStats::from_seed(2, 2);
-        s.extend(5, 4);
-        s.extend(3, 1);
+        let mut s = ComponentStats::from_seed(Coordinate::new(2, 2));
+        s.extend(Coordinate::new(5, 4));
+        s.extend(Coordinate::new(3, 1));
         assert_eq!(s.area, 3);
         assert_eq!(s.bbox_min, Coordinate::new(2, 1));
         assert_eq!(s.bbox_max_inclusive, Coordinate::new(5, 4));
@@ -222,24 +220,24 @@ mod tests {
     #[test]
     fn centroid_of_centred_square() {
         // 3x3 square at (1..=3, 1..=3), 9 pixels.
-        let mut s = ComponentStats::from_seed(1, 1);
+        let mut s = ComponentStats::from_seed(Coordinate::new(1, 1));
         for y in 1..=3usize {
             for x in 1..=3usize {
                 if (x, y) != (1, 1) {
-                    s.extend(x, y);
+                    s.extend(Coordinate::new(x, y));
                 }
             }
         }
         assert_eq!(s.area, 9);
-        let (cx, cy) = s.centroid();
-        assert!((cx - 2.0).abs() < 1e-12);
-        assert!((cy - 2.0).abs() < 1e-12);
+        let c = s.centroid();
+        assert!((c.x - 2.0).abs() < 1e-12);
+        assert!((c.y - 2.0).abs() < 1e-12);
     }
 
     #[test]
     fn bbox_is_half_open_rectangle() {
-        let mut s = ComponentStats::from_seed(2, 3);
-        s.extend(7, 9);
+        let mut s = ComponentStats::from_seed(Coordinate::new(2, 3));
+        s.extend(Coordinate::new(7, 9));
         let r = s.bbox();
         assert_eq!(r.offset, Coordinate::new(2, 3));
         assert_eq!(r.size, Size::new(6, 7));
@@ -248,13 +246,13 @@ mod tests {
     #[test]
     fn aspect_ratio_wide_versus_tall() {
         // 6x2 box
-        let mut s = ComponentStats::from_seed(0, 0);
-        s.extend(5, 1);
+        let mut s = ComponentStats::from_seed(Coordinate::new(0, 0));
+        s.extend(Coordinate::new(5, 1));
         assert!((s.aspect_ratio() - 3.0).abs() < 1e-12);
 
         // 2x6 box
-        let mut t = ComponentStats::from_seed(0, 0);
-        t.extend(1, 5);
+        let mut t = ComponentStats::from_seed(Coordinate::new(0, 0));
+        t.extend(Coordinate::new(1, 5));
         assert!((t.aspect_ratio() - (2.0 / 6.0)).abs() < 1e-12);
     }
 }

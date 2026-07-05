@@ -108,7 +108,7 @@ where
 ///     connected_components_with_stats::<Label32, Connectivity4>(&img).unwrap();
 /// assert_eq!(lab.label_count, 1);
 /// assert_eq!(stats[0].area, 4);
-/// assert_eq!(stats[0].centroid(), (0.5, 0.5));
+/// assert_eq!(stats[0].centroid(), fovea::CoordinateF64::new(0.5, 0.5));
 /// ```
 pub fn connected_components_with_stats<L, C>(
     image: &impl RasterImage<Pixel = bool>,
@@ -628,9 +628,9 @@ mod tests {
         );
         let (_, stats) = connected_components_with_stats::<Label32, Connectivity4>(&img).unwrap();
         assert_eq!(stats.len(), 1);
-        let (cx, cy) = stats[0].centroid();
-        assert!((cx - 2.0).abs() < 1e-9);
-        assert!((cy - 2.0).abs() < 1e-9);
+        let c = stats[0].centroid();
+        assert!((c.x - 2.0).abs() < 1e-9);
+        assert!((c.y - 2.0).abs() < 1e-9);
     }
 
     #[test]
