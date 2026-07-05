@@ -3,8 +3,8 @@
 //! Implements the two-pass union-find engine. See the module-level docs
 //! for the public surface and the worked 4×4 example.
 
-use crate::Error;
 use crate::image::{Image, ImageView, ImageViewMut, RasterImage};
+use crate::{Coordinate, Error};
 use crate::pixel::LabelPixel;
 
 use super::Labeling;
@@ -260,12 +260,51 @@ where
                     "internal error: compact label exceeds L::MAX_LABEL despite \
                      pass-1 overflow check (analyze::components engine)",
                 );
-                sink.record(c, first, x, y);
+                // The boundary neighbour-check is gated behind the sink's
+                // `NEEDS_BOUNDARY` const so it is const-folded away (and
+                // `is_boundary` reduces to a literal `false`) for the
+                // `NoStats` / `WithStats` paths.
+                let is_boundary = if S::NEEDS_BOUNDARY {
+                    is_4_boundary(image, x, y)
+                } else {
+                    false
+                };
+                sink.record(c, first, Coordinate::new(x, y), is_boundary);
             }
         }
     }
 
     Ok(compact_counter - 1)
+}
+
+/// Returns `true` if the foreground pixel at `(x, y)` is a 4-connected
+/// boundary pixel: at least one of its four orthogonal neighbours is
+/// background (`false`) or lies off the analyzed view.
+///
+/// The caller guarantees `(x, y)` is itself foreground. Off-view
+/// neighbours (`image.get` → `None`) count as boundary — this is what
+/// makes measurements *view-relative*: a blob clipped by the view edge
+/// has its cut edge counted as perimeter.
+///
+/// This test is fixed at 4-connectivity regardless of the labeling
+/// [`Connectivity`], because a blob's perimeter is a property of its
+/// pixel *set*, not of the rule that grouped the pixels.
+#[inline]
+fn is_4_boundary<I>(image: &I, x: usize, y: usize) -> bool
+where
+    I: RasterImage<Pixel = bool>,
+{
+    // Left, right, up, down. `checked_sub` handles the x==0 / y==0 edges
+    // (underflow → off-view → boundary); `get` handles the far edges.
+    let left = x.checked_sub(1).and_then(|nx| image.get(nx, y));
+    let right = image.get(x + 1, y);
+    let up = y.checked_sub(1).and_then(|ny| image.get(x, ny));
+    let down = image.get(x, y + 1);
+    // A neighbour that is off-view (`None`) or background (`Some(false)`)
+    // makes this a boundary pixel.
+    [left, right, up, down]
+        .iter()
+        .any(|n| !matches!(n, Some(true)))
 }
 
 // ══════════════════════════════════════════════════════════════════════
