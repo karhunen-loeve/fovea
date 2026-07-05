@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `analyze::components::connected_components_with_measurements`: opt-in blob
+  shape analysis. Returns one `BlobMeasurements` per component alongside the
+  labeling — area, bounding box, centroid sums, the raw second-order moment
+  sums (`sum_x2`/`sum_y2`/`sum_xy`), and a 4-connected boundary-pixel
+  `perimeter` — with derived `f64` descriptors (`centroid`,
+  `equivalent_diameter`, `orientation`, `eccentricity`, `circularity`,
+  `central_moments`) computed on demand. Everything accumulates in the same
+  single pass 2 as the labeling; no separate contour extraction. The perimeter
+  boundary test is fixed at 4-connectivity independent of the labeling
+  `Connectivity`, and all measurements are view-relative (a blob clipped by the
+  view edge is measured as clipped). The cheap `connected_components_with_stats`
+  path is unchanged: the extra moment + boundary work is gated behind a
+  monomorphised sink and compiles away when not requested. Note the 4-connected
+  boundary-pixel count undercounts diagonal outline, so `circularity` of a
+  rasterised disc reads ≈1.25 (above 1) while a square reads ≈π/4 — treat it as
+  a relative shape score within a tolerance band.
+- `CoordinateF64`: sub-pixel `f64` companion to `Coordinate`, with
+  `From<Coordinate>`/`From<(f64, f64)>`. `ComponentStats::centroid` and
+  `BlobMeasurements::centroid` now return it.
 - `analyze::edge::canny`: single-scale Canny edge detector composing the full
   pipeline — `gaussian_blur(sigma)` → Scharr `Gx`/`Gy` → gradient magnitude +
   direction → non-maximum suppression → `hysteresis_threshold` — and returning

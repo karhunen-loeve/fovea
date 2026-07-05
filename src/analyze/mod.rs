@@ -16,6 +16,7 @@
 //! | "Threshold each pixel against its local neighbourhood (uneven lighting)?" | [`threshold::adaptive_threshold`](crate::analyze::threshold::adaptive_threshold) | Binary mask. |
 //! | "What is the sum of this rectangle?" | [`integral`](crate::analyze::integral) | Summed-area table with explicit accumulator pixels. |
 //! | "How many foreground blobs are in this mask?" | [`components`](crate::analyze::components) | Label image and optional component stats. |
+//! | "What shape are the blobs (perimeter, orientation, roundness)?" | [`components::connected_components_with_measurements`](crate::analyze::components::connected_components_with_measurements) | Per-blob moments + perimeter, with derived shape descriptors. |
 //!
 //! Do not use this module for operations that produce another image of the
 //! same conceptual kind. Those belong in [`crate::transform`].

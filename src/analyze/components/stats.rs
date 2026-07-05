@@ -186,7 +186,7 @@ pub(super) mod sink {
     }
 
     /// Sink that accumulates per-component [`BlobMeasurements`] (moments
-    /// + perimeter) into a `Vec` indexed by `compact_label - 1`. Sets
+    /// and perimeter) into a `Vec` indexed by `compact_label - 1`. Sets
     /// `NEEDS_BOUNDARY = true` so the engine runs the per-pixel boundary
     /// check that feeds the perimeter count.
     pub(crate) struct WithMeasurements<'a> {
