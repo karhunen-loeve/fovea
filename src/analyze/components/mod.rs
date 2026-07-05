@@ -50,8 +50,10 @@ mod union_find;
 
 pub use connectivity::{Connectivity, Connectivity4, Connectivity8};
 pub use engine::{
-    connected_components, connected_components_into, connected_components_with_stats,
+    connected_components, connected_components_into, connected_components_with_measurements,
+    connected_components_with_stats,
 };
+pub use measurements::BlobMeasurements;
 pub use stats::ComponentStats;
 
 use crate::image::{Image, ImageView};

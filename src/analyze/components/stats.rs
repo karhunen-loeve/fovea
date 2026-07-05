@@ -127,6 +127,7 @@ impl ComponentStats {
 // vector-backed accumulator. There is no per-pixel runtime branch.
 
 pub(super) mod sink {
+    use super::super::measurements::BlobMeasurements;
     use super::ComponentStats;
     use crate::Coordinate;
 
@@ -180,6 +181,28 @@ pub(super) mod sink {
                 self.out.push(ComponentStats::from_seed(at));
             } else {
                 self.out[(compact_label - 1) as usize].extend(at);
+            }
+        }
+    }
+
+    /// Sink that accumulates per-component [`BlobMeasurements`] (moments
+    /// + perimeter) into a `Vec` indexed by `compact_label - 1`. Sets
+    /// `NEEDS_BOUNDARY = true` so the engine runs the per-pixel boundary
+    /// check that feeds the perimeter count.
+    pub(crate) struct WithMeasurements<'a> {
+        pub(crate) out: &'a mut Vec<BlobMeasurements>,
+    }
+
+    impl StatsSink for WithMeasurements<'_> {
+        const NEEDS_BOUNDARY: bool = true;
+
+        #[inline]
+        fn record(&mut self, compact_label: u64, first: bool, at: Coordinate, is_boundary: bool) {
+            if first {
+                debug_assert_eq!(self.out.len() as u64, compact_label - 1);
+                self.out.push(BlobMeasurements::from_seed(at, is_boundary));
+            } else {
+                self.out[(compact_label - 1) as usize].extend(at, is_boundary);
             }
         }
     }

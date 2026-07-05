@@ -9,8 +9,9 @@ use crate::pixel::LabelPixel;
 
 use super::Labeling;
 use super::connectivity::Connectivity;
+use super::measurements::BlobMeasurements;
 use super::stats::ComponentStats;
-use super::stats::sink::{NoStats, StatsSink, WithStats};
+use super::stats::sink::{NoStats, StatsSink, WithMeasurements, WithStats};
 use super::union_find::UnionFind;
 
 /// Compute the connected-component labeling of `image`, allocating a
@@ -130,6 +131,81 @@ where
             label_count,
         },
         stats,
+    ))
+}
+
+/// Compute the connected-component labeling of `image`, plus one
+/// [`BlobMeasurements`] per foreground component: area, bounding box,
+/// centroid sums, the raw second-order moment sums, and a 4-connected
+/// boundary-pixel perimeter count. From these the shape descriptors
+/// (equivalent diameter, orientation, eccentricity, circularity) are
+/// derived on demand — see [`BlobMeasurements`].
+///
+/// Everything is accumulated in the *same* single pass 2 as the labeling;
+/// there is no separate contour extraction. This is the heavier sibling
+/// of [`connected_components_with_stats`]: it additionally runs a
+/// per-foreground-pixel 4-neighbour boundary check to count the
+/// perimeter. Reach for [`connected_components_with_stats`] when you only
+/// need area / bounding box / centroid.
+///
+/// # Two non-obvious contracts
+///
+/// - **The perimeter boundary test is 4-connected regardless of the
+///   labeling [`Connectivity`] `C`.** `C` decides which pixels form a
+///   blob; the boundary test decides how its outline is counted. A
+///   `Connectivity8` caller still gets a 4-connected perimeter — correct,
+///   because perimeter is a property of the blob's pixel set, not of the
+///   grouping rule.
+/// - **Measurements are view-relative.** A blob clipped by the view edge
+///   is measured as clipped: its cut edge counts toward the perimeter and
+///   `area` / `bbox` / centroid cover only the in-view part. When tiling,
+///   use an overlapping margin and keep only blobs whose full extent lies
+///   in the non-overlapped core.
+///
+/// # Errors — Tier 2
+///
+/// Returns [`Error::LabelOverflow`] if the input contains more connected
+/// components than `L::MAX_LABEL` can encode.
+///
+/// # Examples
+///
+/// ```
+/// use fovea::analyze::components::{
+///     connected_components_with_measurements, Connectivity4,
+/// };
+/// use fovea::image::BinaryImage;
+/// use fovea::pixel::Label32;
+///
+/// // A solid 3x3 square: area 9, perimeter 8 (4·3 − 4).
+/// let img = BinaryImage::fill(3, 3, true);
+/// let (lab, m) =
+///     connected_components_with_measurements::<Label32, Connectivity4>(&img).unwrap();
+/// assert_eq!(lab.label_count, 1);
+/// assert_eq!(m[0].area, 9);
+/// assert_eq!(m[0].perimeter, 8);
+/// ```
+pub fn connected_components_with_measurements<L, C>(
+    image: &impl RasterImage<Pixel = bool>,
+) -> Result<(Labeling<L>, Vec<BlobMeasurements>), Error>
+where
+    L: LabelPixel,
+    C: Connectivity,
+{
+    let mut labels = Image::<L>::zero(image.width(), image.height());
+    let mut measurements: Vec<BlobMeasurements> = Vec::new();
+    let label_count = {
+        let mut sink = WithMeasurements {
+            out: &mut measurements,
+        };
+        run::<L, C, _, WithMeasurements<'_>>(image, &mut labels, &mut sink)?
+    };
+    debug_assert_eq!(measurements.len() as u64, label_count);
+    Ok((
+        Labeling {
+            labels,
+            label_count,
+        },
+        measurements,
     ))
 }
 
@@ -317,6 +393,7 @@ mod tests {
         Connectivity4, Connectivity8, Labeling, connected_components, connected_components_into,
         connected_components_with_stats,
     };
+    use super::connected_components_with_measurements;
     use crate::Error;
     use crate::image::{BinaryImage, Image, ImageView, SubView};
     use crate::pixel::{Label32, LabelPixel, ZeroablePixel};
@@ -738,5 +815,126 @@ mod tests {
         assert_eq!(cloned.label_count, 1);
         let s = format!("{:?}", cloned);
         assert!(s.contains("Labeling"));
+    }
+
+    // Measurements entry-point tests ──────────────────────────────────
+
+    #[test]
+    fn measurements_perimeter_of_square_is_exact() {
+        // Solid 5x5 square → boundary-pixel count = 4·5 − 4 = 16.
+        let img = BinaryImage::fill(5, 5, true);
+        let (lab, m) =
+            connected_components_with_measurements::<Label32, Connectivity4>(&img).unwrap();
+        assert_eq!(lab.label_count, 1);
+        assert_eq!(m.len(), 1);
+        assert_eq!(m[0].area, 25);
+        assert_eq!(m[0].perimeter, 16);
+        // Moments match the cheap path for the shared fields.
+        assert_eq!(m[0].centroid(), crate::CoordinateF64::new(2.0, 2.0));
+    }
+
+    #[test]
+    fn measurements_single_pixel_blob_is_finite() {
+        let mut data = vec![false; 3 * 3];
+        data[4] = true; // centre pixel
+        let img = BinaryImage::from_vec(3, 3, data).unwrap();
+        let (_, m) =
+            connected_components_with_measurements::<Label32, Connectivity4>(&img).unwrap();
+        assert_eq!(m.len(), 1);
+        assert_eq!(m[0].area, 1);
+        assert_eq!(m[0].perimeter, 1);
+        assert_eq!(m[0].eccentricity(), 0.0);
+        assert!(m[0].orientation().is_finite());
+        assert!(m[0].circularity().is_finite());
+    }
+
+    #[test]
+    fn measurements_moments_match_cheap_path() {
+        // The shared fields (area, bbox, sum_x/y) must agree with
+        // connected_components_with_stats — regression guard for the sink
+        // signature change.
+        let img = img_from_str(
+            r#"
+            #..##.
+            ...##.
+            ......
+            #.....
+            #.....
+            #.....
+        "#,
+        );
+        let (_, stats) = connected_components_with_stats::<Label32, Connectivity4>(&img).unwrap();
+        let (_, meas) =
+            connected_components_with_measurements::<Label32, Connectivity4>(&img).unwrap();
+        assert_eq!(stats.len(), meas.len());
+        for (s, m) in stats.iter().zip(meas.iter()) {
+            assert_eq!(s.area, m.area);
+            assert_eq!(s.bbox_min, m.bbox_min);
+            assert_eq!(s.bbox_max_inclusive, m.bbox_max_inclusive);
+            assert_eq!(s.sum_x, m.sum_x);
+            assert_eq!(s.sum_y, m.sum_y);
+        }
+    }
+
+    #[test]
+    fn measurements_connectivity4_vs_8_perimeter() {
+        // Two pixels touching only diagonally. Under Connectivity4 they
+        // are two separate 1-pixel blobs (perimeter 1 each); under
+        // Connectivity8 they form one blob whose perimeter is the
+        // 4-connected boundary count of the two-pixel set = 2 (each pixel
+        // has a background 4-neighbour, so both are boundary pixels). The
+        // boundary test stays 4-connected regardless of the labeling C.
+        let img = img_from_str(
+            r#"
+            #..
+            .#.
+            ...
+        "#,
+        );
+        let (lab4, m4) =
+            connected_components_with_measurements::<Label32, Connectivity4>(&img).unwrap();
+        assert_eq!(lab4.label_count, 2);
+        assert_eq!(m4.len(), 2);
+        for m in &m4 {
+            assert_eq!(m.area, 1);
+            assert_eq!(m.perimeter, 1);
+        }
+
+        let (lab8, m8) =
+            connected_components_with_measurements::<Label32, Connectivity8>(&img).unwrap();
+        assert_eq!(lab8.label_count, 1);
+        assert_eq!(m8.len(), 1);
+        assert_eq!(m8[0].area, 2);
+        assert_eq!(m8[0].perimeter, 2);
+    }
+
+    #[test]
+    fn measurements_roi_clips_perimeter() {
+        // A solid 3-wide, full-height bar in a 5x5 image; the ROI is the
+        // left 3x3 corner. Inside the ROI the visible blob is a 3x3 solid
+        // square, but its right and bottom edges are cut by the view, so
+        // those pixels still count as boundary (off-view neighbour). The
+        // clipped square measures area 9, perimeter 8 — as if it were a
+        // standalone 3x3 square — confirming the view-relative contract.
+        let img = img_from_str(
+            r#"
+            #####
+            #####
+            #####
+            #####
+            #####
+        "#,
+        );
+        let roi = img
+            .roi(Rectangle::new(Coordinate::new(0, 0), Size::new(3, 3)))
+            .unwrap();
+        let (lab, m) =
+            connected_components_with_measurements::<Label32, Connectivity4>(&roi).unwrap();
+        assert_eq!(lab.label_count, 1);
+        assert_eq!(m[0].area, 9);
+        // 3x3 block with all four view edges cutting it → every pixel is a
+        // boundary pixel except the centre → perimeter 8.
+        assert_eq!(m[0].perimeter, 8);
+        assert_eq!(m[0].bbox(), Rectangle::new(Coordinate::new(0, 0), Size::new(3, 3)));
     }
 }
