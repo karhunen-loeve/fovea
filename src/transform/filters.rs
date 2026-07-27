@@ -18,8 +18,7 @@
 use crate::border::BorderPolicy;
 use crate::error::Error;
 use crate::image::{
-    Image, ImageRef, ImageView, Neighborhood, RasterImage, RasterImageMut, SeparableKernel,
-    gaussian_kernel_1d,
+    Image, ImageRef, Neighborhood, RasterImage, RasterImageMut, SeparableKernel, gaussian_kernel_1d,
 };
 use crate::pixel::{FromLinear, HomogeneousPixel, LinearPixel, ZeroablePixel};
 use crate::transform::combine::{
@@ -781,14 +780,18 @@ where
 /// Fuses a pair of gradient images — typically [`scharr_x`] / [`scharr_y`]
 /// (or [`sobel_x`] / [`sobel_y`]) — into a single unsigned edge-strength map.
 /// This is the magnitude pre-stage of a Canny pipeline and a thin, named
-/// wrapper over [`combine_images`] with the [`Magnitude`] strategy (which uses
-/// [`f32::hypot`] / [`f64::hypot`], avoiding intermediate overflow).
+/// wrapper over [`combine_images`] with the [`Magnitude`] strategy.
 ///
 /// Generic over the same float-channel pixel types as [`Magnitude`] (e.g.
 /// `MonoF32`, `MonoF64`, `RgbF32`), so it follows whichever accumulator the
 /// upstream gradient operator produced. The output is a raw float container:
 /// values are `>= 0` but otherwise unbounded — thresholding is the caller's
 /// responsibility.
+///
+/// [`Magnitude`] computes `sqrt(gx² + gy²)` directly, which is exact for
+/// gradients of ordinary image data and vectorizes. For inputs large enough
+/// that `gx²` leaves the float range, combine with
+/// [`MagnitudeHypot`](crate::transform::MagnitudeHypot) instead.
 ///
 /// # Errors
 ///
@@ -864,7 +867,8 @@ where
 /// The gradient and its opposite describe the same edge, so the angle is
 /// folded into `[0, π)` before quantising. The four returned steps are:
 /// `(1, 0)` horizontal, `(1, 1)` main diagonal, `(0, 1)` vertical, and
-/// `(-1, 1)` anti-diagonal.
+/// `(-1, 1)` anti-diagonal. Every step has `dy >= 0`, which
+/// [`nms_survives`] relies on when picking the two neighbour rows.
 #[inline]
 fn nms_sector(theta: f64) -> (isize, isize) {
     use core::f64::consts::PI;
@@ -887,28 +891,98 @@ fn nms_sector(theta: f64) -> (isize, isize) {
     }
 }
 
-/// Magnitude channel of the neighbour at `(x + dx, y + dy)`, or `None` if it
-/// falls outside the image.
+/// The same quantisation as [`nms_sector`], computed straight from the
+/// gradient components instead of from `atan2(gy, gx)`.
+///
+/// Only the sector survives the quantisation, so the angle itself is
+/// wasted work: this compares `|gy|` against `|gx|·tan(22.5°)` and
+/// `|gx|·tan(67.5°)`, with the sign of `gx·gy` choosing between the two
+/// diagonals. That reproduces `nms_sector(atan2(gy, gx))` exactly (the
+/// half-plane fold becomes "take absolute values"), minus one
+/// transcendental call per pixel.
+///
+/// The one divergence is the zero gradient `(0, 0)`, reported here as
+/// vertical and by the angle path as horizontal. Its magnitude is `0`, so
+/// the suppressed output is `0` under either sector.
 #[inline]
-fn nms_neighbour<I, P>(
-    magnitude: &I,
-    x: usize,
-    y: usize,
-    dx: isize,
-    dy: isize,
-) -> Option<P::Channel>
+fn nms_sector_from_gradient(gx: f64, gy: f64) -> (isize, isize) {
+    /// `tan(22.5°)`
+    const T22: f64 = 0.414_213_562_373_095_05;
+    /// `tan(67.5°)`
+    const T67: f64 = 2.414_213_562_373_095;
+
+    let ax = gx.abs();
+    let ay = gy.abs();
+    if gx * gy >= 0.0 {
+        // Folded angle in [0, π/2]: rising diagonal.
+        if ay < ax * T22 {
+            (1, 0)
+        } else if ay < ax * T67 {
+            (1, 1)
+        } else {
+            (0, 1)
+        }
+    } else {
+        // Folded angle in (π/2, π): falling diagonal. The comparisons
+        // mirror the branch above, hence the flipped order and strictness.
+        if ay > ax * T67 {
+            (0, 1)
+        } else if ay > ax * T22 {
+            (-1, 1)
+        } else {
+            (1, 0)
+        }
+    }
+}
+
+/// Channel of `row[x + dx]`, or `None` if the row is absent (off the top or
+/// bottom of the image) or the column falls outside `0..w`.
+#[inline]
+fn nms_at<P>(row: Option<&[P]>, x: usize, dx: isize, w: usize) -> Option<P::Channel>
 where
-    I: ImageView<Pixel = P>,
     P: HomogeneousPixel,
 {
-    let nx = x as isize + dx;
-    let ny = y as isize + dy;
-    if nx < 0 || ny < 0 {
+    let row = row?;
+    let nx = x.checked_add_signed(dx)?;
+    if nx >= w {
         return None;
     }
-    magnitude
-        .get(nx as usize, ny as usize)
-        .map(|p| p.channel(0))
+    Some(row[nx].channel(0))
+}
+
+/// Whether `cur[x]` is a local maximum along `(dx, dy)`.
+///
+/// `prev` / `next` are the rows above and below `cur`, or `None` at the
+/// image border. Because every [`nms_sector`] step has `dy >= 0`, the two
+/// neighbours are always `next`/`prev` (for `dy == 1`) or `cur` twice (for
+/// `dy == 0`) — no row indexing arithmetic is needed. A neighbour outside
+/// the image suppresses the pixel: local maximality cannot be established.
+#[inline]
+fn nms_survives<P>(
+    cur: &[P],
+    prev: Option<&[P]>,
+    next: Option<&[P]>,
+    x: usize,
+    w: usize,
+    dx: isize,
+    dy: isize,
+) -> bool
+where
+    P: HomogeneousPixel,
+    P::Channel: PartialOrd,
+{
+    let (forward, backward) = if dy == 0 {
+        (Some(cur), Some(cur))
+    } else {
+        (next, prev)
+    };
+    match (nms_at(forward, x, dx, w), nms_at(backward, x, -dx, w)) {
+        (Some(a), Some(b)) => {
+            let m = cur[x].channel(0);
+            m >= a && m >= b
+        }
+        _ => false,
+    }
 }
 
 /// Non-maximum suppression: thin a gradient-magnitude ridge to single-pixel
@@ -968,20 +1042,76 @@ where
         "non_maximum_suppression: magnitude and direction must have the same size",
     );
 
-    let zero = P::zero();
-    Image::generate(magnitude.width(), magnitude.height(), |x, y| {
-        let m = magnitude.pixel_at(x, y);
-        let m_channel = m.channel(0);
-        let theta = f64::from(direction.pixel_at(x, y).channel(0));
-        let (dx, dy) = nms_sector(theta);
-        match (
-            nms_neighbour(magnitude, x, y, dx, dy),
-            nms_neighbour(magnitude, x, y, -dx, -dy),
-        ) {
-            (Some(a), Some(b)) if m_channel >= a && m_channel >= b => m,
-            _ => zero,
+    let (w, h) = (magnitude.width(), magnitude.height());
+    let mut out = Image::fill(w, h, P::zero());
+    for y in 0..h {
+        let cur = magnitude.row(y);
+        let prev = (y > 0).then(|| magnitude.row(y - 1));
+        let next = (y + 1 < h).then(|| magnitude.row(y + 1));
+        let dir = direction.row(y);
+        let dst = out.row_mut(y);
+        for x in 0..w {
+            let (dx, dy) = nms_sector(f64::from(dir[x].channel(0)));
+            if nms_survives(cur, prev, next, x, w, dx, dy) {
+                dst[x] = cur[x];
+            }
         }
-    })
+    }
+    out
+}
+
+/// [`non_maximum_suppression`] driven by the raw gradient pair instead of a
+/// pre-computed direction map.
+///
+/// Behaviourally equivalent to
+/// `non_maximum_suppression(magnitude, &gradient_direction(gx, gy)?)`, but
+/// it skips building the direction image and the `atan2` per pixel that
+/// fills it — see [`nms_sector_from_gradient`]. This is the path
+/// [`canny`](crate::analyze::edge::canny) takes; the staged form stays
+/// public so a hand-composed pipeline can still inspect the angle map.
+///
+/// # Panics
+///
+/// Panics if `magnitude`, `gx`, and `gy` do not all share a size.
+#[must_use]
+pub(crate) fn non_maximum_suppression_from_gradients<IM, IX, IY, P>(
+    magnitude: &IM,
+    gx: &IX,
+    gy: &IY,
+) -> Image<P>
+where
+    IM: RasterImage<Pixel = P>,
+    IX: RasterImage<Pixel = P>,
+    IY: RasterImage<Pixel = P>,
+    P: HomogeneousPixel + ZeroablePixel,
+    P::Channel: PartialOrd,
+    f64: From<P::Channel>,
+{
+    assert!(
+        magnitude.size() == gx.size() && gx.size() == gy.size(),
+        "non_maximum_suppression: magnitude, gx and gy must have the same size",
+    );
+
+    let (w, h) = (magnitude.width(), magnitude.height());
+    let mut out = Image::fill(w, h, P::zero());
+    for y in 0..h {
+        let cur = magnitude.row(y);
+        let prev = (y > 0).then(|| magnitude.row(y - 1));
+        let next = (y + 1 < h).then(|| magnitude.row(y + 1));
+        let gx_row = gx.row(y);
+        let gy_row = gy.row(y);
+        let dst = out.row_mut(y);
+        for x in 0..w {
+            let (dx, dy) = nms_sector_from_gradient(
+                f64::from(gx_row[x].channel(0)),
+                f64::from(gy_row[x].channel(0)),
+            );
+            if nms_survives(cur, prev, next, x, w, dx, dy) {
+                dst[x] = cur[x];
+            }
+        }
+    }
+    out
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1725,7 +1855,7 @@ mod tests {
     #[test]
     fn uniform_magnitude_plateau_kept() {
         // Equal along-gradient neighbours: inclusive `>=` keeps the centre
-        // (a strict `>` would erase this flat ridge — pins Decision 4).
+        // (a strict `>` would erase this flat ridge).
         let mag = mag_grid(3, 1, &[2.0, 2.0, 2.0]);
         let dir = Image::fill(3, 1, MonoF32::new(0.0));
         let thin = non_maximum_suppression(&mag, &dir);
@@ -1803,5 +1933,107 @@ mod tests {
             let thin = non_maximum_suppression(&mag, &dir);
             assert_eq!(thin.pixel_at(1, 1).0, 5.0, "case {i}: should keep");
         }
+    }
+
+    #[test]
+    fn nms_generic_over_mono_f64() {
+        use crate::pixel::MonoF64;
+
+        // Suppression on the `MonoF64` accumulator directly, not merely
+        // transitively through `canny`. Horizontal gradient, [1,2,3,2,1].
+        let mag = Image::from_vec(
+            5,
+            1,
+            [1.0, 2.0, 3.0, 2.0, 1.0]
+                .iter()
+                .map(|&v| MonoF64::new(v))
+                .collect(),
+        )
+        .unwrap();
+        let dir = Image::fill(5, 1, MonoF64::new(0.0));
+        let thin = non_maximum_suppression(&mag, &dir);
+        let row: Vec<f64> = (0..5).map(|x| thin.pixel_at(x, 0).0).collect();
+        assert_eq!(row, vec![0.0, 0.0, 3.0, 0.0, 0.0]);
+
+        // A vertical gradient on the same accumulator: θ = π/2 compares
+        // up/down, so a single-row image suppresses everything.
+        let dir = Image::fill(5, 1, MonoF64::new(std::f64::consts::FRAC_PI_2));
+        let thin = non_maximum_suppression(&mag, &dir);
+        assert!((0..5).all(|x| thin.pixel_at(x, 0).0 == 0.0));
+    }
+
+    // ── fused (gradient-driven) suppression ─────────────────────────────
+
+    #[test]
+    fn gradient_sector_matches_angle_sector() {
+        use std::f64::consts::{PI, TAU};
+
+        // The fused Canny path buckets sectors straight from (gx, gy); the
+        // staged path routes through `atan2`. Sweep a full turn — offset off
+        // the 22.5° boundaries, where the two disagree only by float
+        // rounding — and require identical sectors.
+        for i in 0..3600 {
+            let theta = -PI + (i as f64 + 0.37) * TAU / 3600.0;
+            let (gx, gy) = (theta.cos(), theta.sin());
+            assert_eq!(
+                nms_sector_from_gradient(gx, gy),
+                nms_sector(gy.atan2(gx)),
+                "theta = {theta}",
+            );
+        }
+
+        // The axis- and diagonal-exact vectors, which the sweep skips.
+        for &(gx, gy) in &[
+            (1.0, 0.0),
+            (0.0, 1.0),
+            (-1.0, 0.0),
+            (0.0, -1.0),
+            (1.0, 1.0),
+            (-1.0, 1.0),
+            (1.0, -1.0),
+            (-1.0, -1.0),
+            (3.0, 0.5),
+            (-0.25, 7.0),
+        ] {
+            assert_eq!(
+                nms_sector_from_gradient(gx, gy),
+                nms_sector(gy.atan2(gx)),
+                "(gx, gy) = ({gx}, {gy})",
+            );
+        }
+    }
+
+    #[test]
+    fn fused_nms_matches_staged_nms() {
+        // Same inputs, both routes: the fused suppression must reproduce
+        // `gradient_direction` + `non_maximum_suppression` exactly.
+        let src = Image::generate(11, 9, |x, y| {
+            MonoF32::new(((x * 13 + y * 7) % 5) as f32 * 0.25 + (x as f32 * 0.1).sin())
+        });
+        let gx = scharr_x(&src, &Clamp);
+        let gy = scharr_y(&src, &Clamp);
+        let mag = gradient_magnitude(&gx, &gy).unwrap();
+        let dir = gradient_direction(&gx, &gy).unwrap();
+
+        let staged = non_maximum_suppression(&mag, &dir);
+        let fused = non_maximum_suppression_from_gradients(&mag, &gx, &gy);
+        for y in 0..9 {
+            for x in 0..11 {
+                assert_eq!(
+                    staged.pixel_at(x, y).0,
+                    fused.pixel_at(x, y).0,
+                    "({x},{y})"
+                );
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "must have the same size")]
+    fn fused_nms_size_mismatch_panics() {
+        let mag = Image::fill(4, 4, MonoF32::new(1.0));
+        let gx = Image::fill(4, 4, MonoF32::new(1.0));
+        let gy = Image::fill(3, 3, MonoF32::new(1.0));
+        let _ = non_maximum_suppression_from_gradients(&mag, &gx, &gy);
     }
 }

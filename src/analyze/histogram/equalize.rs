@@ -89,14 +89,12 @@ where
 /// Each channel is equalized independently. For color images this does
 /// **not** preserve hue — convert to a luminance/chrominance space
 /// (e.g. YCbCr) first if hue preservation is required. The library
-/// surfaces information, it does not silently colour-space-convert
-/// (Philosophy §8).
+/// surfaces information, it does not silently colour-space-convert.
 ///
 /// The `Channel = Saturating<u8>` bound deliberately rejects
 /// [`Indexed8`](crate::pixel::Indexed8): equalising palette indices is
-/// meaningless (Philosophy §1). It also rejects 16-bit and
-/// float channel types — a wider equalization can be added later
-/// without breaking changes (Philosophy §10 — extension by addition).
+/// meaningless. It also rejects 16-bit and float channel types — a wider
+/// equalization can be added later without breaking changes.
 ///
 /// # Errors
 ///

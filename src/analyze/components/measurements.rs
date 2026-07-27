@@ -205,11 +205,13 @@ impl BlobMeasurements {
         0.5 * (2.0 * mu11).atan2(mu20 - mu02)
     }
 
-    /// Eccentricity of the equivalent ellipse, in `[0, 1)`.
+    /// Eccentricity of the equivalent ellipse, in `[0, 1]`.
     ///
-    /// `0` is a perfect circle, approaching `1` for an increasingly
-    /// line-like blob. Derived from the eigenvalues `λ₁ ≥ λ₂ ≥ 0` of the
-    /// central second-moment matrix as `√(1 − λ₂/λ₁)`. A degenerate blob
+    /// `0` is a perfect circle and the value rises toward `1` as the blob
+    /// becomes more line-like. `1` is attained **exactly**, not merely
+    /// approached: a straight axis-aligned run of pixels has `λ₂ = 0` and
+    /// therefore `ecc = 1.0`. Derived from the eigenvalues `λ₁ ≥ λ₂ ≥ 0` of
+    /// the central second-moment matrix as `√(1 − λ₂/λ₁)`. A degenerate blob
     /// (single pixel, `λ₁ = 0`) returns `0` rather than `NaN`.
     pub fn eccentricity(&self) -> f64 {
         let (mu20, mu02, mu11) = self.central_moments();
@@ -356,7 +358,7 @@ mod tests {
     #[test]
     fn diagonal_bar_orientation_sign() {
         // Bar along x==y (top-left → bottom-right, i.e. downward-right in
-        // y-down image coords) → orientation +π/4. Pins Decision 4's sign.
+        // y-down image coords) → orientation +π/4. Pins the sign convention.
         let pixels: Vec<(usize, usize)> = (0..11).map(|i| (i, i)).collect();
         let m = from_pixels(&pixels);
         assert!(
@@ -376,10 +378,18 @@ mod tests {
     }
 
     #[test]
-    fn line_eccentricity_near_one() {
+    fn line_eccentricity_is_exactly_one() {
+        // A straight axis-aligned run has μ02 = μ11 = 0, so λ₂ = 0 and the
+        // eccentricity is exactly 1 — the documented upper bound is closed,
+        // not open.
         let pixels: Vec<(usize, usize)> = (0..50).map(|x| (x, 0)).collect();
         let m = from_pixels(&pixels);
-        assert!(m.eccentricity() > 0.99, "got {}", m.eccentricity());
+        assert_eq!(m.eccentricity(), 1.0);
+
+        // Vertical too, so the result does not depend on which moment vanishes.
+        let pixels: Vec<(usize, usize)> = (0..50).map(|y| (0, y)).collect();
+        let m = from_pixels(&pixels);
+        assert_eq!(m.eccentricity(), 1.0);
     }
 
     #[test]

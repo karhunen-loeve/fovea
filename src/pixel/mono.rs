@@ -8,8 +8,8 @@ use fovea_derive::{HomogeneousPixel, LinearPixel, PlainPixel, WhiteChannel, Zero
 
 use crate::pixel::{
     FromLinear, HomogeneousPixel, IntegralPixel, IntegralSquaredPixel, LinearChannel, LinearPixel,
-    LinearSpace, OriginInvariantPixel, PlainChannel, PlainPixel, WhiteChannel, ZeroablePixel,
-    impl_origin_invariant_pixel,
+    LinearSpace, OriginInvariantPixel, PlainChannel, PlainPixel, SingleChannel, WhiteChannel,
+    ZeroablePixel, impl_origin_invariant_pixel, impl_single_channel, single_channel_sealed,
 };
 use std::{
     hash::{Hash, Hasher},
@@ -492,7 +492,7 @@ impl LinearPixel<f64> for Mono64 {
 /// Bare `f32` is a [`PlainChannel`](crate::pixel::PlainChannel) but **not** a
 /// [`PlainPixel`](crate::pixel::PlainPixel) (channels are not pixels).
 /// `MonoF32` is the actual pixel type: it carries the semantic
-/// meaning "this is a pixel intensity value" per Philosophy §1 and
+/// meaning "this is a pixel intensity value" and
 /// participates in the pixel-typed APIs.
 ///
 /// # Examples
@@ -571,7 +571,7 @@ impl Hash for MonoF32 {
 /// Bare `f64` is a [`PlainChannel`](crate::pixel::PlainChannel) but **not** a
 /// [`PlainPixel`](crate::pixel::PlainPixel) (channels are not pixels).
 /// `MonoF64` is the actual pixel type: it carries the semantic
-/// meaning "this is a pixel intensity value" per Philosophy §1 and
+/// meaning "this is a pixel intensity value" and
 /// participates in the pixel-typed APIs.
 ///
 /// # Examples
@@ -866,9 +866,20 @@ impl<const BITS: usize> LinearSpace for Mono<BITS> {}
 // an origin-translated crop never changes its meaning — these types support
 // ordinary `roi`, tiling, and sliding windows. The raw `u8`/`u16`/`f32`
 // channels they wrap are deliberately *not* origin-invariant: they are
-// channels, not pixels (Philosophy §9).
+// channels, not pixels.
 impl_origin_invariant_pixel!(Mono8, Mono16, Mono32, Mono64, MonoF32, MonoF64);
 impl<const BITS: usize> OriginInvariantPixel for Mono<BITS> {}
+
+// ---------------------------------------------------------------------------
+// SingleChannel impls
+// ---------------------------------------------------------------------------
+//
+// Every monochrome pixel carries exactly one intensity channel, so they are
+// the canonical inputs to single-channel-only operations such as
+// `hysteresis_threshold`.
+impl_single_channel!(Mono8, Mono16, Mono32, Mono64, MonoF32, MonoF64);
+impl<const BITS: usize> single_channel_sealed::Sealed for Mono<BITS> {}
+impl<const BITS: usize> SingleChannel for Mono<BITS> {}
 
 // ---------------------------------------------------------------------------
 // IntegralPixel / IntegralSquaredPixel impls
@@ -878,7 +889,7 @@ impl<const BITS: usize> OriginInvariantPixel for Mono<BITS> {}
 // permitted accumulator pixel `A` for the summed-area-table engine in
 // `crate::analyze::integral`. Combinations are deliberately closed and
 // small (no macros); the trait's correctness contract is the tightness of
-// `max_integral_value()` (Philosophy §11).
+// `max_integral_value()`.
 //
 // Source coverage (this file): `Mono8`, `Mono16`, `Mono32`, `MonoF32`,
 // `MonoF64`. RGB sources live in `rgb.rs`. `Mono<BITS>`,
@@ -888,7 +899,7 @@ impl<const BITS: usize> OriginInvariantPixel for Mono<BITS> {}
 // palette indices do not add).
 //
 // Float impls assume the conventional `[0.0, 1.0]` range and document
-// the assumption at the trait level (Philosophy §8 — surface, don't decide).
+// the assumption at the trait level — surface it, don't decide for the caller.
 
 // ── Mono8 (u8, range 0..=255) ──────────────────────────────────────────────
 impl IntegralPixel<Mono32> for Mono8 {
@@ -1029,7 +1040,7 @@ impl IntegralSquaredPixel<MonoF64> for Mono32 {
 // ── MonoF32 / MonoF64 (float, conventional [0, 1] range) ──────────────────
 // f32 accumulators are never offered — only `MonoF64`.
 // The `[0, 1]` convention is documented on the trait; this library does
-// not silently rescale data outside that range (Philosophy §8).
+// not silently rescale data outside that range.
 impl IntegralPixel<MonoF64> for MonoF32 {
     #[inline]
     fn to_integral(self) -> MonoF64 {

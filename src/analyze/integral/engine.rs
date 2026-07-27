@@ -43,8 +43,8 @@
 //! The four public functions in this module have `IntegralCapacity` /
 //! `IntegralSquaredCapacity` bounds. Those traits are deliberately
 //! `pub(super)` (private to the module so they do not pollute the
-//! public trait hierarchy; Philosophy §3 — bind on the tightest trait
-//! that admits the operation, and nothing more). Promoting them to
+//! public trait hierarchy) — the rule is to bind on the tightest trait
+//! that admits the operation, and nothing more. Promoting them to
 //! `pub` would invite user impls that bypass the pre-flight overflow
 //! gate — defeating its whole point. The `private_bounds` lint flags
 //! this exposure; the allow is by design and applies to all four entry

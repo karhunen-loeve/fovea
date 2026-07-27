@@ -489,7 +489,7 @@ test_pixel_family!(indexed8, Indexed8, name: "Indexed8",
 //
 // `bool` is included because `BinaryImage = Image<bool>` relies on the marker
 // for ROI. Raw channel primitives (`u8`, `u16`, `f32`, …) are deliberately
-// absent — they are channels, not pixels (Philosophy §9) — and a
+// absent — they are channels, not pixels — and a
 // coordinate-dependent Bayer CFA pixel would be absent too.
 #[test]
 fn origin_invariant_marker_covers_all_families() {

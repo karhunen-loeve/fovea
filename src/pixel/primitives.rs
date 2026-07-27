@@ -310,7 +310,7 @@ impl FromLinear<MonoF64> for Saturating<u64> {
 // Every channel primitive implements `LinearChannel`; the derive
 // macro probes this trait first when composing a pixel's accumulator
 // from its channel fields. The distinction between this and
-// `LinearPixel` is taxonomic (see Philosophy §2): channels are not
+// `LinearPixel` is taxonomic: channels are not
 // pixels.
 
 impl LinearChannel<f32> for u8 {
@@ -885,7 +885,7 @@ impl LinearChannel<f64> for Saturating<u64> {
 // Intrinsic maximum value for every integer channel type the library ships.
 //
 // Deliberately NOT implemented for `f32` / `f64` — floating-point pixels do
-// not have an intrinsic maximum in this library (Philosophy §8).
+// not have an intrinsic maximum in this library.
 // The absence is load-bearing: it is what makes `Invert` refuse to compile
 // for float-channel pixels.
 
@@ -1006,8 +1006,8 @@ mod tests {
     // Compile-time assertion: `BoundedChannel` must NOT be implemented for
     // `f32` / `f64`. This absence is load-bearing — it is what makes
     // `Invert` and `BinaryThreshold` refuse to compile for float channels
-    // (Philosophy §1 "Types are the spec", §8 "Surface information,
-    // don't decide").
+    // — the type is the spec, and the range assumption stays with the
+    // caller.
     //
     // We cannot test "does not implement" directly inside a `#[cfg(test)]`
     // block without a dedicated compile-fail harness (which the core crate

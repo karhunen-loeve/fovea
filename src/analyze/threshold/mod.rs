@@ -5,7 +5,7 @@
 //! against one or more explicit thresholds.
 //!
 //! Each threshold is a named caller argument — this module never *infers*
-//! a cut point from the data (Philosophy §8). The data-driven counterpart
+//! a cut point from the data. The data-driven counterpart
 //! is [`otsu_threshold`](crate::analyze::histogram::otsu_threshold), which
 //! lives in [`histogram`](crate::analyze::histogram) because it consumes a
 //! histogram to *choose* its threshold; the functions here take the

@@ -5,8 +5,8 @@
 //! [`hysteresis_threshold_into`] pair and their tests.
 
 use crate::analyze::components::{Connectivity8, connected_components};
-use crate::image::{BinaryImage, Image, ImageView, RasterImage, RasterImageMut};
-use crate::pixel::{HomogeneousPixel, Label32, LabelPixel};
+use crate::image::{BinaryImage, ImageView, RasterImage, RasterImageMut};
+use crate::pixel::{Label32, LabelPixel, SingleChannel};
 
 /// Double-threshold segmentation with 8-connected weak-edge propagation.
 ///
@@ -34,17 +34,16 @@ use crate::pixel::{HomogeneousPixel, Label32, LabelPixel};
 ///
 /// # Single channel only
 ///
-/// Comparison uses channel 0. The bound is
-/// [`HomogeneousPixel`] rather than a monochrome-specific type so the
-/// function accepts both integer masks ([`Mono8`](crate::pixel::Mono8))
-/// and the float gradient-magnitude image
+/// Comparison uses channel 0, and the [`SingleChannel`] bound makes that
+/// a compile-time requirement: passing a multi-channel pixel does not
+/// compile. The bound is the marker rather than a monochrome-specific
+/// type so the function still accepts both integer masks
+/// ([`Mono8`](crate::pixel::Mono8)) and the float gradient-magnitude image
 /// ([`MonoF32`](crate::pixel::MonoF32)) the Canny pipeline produces —
 /// hence [`PartialOrd`] (not [`Ord`]) on the channel.
 ///
 /// # Panics
 ///
-/// - Panics if `P::CHANNEL_COUNT != 1` (Tier 3 — programmer bug; convert
-///   multi-channel input to single channel first).
 /// - Panics if `!(low <= high)` (Tier 3 — misordered or NaN thresholds
 ///   are a precondition violation). The message names both values.
 ///
@@ -71,7 +70,7 @@ use crate::pixel::{HomogeneousPixel, Label32, LabelPixel};
 pub fn hysteresis_threshold<I, P>(image: &I, low: P::Channel, high: P::Channel) -> BinaryImage
 where
     I: RasterImage<Pixel = P>,
-    P: HomogeneousPixel,
+    P: SingleChannel,
     P::Channel: PartialOrd + Copy + core::fmt::Debug,
 {
     // Owned variant allocates the output and delegates, matching the
@@ -98,15 +97,9 @@ pub fn hysteresis_threshold_into<I, P>(
     out: &mut BinaryImage,
 ) where
     I: RasterImage<Pixel = P>,
-    P: HomogeneousPixel,
+    P: SingleChannel,
     P::Channel: PartialOrd + Copy + core::fmt::Debug,
 {
-    assert_eq!(
-        P::CHANNEL_COUNT,
-        1,
-        "hysteresis_threshold: requires a single-channel pixel; got CHANNEL_COUNT = {}",
-        P::CHANNEL_COUNT
-    );
     assert_eq!(
         out.size(),
         image.size(),
@@ -114,9 +107,9 @@ pub fn hysteresis_threshold_into<I, P>(
         out.size(),
         image.size()
     );
-    // Decision 2 (Tier 3): misordered thresholds are a caller
-    // bug, not a data failure. Panic with both values named. `!(low <=
-    // high)` also rejects a NaN threshold on float inputs.
+    // Tier 3: misordered thresholds are a caller bug, not a data failure.
+    // Panic with both values named. `!(low <= high)` also rejects a NaN
+    // threshold on float inputs.
     assert!(
         low <= high,
         "hysteresis_threshold: low ({low:?}) must be <= high ({high:?})"
@@ -125,8 +118,17 @@ pub fn hysteresis_threshold_into<I, P>(
     let w = image.width();
     let h = image.height();
 
-    // 1. Weak mask: every pixel that clears the low threshold.
-    let weak: BinaryImage = Image::generate(w, h, |x, y| image.pixel_at(x, y).channel(0) >= low);
+    // 1. Weak mask: every pixel that clears the low threshold. Built row
+    //    by row so the source is read through a contiguous slice rather
+    //    than a per-pixel `pixel_at` index computation.
+    let mut weak = BinaryImage::fill(w, h, false);
+    for y in 0..h {
+        let src = image.row(y);
+        let dst = weak.row_mut(y);
+        for (out_px, src_px) in dst.iter_mut().zip(src) {
+            *out_px = src_px.channel(0) >= low;
+        }
+    }
 
     // 2. Label the weak mask with 8-connectivity. The strong mask is
     //    never materialised — `>= high` is tested inline in step 3.
@@ -297,6 +299,30 @@ mod tests {
         assert!(!out.pixel_at(0, 0), "0.1 < low → non-edge");
         assert!(out.pixel_at(1, 0), "0.3 weak, bridged to the strong 0.6");
         assert!(out.pixel_at(2, 0), "0.6 >= high → strong");
+    }
+
+    #[test]
+    fn low_equals_high_keeps_only_strong() {
+        // `low == high` is allowed (`low <= high`) and collapses the weak
+        // band to nothing: the output is exactly `value >= high`, with no
+        // propagation. The isolated 200 survives on its own, and the 199
+        // next to it does not get bridged.
+        let img = Image::from_vec(
+            4,
+            1,
+            vec![
+                Mono8::new(0),
+                Mono8::new(199),
+                Mono8::new(200),
+                Mono8::new(255),
+            ],
+        )
+        .unwrap();
+        let out = hysteresis_threshold(&img, Saturating(200), Saturating(200));
+        assert!(!out.pixel_at(0, 0), "0 < high");
+        assert!(!out.pixel_at(1, 0), "199 < high, and there is no weak band");
+        assert!(out.pixel_at(2, 0), "200 == high → strong");
+        assert!(out.pixel_at(3, 0), "255 >= high → strong");
     }
 
     #[test]

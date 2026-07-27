@@ -44,9 +44,9 @@ use super::strategy::{BinIndex, BinningStrategy};
 /// produces 6.4 × 10⁷ — well within `u64` and an overflow of `u32`.
 ///
 /// `nan_count`, `underflow_count`, and `overflow_count` are surfaced as
-/// public fields rather than hidden by `count_for`. Philosophy §8
-/// ("surface information, don't decide"): the library reports each
-/// out-of-bin category and lets the caller decide what to do with them.
+/// public fields rather than hidden by `count_for`: the library reports
+/// each out-of-bin category and lets the caller decide what to do with
+/// them, rather than deciding on their behalf.
 ///
 /// # Construction
 ///

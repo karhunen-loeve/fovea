@@ -7,8 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-07-27
+
 ### Added
 
+- `pixel::SingleChannel`: a sealed marker trait for pixel types with exactly
+  one channel (`Mono8/16/32/64`, `Mono<N>`, `MonoF32`/`MonoF64`, `Label32`,
+  `Indexed8`, and the primitive scalar pixels). It turns "this operation is
+  monochrome-only" into a bound the compiler checks;
+  `hysteresis_threshold` now uses it in place of a runtime
+  `CHANNEL_COUNT` assertion.
+- `transform::MagnitudeHypot`: an overflow-safe `CombinePixels` sibling of
+  `Magnitude`, computing `sqrt(a² + b²)` via `f32::hypot` / `f64::hypot`.
+  Use it when inputs can approach the limits of the float range; `Magnitude`
+  itself now takes the direct, vectorizable route (see *Changed*). The
+  sealed `MagnitudeChannel` trait gained a matching `magnitude_hypot`
+  method beside `magnitude`.
 - `analyze::components::connected_components_with_measurements`: opt-in blob
   shape analysis. Returns one `BlobMeasurements` per component alongside the
   labeling — area, bounding box, centroid sums, the raw second-order moment
@@ -26,8 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rasterised disc reads ≈1.25 (above 1) while a square reads ≈π/4 — treat it as
   a relative shape score within a tolerance band.
 - `CoordinateF64`: sub-pixel `f64` companion to `Coordinate`, with
-  `From<Coordinate>`/`From<(f64, f64)>`. `ComponentStats::centroid` and
-  `BlobMeasurements::centroid` now return it.
+  `From<Coordinate>`/`From<(f64, f64)>`. `BlobMeasurements::centroid`
+  returns it, and `ComponentStats::centroid` was changed to return it (see
+  *Changed → Breaking*).
 - `analyze::edge::canny`: single-scale Canny edge detector composing the full
   pipeline — `gaussian_blur(sigma)` → Scharr `Gx`/`Gy` → gradient magnitude +
   direction → non-maximum suppression → `hysteresis_threshold` — and returning
@@ -106,6 +121,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** `ComponentStats::centroid` returns `CoordinateF64` instead
+  of `(f64, f64)`. Destructuring call sites (`let (cx, cy) =
+  stats.centroid();`) no longer compile; use `let c = stats.centroid();`
+  with `c.x` / `c.y`, or `let (cx, cy) = stats.centroid().into();`. The
+  sibling `BlobMeasurements::centroid` is new in this release and returns
+  the same type, so the two agree.
+- **Breaking:** `hysteresis_threshold` / `hysteresis_threshold_into` are
+  bound on the new `pixel::SingleChannel` marker instead of
+  `HomogeneousPixel`. Passing a multi-channel pixel is now a compile error
+  rather than a runtime panic; every single-channel type that previously
+  worked still works unchanged.
+- **Breaking (numerical, narrow):** the `Magnitude` combine strategy — and
+  therefore `gradient_magnitude` and the magnitude stage of `canny` —
+  computes `sqrt(a² + b²)` directly instead of calling
+  `f32::hypot` / `f64::hypot`. The results are identical for any input
+  whose square is representable, which covers gradients of real image
+  data; the direct form inlines and autovectorizes where the libm call did
+  neither. Inputs large enough to overflow the square (above ≈1.8·10³⁸ for
+  `f32`) now yield `inf` where they previously yielded a finite value —
+  use the new `MagnitudeHypot` strategy if that matters for your data.
+- `canny` no longer materialises an `atan2` gradient-direction image.
+  Non-maximum suppression reads the sector it needs straight from
+  `gx`/`gy`, removing one transcendental call and one full-image
+  allocation per invocation. The output mask is unchanged, and the staged
+  `gradient_direction` → `non_maximum_suppression` composition stays
+  public for callers who want to inspect the angle map.
 - **Breaking:** `gaussian_blur_3x3` and `gaussian_blur_5x5` are now
   **normalized** (kernel sums to 1) and therefore **preserve brightness**,
   matching `box_blur_3x3` / `box_blur_5x5` and every mainstream library.
@@ -129,6 +170,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   accumulator + output) are unchanged; reusing those across calls is the
   deferred follow-up (tracked in OPT-004). The
   `SeparableKernel::to_h_image` / `to_v_image` helpers were removed.
+- `hysteresis_threshold_into` builds its weak mask by row iteration rather
+  than a per-pixel `pixel_at`, and `non_maximum_suppression` walks
+  previous/current/next row slices instead of recomputing a bounds-checked
+  index per neighbour. Behaviour is unchanged.
+
+### Fixed
+
+- `BlobMeasurements::eccentricity` documented its range as `[0, 1)`, but a
+  straight axis-aligned blob has `λ₂ = 0` and returns exactly `1.0`. The
+  range is `[0, 1]`; the doc and its test now say so.
+- `gaussian_kernel_size` / the internal radius helper now document that
+  they deliberately do **not** enforce `MAX_RADIUS`, unlike
+  `gaussian_kernel_1d` and the `gaussian_blur*` family, which panic above
+  it. Keeping the size query total is what lets a caller test whether a
+  `sigma` is admissible instead of catching a panic.
+- Shipped documentation no longer cites `PHILOSOPHY.md` sections or
+  internal plan "Decision N" tags. Those files are not part of the
+  published crate, so the references dangled on docs.rs; each is replaced
+  by the reasoning it stood for.
 
 ## [0.2.0] — 2026-06-12
 
@@ -234,5 +294,6 @@ actual functionality.
   `Result<T, Error>` for caller-data failures, `panic!` for
   programmer bugs.
 
+[0.3.0]: https://github.com/karhunen-loeve/fovea/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/karhunen-loeve/fovea/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/karhunen-loeve/fovea/releases/tag/v0.1.1

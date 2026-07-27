@@ -5,7 +5,7 @@
 
 use fovea_derive::{HomogeneousPixel, PlainPixel, WhiteChannel, ZeroablePixel};
 
-use crate::pixel::impl_origin_invariant_pixel;
+use crate::pixel::{impl_origin_invariant_pixel, impl_single_channel};
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Indexed (palette) pixel type
@@ -76,6 +76,14 @@ impl From<Indexed8> for u8 {
 // preserves its meaning. (Interpolating indices remains a type error, since
 // `Indexed8` withholds `LinearSpace` — a separate axis from origin-invariance.)
 impl_origin_invariant_pixel!(Indexed8);
+
+// ---------------------------------------------------------------------------
+// SingleChannel impl
+// ---------------------------------------------------------------------------
+//
+// One palette index per pixel. As with `Label32`, the marker states channel
+// arity only — it does not make an index an intensity.
+impl_single_channel!(Indexed8);
 
 #[cfg(test)]
 mod tests {

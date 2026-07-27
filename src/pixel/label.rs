@@ -11,7 +11,7 @@ use std::num::Saturating;
 
 use fovea_derive::{HomogeneousPixel, PlainPixel, ZeroablePixel};
 
-use crate::pixel::{LabelPixel, impl_origin_invariant_pixel};
+use crate::pixel::{LabelPixel, impl_origin_invariant_pixel, impl_single_channel};
 
 /// A 32-bit foreground component label.
 ///
@@ -38,8 +38,7 @@ use crate::pixel::{LabelPixel, impl_origin_invariant_pixel};
 /// [`FromLinear`](crate::pixel::FromLinear), or any arithmetic
 /// operator. Averaging two labels, gamma-converting them, thresholding
 /// them, inverting them, or adding them is meaningless; excluding those
-/// traits makes such operations *fail to compile* on label images
-/// (Philosophy §1).
+/// traits makes such operations *fail to compile* on label images.
 ///
 /// # Layout
 ///
@@ -130,6 +129,15 @@ impl LabelPixel for Label32 {
 // withholds `LinearPixel`/`LinearSpace`, so averaging or blending labels
 // remains a type error — a separate axis from origin-invariance.)
 impl_origin_invariant_pixel!(Label32);
+
+// ---------------------------------------------------------------------------
+// SingleChannel impl
+// ---------------------------------------------------------------------------
+//
+// A label image carries one label per pixel. The marker only states channel
+// arity; it grants no arithmetic, so label images stay outside intensity
+// operations.
+impl_single_channel!(Label32);
 
 #[cfg(test)]
 mod tests {

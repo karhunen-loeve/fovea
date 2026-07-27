@@ -410,6 +410,10 @@ impl core::fmt::Debug for GaussianKernel1D {
 /// actually compute and is the parity this kernel targets. For very small
 /// `sigma` the radius rounds down to 0, yielding a 1-tap identity kernel.
 ///
+/// The result is **not** clamped to [`MAX_RADIUS`]; enforcing that bound is
+/// the caller's job, and only the kernel *builders* do it. See
+/// [`gaussian_kernel_size`] for why the size query stays total.
+///
 /// # Panics
 ///
 /// Panics if `sigma <= 0.0` or `truncate <= 0.0` (Tier 3 precondition).
@@ -429,8 +433,27 @@ fn gaussian_radius(sigma: f32, truncate: f32) -> usize {
 /// and `truncate`: `2 * floor(truncate * sigma + 0.5) + 1`.
 ///
 /// This reports the derived size without building the kernel, so callers
-/// can size buffers or reason about cost up front (PHILOSOPHY §8 — the
-/// derived size is surfaced, not hidden).
+/// can size buffers or reason about cost up front — the derived size is
+/// surfaced rather than hidden inside the blur.
+///
+/// # `MAX_RADIUS` is not enforced here
+///
+/// This is a pure arithmetic query and deliberately does **not** panic when
+/// the derived radius exceeds [`MAX_RADIUS`]; that is what makes it usable
+/// as an admissibility *check*. [`gaussian_kernel_1d`] and the
+/// [`gaussian_blur`](crate::transform::gaussian_blur) family do panic in
+/// that case, so a size reported here above `2 * MAX_RADIUS + 1` (= 129)
+/// means "this `sigma` is out of range", not "allocate a bigger buffer":
+///
+/// ```
+/// use fovea::image::{MAX_RADIUS, gaussian_kernel_size};
+///
+/// let supported = |sigma, truncate| {
+///     gaussian_kernel_size(sigma, truncate) <= 2 * MAX_RADIUS + 1
+/// };
+/// assert!(supported(16.0, 4.0));
+/// assert!(!supported(20.0, 4.0)); // 161 taps — `gaussian_blur` would panic
+/// ```
 ///
 /// # Panics
 ///
@@ -920,6 +943,17 @@ mod tests {
     fn gaussian_kernel_over_radius_panics() {
         // radius = round(4.0 * 20.0) = 80 > MAX_RADIUS (64).
         let _ = gaussian_kernel_1d(20.0, 4.0);
+    }
+
+    #[test]
+    fn gaussian_kernel_size_reports_over_max_radius_without_panicking() {
+        // The size query is total where the builder is not: it must report
+        // the derived size for an out-of-range sigma so callers can test
+        // admissibility instead of catching a panic.
+        assert_eq!(gaussian_kernel_size(20.0, 4.0), 161);
+        assert!(gaussian_kernel_size(20.0, 4.0) > 2 * MAX_RADIUS + 1);
+        // The largest admissible sigma sits exactly on the bound.
+        assert_eq!(gaussian_kernel_size(16.0, 4.0), 2 * MAX_RADIUS + 1);
     }
 
     #[test]

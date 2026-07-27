@@ -3,7 +3,13 @@
 //! [`canny`] is an orchestrator, not a primitive. Every stage it runs is a
 //! public function in its own right, so a caller who needs a different
 //! operator, border policy, or intermediate inspection can rebuild the
-//! pipeline by hand instead of reaching for a configuration knob:
+//! pipeline by hand instead of reaching for a configuration knob.
+//!
+//! The hand-built form below produces the same mask as [`canny`]. It is not
+//! the same code path: `canny` fuses the direction stage into suppression
+//! (the sector each gradient falls into is read from `gx`/`gy` directly,
+//! skipping a full-image `atan2`), whereas composing by hand materialises
+//! the angle map so you can look at it.
 //!
 //! ```
 //! use fovea::analyze::threshold::hysteresis_threshold;
@@ -15,7 +21,7 @@
 //!     scharr_x, scharr_y,
 //! };
 //!
-//! // A hand-built Canny, identical to `canny(&image, low, high, sigma)`.
+//! // A hand-built Canny, equivalent to `canny(&image, low, high, sigma)`.
 //! let image = Image::fill(16, 16, MonoF32::new(0.5));
 //! let (low, high, sigma) = (0.05, 0.15, 1.4);
 //!
@@ -32,10 +38,10 @@ use core::ops::Add;
 
 use crate::border::Clamp;
 use crate::image::{BinaryImage, Image, RasterImage};
-use crate::pixel::{FromLinear, HomogeneousPixel, LinearPixel, ZeroablePixel};
+use crate::pixel::{FromLinear, LinearPixel, SingleChannel, ZeroablePixel};
 use crate::transform::{
-    DirectionChannel, MagnitudeChannel, gaussian_blur, gradient_direction, gradient_magnitude,
-    non_maximum_suppression, scharr_x, scharr_y,
+    MagnitudeChannel, gaussian_blur, gradient_magnitude, non_maximum_suppression_from_gradients,
+    scharr_x, scharr_y,
 };
 
 use crate::analyze::threshold::hysteresis_threshold;
@@ -104,12 +110,11 @@ where
     Acc: Copy
         + Default
         + ZeroablePixel
-        + HomogeneousPixel
+        + SingleChannel
         + FromLinear<Acc>
         + LinearPixel<f32, Accumulator = Acc>
         + Add<Output = Acc>,
-    Acc::Channel:
-        PartialOrd + Copy + core::fmt::Debug + From<f32> + MagnitudeChannel + DirectionChannel,
+    Acc::Channel: PartialOrd + Copy + core::fmt::Debug + From<f32> + MagnitudeChannel,
     f64: From<Acc::Channel>,
 {
     let blurred: Image<Acc> = gaussian_blur(image, sigma, &Clamp);
@@ -119,9 +124,13 @@ where
     // gx / gy are produced from the same blurred image, so their sizes match
     // by construction — the `Result` cannot be `Err` here.
     let magnitude = gradient_magnitude(&gx, &gy).expect("gx and gy share a size");
-    let direction = gradient_direction(&gx, &gy).expect("gx and gy share a size");
 
-    let thinned = non_maximum_suppression(&magnitude, &direction);
+    // Suppression only needs the *sector* each gradient falls into, so it
+    // reads `gx`/`gy` directly rather than materialising an `atan2`
+    // direction map whose precision is then discarded. The staged
+    // `gradient_direction` → `non_maximum_suppression` form is public and
+    // yields the same mask; see the module docs.
+    let thinned = non_maximum_suppression_from_gradients(&magnitude, &gx, &gy);
     hysteresis_threshold(
         &thinned,
         <Acc::Channel as From<f32>>::from(low),
@@ -224,6 +233,57 @@ mod tests {
         let image = Image::generate(8, 6, |x, _| MonoF64::new(if x < 4 { 0.0 } else { 1.0 }));
         let edges = canny(&image, 0.10, 0.30, 1.0);
         assert_thin_edge(&edges, &[3, 4]);
+    }
+
+    #[test]
+    fn fused_pipeline_matches_staged_composition() {
+        // `canny` reads NMS sectors straight from gx/gy; the documented
+        // hand-composed form goes through `gradient_direction`'s atan2 map.
+        // On a pattern carrying all four sector orientations the two must
+        // agree pixel for pixel.
+        use crate::analyze::threshold::hysteresis_threshold;
+        use crate::border::Clamp;
+        use crate::transform::{
+            gaussian_blur, gradient_direction, gradient_magnitude, non_maximum_suppression,
+            scharr_x, scharr_y,
+        };
+
+        const N: usize = 24;
+        let image = Image::generate(N, N, |x, y| {
+            let (dx, dy) = (x as i32 - 12, y as i32 - 12);
+            let v = if dx * dx + dy * dy < 36 {
+                1.0 // a disc: every gradient orientation on its rim
+            } else if x % 7 == 0 || y % 5 == 0 {
+                0.6 // axis-aligned rules
+            } else if x == y || x + y == N - 1 {
+                0.35 // both diagonals
+            } else {
+                0.1
+            };
+            MonoF32::new(v)
+        });
+        let (low, high, sigma) = (0.02f32, 0.08f32, 1.2f32);
+
+        let fused = canny(&image, low, high, sigma);
+
+        let blurred: Image<MonoF32> = gaussian_blur(&image, sigma, &Clamp);
+        let gx = scharr_x(&blurred, &Clamp);
+        let gy = scharr_y(&blurred, &Clamp);
+        let mag = gradient_magnitude(&gx, &gy).unwrap();
+        let dir = gradient_direction(&gx, &gy).unwrap();
+        let thin = non_maximum_suppression(&mag, &dir);
+        let staged = hysteresis_threshold(&thin, low, high);
+
+        assert!(count_true(&fused) > 0, "the fixture should produce edges");
+        for y in 0..N {
+            for x in 0..N {
+                assert_eq!(
+                    fused.pixel_at(x, y),
+                    staged.pixel_at(x, y),
+                    "fused and staged disagree at ({x},{y})"
+                );
+            }
+        }
     }
 
     #[test]

@@ -55,10 +55,13 @@
 //! [`LinearCombine`](crate::transform::LinearCombine),
 //! [`Blend`](crate::transform::Blend),
 //! [`Magnitude`](crate::transform::Magnitude),
+//! [`MagnitudeHypot`](crate::transform::MagnitudeHypot),
 //! [`Direction`](crate::transform::Direction)) cover everyday arithmetic.
 //! The gradient-fusion helpers [`gradient_magnitude`](crate::transform::gradient_magnitude)
-//! and [`gradient_direction`](crate::transform::gradient_direction) wrap the
-//! last two for edge pipelines, and [`non_maximum_suppression`](crate::transform::non_maximum_suppression)
+//! and [`gradient_direction`](crate::transform::gradient_direction) wrap
+//! [`Magnitude`](crate::transform::Magnitude) and
+//! [`Direction`](crate::transform::Direction) for edge pipelines, and
+//! [`non_maximum_suppression`](crate::transform::non_maximum_suppression)
 //! thins the resulting ridge.
 //! Thin free-function wrappers ([`add`](crate::transform::add),
 //! [`subtract`](crate::transform::subtract),
@@ -104,9 +107,9 @@ mod template_match;
 pub use crate::pixel::blend;
 pub use combine::{
     AbsDiff, Blend, ClosureCombine, CombinePixels, Direction, DirectionChannel, LinearCombine,
-    Magnitude, MagnitudeChannel, Max, Min, PixelAdd, PixelMultiply, PixelSubtract, abs_diff, add,
-    combine_images, combine_images_fn, combine_images_fn_into, combine_images_into, image_max,
-    image_min, subtract,
+    Magnitude, MagnitudeChannel, MagnitudeHypot, Max, Min, PixelAdd, PixelMultiply, PixelSubtract,
+    abs_diff, add, combine_images, combine_images_fn, combine_images_fn_into, combine_images_into,
+    image_max, image_min, subtract,
 };
 pub use convert::{
     AddAlpha, BinaryMask, BinaryThreshold, BinaryThresholdInv, BrightnessContrast, Broadcast,
@@ -122,6 +125,7 @@ pub use filters::{
     gradient_direction, gradient_magnitude, laplacian, laplacian_8, non_maximum_suppression,
     prewitt_x, prewitt_y, scharr_x, scharr_y, sharpen, sobel_x, sobel_y,
 };
+pub(crate) use filters::non_maximum_suppression_from_gradients;
 pub use fold::{
     ClosureFold, FoldItem, FoldOp, fold_neighborhood, fold_neighborhood_fn,
     fold_neighborhood_fn_into, fold_neighborhood_into,

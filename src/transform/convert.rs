@@ -1798,7 +1798,7 @@ impl ConvertPixel<BgraF32, SrgbBgra16> for SrgbGamma {
 // `BoundedChannel` is what grants access to the channel's intrinsic
 // maximum; its absence on `f32` / `f64` is load-bearing and is what
 // makes `Invert` / `BinaryThreshold[ Inv]` refuse to compile for
-// float-channel pixels (Philosophy §1, §8).
+// float-channel pixels.
 
 /// Binary threshold: output channel is `Channel::MAX` if `value > thresh`,
 /// else `Channel::zero()`.
@@ -2060,9 +2060,9 @@ where
 /// Bound via [`WhiteChannel`](crate::pixel::WhiteChannel), so
 /// floating-point pixel families (`MonoF32`, `RgbF32`, …) are
 /// **deliberately excluded**: there is no intrinsic maximum for `f32` /
-/// `f64`, and the library refuses to bake in a `[0, 1]` assumption
-/// (Philosophy §1 "Types are the spec", §8 "Surface information, don't
-/// decide"). Users who want float inversion name the range assumption
+/// `f64`, and the library refuses to bake in a `[0, 1]` assumption —
+/// the type is the spec, and the range stays the caller's to name.
+/// Users who want float inversion name the range assumption
 /// explicitly — for example with `PixelMap(|p: &MonoF32| MonoF32(1.0 - p.0))`.
 ///
 /// # Reduced-range pixels
@@ -2211,8 +2211,8 @@ where
     pub fn new(lo: P, hi: P) -> Self {
         // Per-channel validation: matches the channel-wise semantics of
         // `convert`. Done once at construction so the hot loop pays
-        // nothing for it (PHILOSOPHY § "checks belong where the data
-        // becomes a contract").
+        // nothing for it: checks belong where the data becomes a
+        // contract.
         let n = <<P as HomogeneousPixel>::Channels as Array<P::Channel>>::LEN;
         for i in 0..n {
             if lo.channel(i) > hi.channel(i) {
@@ -2294,8 +2294,8 @@ where
 ///
 /// The strategy requires `LinearPixel<S> + FromLinear<P::Accumulator>` —
 /// it does **not** require `LinearSpace`. This is a point transform,
-/// not an interpolation (Philosophy §3 — bind to the minimum layer that
-/// admits the operation).
+/// not an interpolation — bind to the minimum layer that admits the
+/// operation.
 ///
 /// # Example
 /// ```
@@ -2466,7 +2466,7 @@ impl<V: Copy> ConvertPixel<Mono8, V> for Lut<V> {
 /// A `u16 → u16` variant would need a 65 536-entry table — a different
 /// operation that deserves a different name. If that becomes a real
 /// need, it can be added as `ChannelLut16` later without breaking
-/// changes (Philosophy §9 — "Extension by addition").
+/// changes — extension by addition.
 ///
 /// # Example
 ///
@@ -9381,7 +9381,7 @@ mod tests {
     fn brightness_contrast_monof32_no_clamping() {
         // MonoF32's FromLinear is the identity (Accumulator = Self), so no
         // clamping is applied. This is correct — floats have no intrinsic
-        // range, and the library refuses to invent one (Philosophy §8).
+        // range, and the library refuses to invent one.
         let strat = BrightnessContrast {
             brightness: 0.1f32,
             contrast: 2.0f32,
