@@ -161,4 +161,4 @@ pub struct MyBayer8 {
 }
 ```
 
-Only implement `LinearPixel` / `LinearSpace` if interpolation and blending are meaningful for the type. Likewise, only implement `OriginInvariantPixel` if cropping preserves the pixel's meaning. A Bayer CFA pixel such as `MyBayer8` deliberately omits it: an ROI at an odd origin shifts the 2×2 mosaic phase, so the compiler rejects ordinary `roi`/`tiles`/`sliding_windows` and steers callers to a phase-aware API instead (see ADR-0051).
+Only implement `LinearPixel` / `LinearSpace` if interpolation and blending are meaningful for the type. Likewise, only implement `OriginInvariantPixel` if cropping preserves the pixel's meaning. A Bayer CFA pixel such as `MyBayer8` deliberately omits it: an ROI at an odd origin shifts the 2×2 mosaic phase, so the compiler rejects ordinary `roi`/`tiles`/`sliding_windows` and steers callers to a phase-aware API instead.

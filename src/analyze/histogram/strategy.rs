@@ -26,8 +26,8 @@ use crate::pixel::Mono;
 ///
 /// Strategies own classification logic; the histogram engine never
 /// re-checks ranges or NaN. The four-way enum makes every outcome a
-/// distinct, named case in the type system, in line with Philosophy §1
-/// ("types are the spec") and §8 ("surface information, don't decide").
+/// distinct, named case in the type system: the type is the spec, and
+/// every outcome is surfaced rather than silently folded away.
 ///
 /// # Variants
 ///
@@ -236,7 +236,7 @@ impl BinningStrategy<Saturating<u8>> for NaturalBins {
 /// # Why `f64` for `min` / `max`
 ///
 /// `f32`'s 24-bit mantissa silently coarsens `u32` (and edge-case `u16`)
-/// histograms — a Philosophy §4 violation, since the discretisation would
+/// histograms — an unnamed lossy conversion, since the discretisation would
 /// happen without the caller naming it. `f64` represents every `u32` and
 /// every `f32` value exactly. The cost is 8 bytes per strategy instance.
 ///

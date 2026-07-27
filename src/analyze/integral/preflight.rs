@@ -31,7 +31,7 @@ use crate::pixel::{
 // These traits stay crate-private: they are an implementation detail of
 // the pre-flight check, not part of the public surface. Promoting them
 // to `pub` would invite users to add custom accumulators that bypass
-// the check, undermining the gate's guarantee. Philosophy §3 — bind
+// the check, undermining the gate's guarantee. The rule is to bind
 // on the tightest trait that admits the operation, and nothing more.
 
 /// Per-channel capacity of an accumulator pixel, in `u128` units, for

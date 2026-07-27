@@ -32,7 +32,7 @@ fn main() {
     // Vertical edges — where intensity changes left-to-right — produce a
     // strong response.  The output is `Image<MonoF32>` — the input
     // pixel's linear accumulator — so that negative gradients
-    // (bright→dark) are preserved. Under ADR-0045 / ADR-0044, gradient
+    // (bright→dark) are preserved. Gradient
     // images are pixel-role spatial grids of signed intensities; the
     // `MonoF32` wrapper names that semantic explicitly.
     use fovea::transform::sobel_x;

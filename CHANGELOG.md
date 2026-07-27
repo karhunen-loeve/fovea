@@ -7,6 +7,189 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-07-27
+
+### Added
+
+- `pixel::SingleChannel`: a sealed marker trait for pixel types with exactly
+  one channel (`Mono8/16/32/64`, `Mono<N>`, `MonoF32`/`MonoF64`, `Label32`,
+  `Indexed8`, and the primitive scalar pixels). It turns "this operation is
+  monochrome-only" into a bound the compiler checks;
+  `hysteresis_threshold` now uses it in place of a runtime
+  `CHANNEL_COUNT` assertion.
+- `transform::MagnitudeHypot`: an overflow-safe `CombinePixels` sibling of
+  `Magnitude`, computing `sqrt(a² + b²)` via `f32::hypot` / `f64::hypot`.
+  Use it when inputs can approach the limits of the float range; `Magnitude`
+  itself now takes the direct, vectorizable route (see *Changed*). The
+  sealed `MagnitudeChannel` trait gained a matching `magnitude_hypot`
+  method beside `magnitude`.
+- `analyze::components::connected_components_with_measurements`: opt-in blob
+  shape analysis. Returns one `BlobMeasurements` per component alongside the
+  labeling — area, bounding box, centroid sums, the raw second-order moment
+  sums (`sum_x2`/`sum_y2`/`sum_xy`), and a 4-connected boundary-pixel
+  `perimeter` — with derived `f64` descriptors (`centroid`,
+  `equivalent_diameter`, `orientation`, `eccentricity`, `circularity`,
+  `central_moments`) computed on demand. Everything accumulates in the same
+  single pass 2 as the labeling; no separate contour extraction. The perimeter
+  boundary test is fixed at 4-connectivity independent of the labeling
+  `Connectivity`, and all measurements are view-relative (a blob clipped by the
+  view edge is measured as clipped). The cheap `connected_components_with_stats`
+  path is unchanged: the extra moment + boundary work is gated behind a
+  monomorphised sink and compiles away when not requested. Note the 4-connected
+  boundary-pixel count undercounts diagonal outline, so `circularity` of a
+  rasterised disc reads ≈1.25 (above 1) while a square reads ≈π/4 — treat it as
+  a relative shape score within a tolerance band.
+- `CoordinateF64`: sub-pixel `f64` companion to `Coordinate`, with
+  `From<Coordinate>`/`From<(f64, f64)>`. `BlobMeasurements::centroid`
+  returns it, and `ComponentStats::centroid` was changed to return it (see
+  *Changed → Breaking*).
+- `analyze::edge::canny`: single-scale Canny edge detector composing the full
+  pipeline — `gaussian_blur(sigma)` → Scharr `Gx`/`Gy` → gradient magnitude +
+  direction → non-maximum suppression → `hysteresis_threshold` — and returning
+  a `BinaryImage`. `sigma` is a true Gaussian standard deviation; `low`/`high`
+  are absolute, kernel-independent gradient-magnitude thresholds (stable
+  because the blur preserves brightness). Generic over any single-channel
+  input whose linear accumulator is a float pixel: `Mono8`/`MonoF32` accumulate
+  in `MonoF32`, `Mono16`/`Mono32`/`Mono64`/`MonoF64` in `MonoF64`. Every stage
+  is a public function, so callers can swap operators or inspect intermediates
+  by composing the pipeline by hand. Demo: `fovea-examples/src/canny.rs`.
+- `transform::gradient_magnitude` and `transform::gradient_direction`: named
+  wrappers over `combine_images` with the `Magnitude` (L2, `hypot`) and the new
+  `Direction` (`atan2`) strategies, fusing an `Gx`/`Gy` pair into an
+  edge-strength map or a gradient-angle map. Both are generic over the
+  float-channel pixel types the strategies support (`MonoF32`, `MonoF64`, …)
+  and return `Err(Error::SizeMismatch)` on differing input sizes.
+- `transform::non_maximum_suppression`: thins a gradient-magnitude ridge to
+  single-pixel width by zeroing any pixel that is not a local maximum along its
+  quantised gradient direction (sectors 0°/45°/90°/135°). Ties are kept
+  (inclusive `>=`, OpenCV-compatible); border pixels whose along-gradient
+  neighbour is out of bounds are suppressed. Generic over single-channel float
+  pixels; panics on a magnitude/direction size mismatch.
+- `transform::Direction` (and the sealed `transform::DirectionChannel` trait):
+  a `CombinePixels` strategy computing channel-wise `atan2(b, a)` in radians on
+  `(-π, π]`, the directional companion to the existing `Magnitude` strategy.
+  Defined for `f32` / `f64` channels.
+- `analyze::threshold::adaptive_threshold` (and `_into`): local-mean
+  adaptive thresholding for uneven illumination — a pixel is foreground iff
+  `pixel > local_mean(window) − bias`, returning a `BinaryImage`. Built by
+  composition over the integral-image engine, so the per-pixel window mean
+  is `O(1)` and the whole pass is `O(n)` regardless of `window` size. The
+  accumulator is named explicitly (`Mono32` / `Mono64` / `MonoF64`) exactly
+  as for `integral_image`, and fixes the offset domain via the new `Bias<A>`
+  newtype (`i64` for integer accumulators, `f64` for `MonoF64`); positive
+  bias biases toward foreground. The decision `(pixel + offset) · area > sum`
+  is evaluated in an exact `i128` (integer) / `f64` (float) domain — no
+  per-pixel division or rounding. Edges use a **clipped** window (exact,
+  allocation-free; matches scikit-image's `threshold_local`, differs from
+  OpenCV's replicate border). The boundary is strict `>` (equality is
+  background, matching Otsu). Single-channel-ness is enforced at compile time
+  (the accepted accumulators are only valid for monochrome sources).
+  Inherits `Error::AccumulatorOverflow` (Tier 2) from the integral
+  pre-flight; panics (Tier 3) on an even/zero `window` or an `out`/input size
+  mismatch. New public items: `adaptive_threshold`, `adaptive_threshold_into`,
+  `Bias`, and the sealed `AdaptiveAccumulator` trait.
+- `analyze::threshold::hysteresis_threshold` (and `_into`): double-threshold
+  segmentation that keeps a **weak** pixel (`value >= low`) only when its
+  8-connected component contains a **strong** pixel (`value >= high`),
+  returning a `BinaryImage`. Both comparisons are inclusive (matching the
+  Canny literature / OpenCV, and intentionally differing from Otsu's
+  exclusive `>`). Accepts any single-channel pixel, including the `MonoF32`
+  gradient-magnitude image of a Canny pipeline; built by composition over
+  `connected_components` rather than new machinery. The strong mask is never
+  materialized. Panics (Tier 3) on a multi-channel pixel, an `out`/input size
+  mismatch, or `!(low <= high)`.
+- Parameterized Gaussian blur: `gaussian_blur(image, sigma, border)` and
+  `gaussian_blur_with(image, sigma, truncate, border)` (plus `_into`
+  variants writing to a caller-owned output) derive a normalized separable
+  kernel from `sigma`, matching the SciPy / scikit-image convention
+  (radius `= round(truncate · sigma)`, default `truncate = 4.0`). The kernel
+  is generated allocation-free into a bounded stack buffer; a `sigma` whose
+  radius exceeds `MAX_RADIUS` (64, i.e. `sigma > MAX_RADIUS / truncate`)
+  panics, as does `sigma <= 0`. The kernel generator is exposed at the image
+  layer as `gaussian_kernel_1d`, `gaussian_kernel_size`, `GaussianKernel1D`,
+  and the `MAX_RADIUS` bound. The fixed `gaussian_blur_3x3` /
+  `gaussian_blur_5x5` paths remain as fast const-sized convenience
+  functions.
+- `FullRange` conversions completing the const-generic `Mono<N>`
+  (`Mono10` / `Mono12` / `Mono14`) coverage: `Mono8/16/32/64 → Mono<N>`
+  (e.g. padding an 8-bit reference up to 12-bit) and `Mono<N1> → Mono<N2>`
+  (e.g. `Mono10 → Mono12` for mixed-camera pipelines, including the
+  equal-depth identity case). The previously shipped
+  `Mono<N> → Mono8/16/32/64` direction is unchanged. Rounding is symmetric,
+  so a widen-then-narrow round-trip is lossless when the wider depth is a
+  superset of the narrower one.
+
+### Changed
+
+- **Breaking:** `ComponentStats::centroid` returns `CoordinateF64` instead
+  of `(f64, f64)`. Destructuring call sites (`let (cx, cy) =
+  stats.centroid();`) no longer compile; use `let c = stats.centroid();`
+  with `c.x` / `c.y`, or `let (cx, cy) = stats.centroid().into();`. The
+  sibling `BlobMeasurements::centroid` is new in this release and returns
+  the same type, so the two agree.
+- **Breaking:** `hysteresis_threshold` / `hysteresis_threshold_into` are
+  bound on the new `pixel::SingleChannel` marker instead of
+  `HomogeneousPixel`. Passing a multi-channel pixel is now a compile error
+  rather than a runtime panic; every single-channel type that previously
+  worked still works unchanged.
+- **Breaking (numerical, narrow):** the `Magnitude` combine strategy — and
+  therefore `gradient_magnitude` and the magnitude stage of `canny` —
+  computes `sqrt(a² + b²)` directly instead of calling
+  `f32::hypot` / `f64::hypot`. The results are identical for any input
+  whose square is representable, which covers gradients of real image
+  data; the direct form inlines and autovectorizes where the libm call did
+  neither. Inputs large enough to overflow the square (above ≈1.8·10³⁸ for
+  `f32`) now yield `inf` where they previously yielded a finite value —
+  use the new `MagnitudeHypot` strategy if that matters for your data.
+- `canny` no longer materialises an `atan2` gradient-direction image.
+  Non-maximum suppression reads the sector it needs straight from
+  `gx`/`gy`, removing one transcendental call and one full-image
+  allocation per invocation. The output mask is unchanged, and the staged
+  `gradient_direction` → `non_maximum_suppression` composition stays
+  public for callers who want to inspect the angle map.
+- **Breaking:** `gaussian_blur_3x3` and `gaussian_blur_5x5` are now
+  **normalized** (kernel sums to 1) and therefore **preserve brightness**,
+  matching `box_blur_3x3` / `box_blur_5x5` and every mainstream library.
+  Previously they convolved with the raw integer kernels `[1, 2, 1]`
+  (sum 16) and `[1, 4, 6, 4, 1]` (sum 256), scaling output brightness by
+  ×16 / ×256 and silently saturating into integer output types. Callers
+  that relied on the old scaling should divide by 16 / 256, or convolve
+  directly with `Neighborhood::gaussian_3x3` / `gaussian_5x5` (the raw
+  integer kernels are unchanged and remain available at that layer, where
+  the caller owns the scale). The `SeparableKernel::gaussian_3` /
+  `gaussian_5` factories are likewise normalized now (weights
+  `[0.25, 0.5, 0.25]` and `[0.0625, 0.25, 0.375, 0.25, 0.0625]`).
+- Internal (no public behaviour change): the separable convolution path no
+  longer materializes its 1-D kernel weights onto the heap. Weights are now
+  borrowed as `ImageRef` views and fed to a new no-flip correlation core, with
+  true convolution flipping the kernel on the stack via
+  `SeparableKernel::flipped`. This removes ~6–8 small per-call allocations from
+  `gaussian_blur*`, `box_blur_*`, and `convolve_separable*`, closing the
+  kernel-allocation half of the previously documented separable-convolution
+  allocation deviation. The image-sized working-set buffers (intermediate +
+  accumulator + output) are unchanged; reusing those across calls is the
+  deferred follow-up (tracked in OPT-004). The
+  `SeparableKernel::to_h_image` / `to_v_image` helpers were removed.
+- `hysteresis_threshold_into` builds its weak mask by row iteration rather
+  than a per-pixel `pixel_at`, and `non_maximum_suppression` walks
+  previous/current/next row slices instead of recomputing a bounds-checked
+  index per neighbour. Behaviour is unchanged.
+
+### Fixed
+
+- `BlobMeasurements::eccentricity` documented its range as `[0, 1)`, but a
+  straight axis-aligned blob has `λ₂ = 0` and returns exactly `1.0`. The
+  range is `[0, 1]`; the doc and its test now say so.
+- `gaussian_kernel_size` / the internal radius helper now document that
+  they deliberately do **not** enforce `MAX_RADIUS`, unlike
+  `gaussian_kernel_1d` and the `gaussian_blur*` family, which panic above
+  it. Keeping the size query total is what lets a caller test whether a
+  `sigma` is admissible instead of catching a panic.
+- Shipped documentation no longer cites `PHILOSOPHY.md` sections or
+  internal plan "Decision N" tags. Those files are not part of the
+  published crate, so the references dangled on docs.rs; each is replaced
+  by the reasoning it stood for.
+
 ## [0.2.0] — 2026-06-12
 
 ### Added
@@ -111,5 +294,6 @@ actual functionality.
   `Result<T, Error>` for caller-data failures, `panic!` for
   programmer bugs.
 
+[0.3.0]: https://github.com/karhunen-loeve/fovea/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/karhunen-loeve/fovea/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/karhunen-loeve/fovea/releases/tag/v0.1.1

@@ -679,7 +679,7 @@ impl SrgbBgra16 {
 // coordinate-dependent one: a gamma-encoded sample means the same thing
 // wherever it sits, so cropping preserves its meaning. (These types still
 // reject *interpolation* by withholding `LinearSpace`; origin-invariance and
-// linear-space membership are independent axes — Philosophy §2.)
+// linear-space membership are independent axes.)
 impl_origin_invariant_pixel!(
     Srgb8,
     Srgba8,

@@ -41,7 +41,9 @@ pub use neighborhood::{
     Neighborhood, PositionsIter,
 };
 pub use planar::ImagePlanes;
-pub use separable::SeparableKernel;
+pub use separable::{
+    GaussianKernel1D, MAX_RADIUS, SeparableKernel, gaussian_kernel_1d, gaussian_kernel_size,
+};
 pub use sequential::{
     ContiguousImage, ContiguousImageMut, Image, ImageArray, ImageRef, ImageRefMut, PlainImage,
     PlainImageMut,
@@ -60,7 +62,7 @@ pub use zip::{ZipPixelsIter, zip_pixels};
 // same thing wherever it sits — it also implements
 // [`OriginInvariantPixel`](crate::pixel::OriginInvariantPixel) (below), which
 // is what keeps ordinary `SubView` ROI, tiling, and sliding windows available
-// for binary images (ADR-0051). `bool` is also the pixel type that
+// for binary images. `bool` is also the pixel type that
 // `map_neighborhood*` already consumes as its topology mask parameter
 // (`MI: ImageView<Pixel = bool>`), so morphology and neighborhood operations
 // natively accept binary images with no bridging conversion.

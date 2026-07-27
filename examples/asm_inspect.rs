@@ -156,13 +156,13 @@ pub fn map_dilate_u8_hot(acc: &mut [u8], src: &[u8]) {
 /// A direct FoldOp for weighted sum (same as ConvolveFold but visible here).
 struct DirectSumFold;
 
-// ADR-0045 Phase S4: `u8` no longer implements `LinearPixel`, so the
+// `u8` no longer implements `LinearPixel`, so the
 // fold pipelines that go through pixel-role traits migrated from
 // `u8` to `Mono8`. `Mono8` is `#[repr(transparent)]` over
 // `Saturating<u8>`, so codegen is equivalent to the old `u8` path.
 impl FoldOp<fovea::pixel::Mono8, f32> for DirectSumFold {
     type Accumulator = f32;
-    // ADR-0044 Phase E: `f32` no longer implements `ZeroablePixel`, so the
+    // `f32` no longer implements `ZeroablePixel`, so the
     // `Output` of a `FoldOp` used with `fold_neighborhood` must be a real
     // pixel type. `MonoF32` is `#[repr(transparent)]` over `f32`, so this
     // is a zero-cost wrapping of the scalar weighted-sum result.
@@ -214,7 +214,7 @@ pub fn fold_trait_convolve_u8_hot(acc: &mut [f32], src: &[u8], weight: f32) {
     let op = DirectSumFold;
     let n = acc.len().min(src.len());
     for i in 0..n {
-        // ADR-0045 Phase S4: `DirectSumFold` now implements
+        // `DirectSumFold` now implements
         // `FoldOp<Mono8, f32>` (not `FoldOp<u8, f32>`). Wrap the raw
         // `u8` byte into `Mono8` at the call site — this is a
         // zero-cost reinterpretation because `Mono8` is
@@ -395,7 +395,7 @@ pub fn real_convolve_u8(
     img: &Image<fovea::pixel::Mono8>,
     kernel: &Kernel3x3,
 ) -> Image<fovea::pixel::MonoF32> {
-    // ADR-0045 Phase C: `Mono8::Accumulator = MonoF32`, so the
+    // `Mono8::Accumulator = MonoF32`, so the
     // `Out` turbofish flips from raw `f32` to the named pixel type.
     convolve::<_, _, _, _, fovea::pixel::MonoF32>(img, kernel, &Clamp)
 }
@@ -414,10 +414,10 @@ pub fn real_dilate_u8(img: &Image<u8>, se: &Mask3x3) -> Image<u8> {
 
 #[unsafe(no_mangle)]
 #[inline(never)]
-// Scalar fold accumulator — kept as `f32` per ADR-0044 §C.3 (not a pixel role).
+// Scalar fold accumulator — kept as `f32` (not a pixel role).
 // `DirectSumFold::Accumulator = f32` is a scalar weighted-sum accumulator,
 // so the output `Image<f32>` carries scalar semantics rather than a pixel
-// intensity. No migration to `MonoF32` under ADR-0045 Phase C.
+// intensity. No migration to `MonoF32`.
 pub fn real_fold_neighborhood_u8(
     img: &Image<fovea::pixel::Mono8>,
     kernel: &Kernel3x3,
@@ -514,7 +514,7 @@ fn main() {
     let w = 256;
     let h = 256;
     let img_u8 = Image::generate(w, h, |x, y| ((x * 17 + y * 31) % 256) as u8);
-    // ADR-0045 Phase S4: `u8` is no longer a pixel. For the pipeline
+    // `u8` is no longer a pixel. For the pipeline
     // calls that go through `LinearPixel` (convolve, fold_neighborhood),
     // build a parallel `Image<Mono8>` with the same underlying bytes.
     let img_mono8: Image<fovea::pixel::Mono8> = Image::generate(w, h, |x, y| {
@@ -578,7 +578,7 @@ fn main() {
 
     // ── Full pipeline ────────────────────────────────────────────────────
     // `real_convolve_u8` and `real_fold_neighborhood_u8` now take
-    // `Image<Mono8>` (ADR-0045 Phase S4); `real_erode_u8` /
+    // `Image<Mono8>`; `real_erode_u8` /
     // `real_dilate_u8` do not go through `LinearPixel` and keep their
     // `Image<u8>` input.
     let _conv = real_convolve_u8(black_box(&img_mono8), black_box(&kernel));

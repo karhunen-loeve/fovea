@@ -91,10 +91,11 @@ pub use label::Label32;
 pub use pixel_traits::{
     Array, BoundedChannel, FromLinear, HomogeneousPixel, IntegralPixel, IntegralSquaredPixel,
     LinearChannel, LinearPixel, LinearSpace, OriginInvariantPixel, PlainChannel, PlainPixel,
-    WhiteChannel, ZeroablePixel, blend,
+    SingleChannel, WhiteChannel, ZeroablePixel, blend,
 };
 
 pub use pixel_traits::LabelPixel;
 
 pub(crate) use pixel_traits::MAX_PIXEL_SIZE;
 pub(crate) use pixel_traits::impl_origin_invariant_pixel;
+pub(crate) use pixel_traits::{impl_single_channel, single_channel_sealed};

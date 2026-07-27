@@ -6,7 +6,8 @@
 //! - [`ClosureCombine`] — an adapter for closures as one-off combiners.
 //! - [`combine_images`] / [`combine_images_into`] — image-level driver functions.
 //! - Named combiners: [`PixelAdd`], [`PixelSubtract`], [`PixelMultiply`],
-//!   [`AbsDiff`], [`Max`], [`Min`], [`LinearCombine`], [`Blend`], [`Magnitude`].
+//!   [`AbsDiff`], [`Max`], [`Min`], [`LinearCombine`], [`Blend`],
+//!   [`Magnitude`], [`MagnitudeHypot`], [`Direction`].
 //!
 //! Everything is re-exported from the parent [`transform`](super) module:
 //!
@@ -579,15 +580,40 @@ mod magnitude_sealed {
 ///
 /// Implemented for `f32` and `f64`.  This trait is **sealed**: it cannot be
 /// implemented outside this crate.
+///
+/// The two methods are the two strategies' kernels: [`magnitude`] is the
+/// direct formula and [`magnitude_hypot`] is the overflow-safe one.  They
+/// agree bit-for-bit on inputs whose squares are representable.
+///
+/// [`magnitude`]: MagnitudeChannel::magnitude
+/// [`magnitude_hypot`]: MagnitudeChannel::magnitude_hypot
 pub trait MagnitudeChannel: magnitude_sealed::Sealed + Copy {
-    /// Compute `sqrt(a² + b²)`, the Euclidean length of the vector `(a, b)`.
+    /// Compute `sqrt(a² + b²)` directly, as the [`Magnitude`] strategy does.
+    ///
+    /// Squares intermediate values, so it overflows to infinity (or
+    /// underflows to zero) when `a` or `b` is near the limits of the float
+    /// range.  In exchange it is a handful of inlined instructions and
+    /// autovectorizes.
     fn magnitude(a: Self, b: Self) -> Self;
+
+    /// Compute `sqrt(a² + b²)` without intermediate overflow, as the
+    /// [`MagnitudeHypot`] strategy does.
+    ///
+    /// Delegates to [`f32::hypot`] / [`f64::hypot`]: correct across the
+    /// whole float range, at the cost of an out-of-line libm call that
+    /// does not vectorize.
+    fn magnitude_hypot(a: Self, b: Self) -> Self;
 }
 
 impl magnitude_sealed::Sealed for f32 {}
 impl MagnitudeChannel for f32 {
     #[inline(always)]
     fn magnitude(a: f32, b: f32) -> f32 {
+        (a * a + b * b).sqrt()
+    }
+
+    #[inline(always)]
+    fn magnitude_hypot(a: f32, b: f32) -> f32 {
         f32::hypot(a, b)
     }
 }
@@ -596,6 +622,11 @@ impl magnitude_sealed::Sealed for f64 {}
 impl MagnitudeChannel for f64 {
     #[inline(always)]
     fn magnitude(a: f64, b: f64) -> f64 {
+        (a * a + b * b).sqrt()
+    }
+
+    #[inline(always)]
+    fn magnitude_hypot(a: f64, b: f64) -> f64 {
         f64::hypot(a, b)
     }
 }
@@ -606,8 +637,16 @@ impl MagnitudeChannel for f64 {
 /// [`sobel_y`]) into a gradient-magnitude image.
 ///
 /// Only defined for float-channel pixel types (`MonoF32`, `MonoF64`, `RgbF32`, …).
-/// The underlying computation uses [`f32::hypot`] / [`f64::hypot`], which avoids
-/// intermediate overflow for large values.
+///
+/// # Range
+///
+/// The computation is the direct `sqrt(a² + b²)`, which squares its inputs.
+/// For gradients of ordinary image data — the case this strategy exists for
+/// — that is exact and it is what lets the magnitude pass autovectorize.
+/// It does overflow to `inf` (or underflow to `0`) once `a²` or `b²` leaves
+/// the float range: above ≈1.8·10³⁸ for `f32`. If your inputs really can
+/// reach that far, use [`MagnitudeHypot`], which is overflow-safe and
+/// otherwise identical.
 ///
 /// [`sobel_x`]: crate::transform::sobel_x
 /// [`sobel_y`]: crate::transform::sobel_y
@@ -636,6 +675,131 @@ where
         let mut result = *a;
         for i in 0..P::CHANNEL_COUNT {
             result.set_channel(i, MagnitudeChannel::magnitude(a.channel(i), b.channel(i)));
+        }
+        result
+    }
+}
+
+/// Channel-wise Euclidean magnitude `sqrt(a² + b²)`, overflow-safe.
+///
+/// The opt-in sibling of [`Magnitude`]: same result, computed with
+/// [`f32::hypot`] / [`f64::hypot`] so that no intermediate square leaves
+/// the float range. Reach for it when the inputs are not image gradients
+/// but arbitrary float data that can approach the representable maximum —
+/// e.g. `hypot(1e30, 1e30)` is finite here and `inf` under [`Magnitude`].
+///
+/// The cost is a libm call per channel that neither inlines nor
+/// vectorizes, so it is the wrong default for a per-pixel edge pipeline.
+///
+/// # Example
+///
+/// ```
+/// use fovea::transform::{CombinePixels, Magnitude, MagnitudeHypot};
+/// use fovea::pixel::MonoF32;
+///
+/// // Identical on ordinary values …
+/// let a = MagnitudeHypot.combine(&MonoF32::new(3.0), &MonoF32::new(4.0));
+/// assert!((a.value() - 5.0).abs() < 1e-5);
+///
+/// // … and still finite where the direct formula overflows.
+/// let big = MonoF32::new(1e30);
+/// assert!(MagnitudeHypot.combine(&big, &big).value().is_finite());
+/// assert!(Magnitude.combine(&big, &big).value().is_infinite());
+/// ```
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct MagnitudeHypot;
+
+impl<P> CombinePixels<P, P> for MagnitudeHypot
+where
+    P: HomogeneousPixel,
+    P::Channel: MagnitudeChannel,
+{
+    type Output = P;
+
+    fn combine(&self, a: &P, b: &P) -> P {
+        let mut result = *a;
+        for i in 0..P::CHANNEL_COUNT {
+            result.set_channel(
+                i,
+                MagnitudeChannel::magnitude_hypot(a.channel(i), b.channel(i)),
+            );
+        }
+        result
+    }
+}
+
+// ─── Direction ─────────────────────────────────────────────────────────────────
+
+/// Sealing module for [`DirectionChannel`].
+mod direction_sealed {
+    pub trait Sealed: Copy {}
+}
+
+/// Channel types that support `atan2(b, a)`.
+///
+/// Implemented for `f32` and `f64`.  This trait is **sealed**: it cannot be
+/// implemented outside this crate.
+pub trait DirectionChannel: direction_sealed::Sealed + Copy {
+    /// Compute `atan2(b, a)`, the direction of the vector `(a, b)` in radians
+    /// on `(-π, π]`.
+    fn direction(a: Self, b: Self) -> Self;
+}
+
+impl direction_sealed::Sealed for f32 {}
+impl DirectionChannel for f32 {
+    #[inline(always)]
+    fn direction(a: f32, b: f32) -> f32 {
+        b.atan2(a)
+    }
+}
+
+impl direction_sealed::Sealed for f64 {}
+impl DirectionChannel for f64 {
+    #[inline(always)]
+    fn direction(a: f64, b: f64) -> f64 {
+        b.atan2(a)
+    }
+}
+
+/// Channel-wise gradient direction `atan2(b, a)`, in radians on `(-π, π]`.
+///
+/// The directional companion to [`Magnitude`]: given X- and Y-gradient images
+/// (e.g. from [`scharr_x`] / [`scharr_y`]), `Direction.combine(&gx, &gy)`
+/// yields the angle of the gradient vector at each pixel. Because the
+/// arguments follow image coordinates (`y` increases downward), a pure `+x`
+/// gradient maps to `0` and a pure `+y` gradient to `π/2`.
+///
+/// Only defined for float-channel pixel types (`MonoF32`, `MonoF64`, …), via
+/// the sealed [`DirectionChannel`] trait.
+///
+/// [`scharr_x`]: crate::transform::scharr_x
+/// [`scharr_y`]: crate::transform::scharr_y
+///
+/// # Example
+///
+/// ```
+/// use fovea::transform::{CombinePixels, Direction};
+/// use fovea::pixel::MonoF32;
+/// use std::f32::consts::FRAC_PI_2;
+///
+/// // Pure +y gradient → π/2.
+/// let dir = Direction.combine(&MonoF32::new(0.0), &MonoF32::new(1.0));
+/// assert!((dir.value() - FRAC_PI_2).abs() < 1e-6);
+/// ```
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Direction;
+
+impl<P> CombinePixels<P, P> for Direction
+where
+    P: HomogeneousPixel,
+    P::Channel: DirectionChannel,
+{
+    type Output = P;
+
+    fn combine(&self, a: &P, b: &P) -> P {
+        let mut result = *a;
+        for i in 0..P::CHANNEL_COUNT {
+            result.set_channel(i, DirectionChannel::direction(a.channel(i), b.channel(i)));
         }
         result
     }
@@ -1929,7 +2093,7 @@ mod tests {
 
     #[test]
     fn magnitude_monof32_unit_axes() {
-        // hypot(1, 0) = 1, hypot(0, 1) = 1
+        // |(1, 0)| = 1, |(0, 1)| = 1
         let r1 = Magnitude.combine(&MonoF32::new(1.0), &MonoF32::new(0.0));
         let r2 = Magnitude.combine(&MonoF32::new(0.0), &MonoF32::new(1.0));
         assert!((r1.value() - 1.0).abs() < 1e-6);
@@ -1957,7 +2121,7 @@ mod tests {
 
     #[test]
     fn magnitude_rgbf32_channel_wise() {
-        // hypot(3,4)=5, hypot(0,1)=1, hypot(1,0)=1
+        // |(3,4)|=5, |(0,1)|=1, |(1,0)|=1
         let a = RgbF32::new(3.0, 0.0, 1.0);
         let b = RgbF32::new(4.0, 1.0, 0.0);
         let result = Magnitude.combine(&a, &b);
@@ -2009,6 +2173,70 @@ mod tests {
     #[test]
     fn magnitude_channel_f64_5_12_13() {
         assert!((MagnitudeChannel::magnitude(5.0_f64, 12.0_f64) - 13.0).abs() < 1e-12);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // MagnitudeHypot — the overflow-safe sibling
+    // ══════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn hypot_agrees_with_magnitude_on_ordinary_values() {
+        // Over the range gradients of real image data occupy, the direct
+        // formula and `hypot` must not diverge.
+        for &(a, b) in &[
+            (3.0_f32, 4.0),
+            (0.0, 0.0),
+            (1.0, 0.0),
+            (0.0, 1.0),
+            (-7.5, 2.25),
+            (1e6, 1e6),
+            (1e-6, 3e-7),
+        ] {
+            let direct = Magnitude.combine(&MonoF32::new(a), &MonoF32::new(b)).value();
+            let safe = MagnitudeHypot
+                .combine(&MonoF32::new(a), &MonoF32::new(b))
+                .value();
+            let tol = 1e-6 * direct.abs().max(1.0);
+            assert!(
+                (direct - safe).abs() <= tol,
+                "magnitude({a}, {b}) = {direct} vs hypot = {safe}"
+            );
+        }
+    }
+
+    #[test]
+    fn hypot_survives_where_direct_overflows() {
+        // `1e30² = 1e60` is not representable in f32, so the direct formula
+        // saturates to infinity while `hypot` stays finite. This is the whole
+        // reason `MagnitudeHypot` exists.
+        let big = MonoF32::new(1e30);
+        assert!(Magnitude.combine(&big, &big).value().is_infinite());
+        let safe = MagnitudeHypot.combine(&big, &big).value();
+        assert!(safe.is_finite());
+        assert!((safe - 1e30 * std::f32::consts::SQRT_2).abs() < 1e25);
+    }
+
+    #[test]
+    fn hypot_channel_helper_matches_std() {
+        assert_eq!(
+            MagnitudeChannel::magnitude_hypot(3.0_f32, 4.0_f32),
+            f32::hypot(3.0, 4.0)
+        );
+        assert_eq!(
+            MagnitudeChannel::magnitude_hypot(5.0_f64, 12.0_f64),
+            f64::hypot(5.0, 12.0)
+        );
+    }
+
+    #[test]
+    fn hypot_is_multi_channel() {
+        // Both strategies operate channel-wise, not just on channel 0.
+        let a = RgbF32::new(3.0, 5.0, 8.0);
+        let b = RgbF32::new(4.0, 12.0, 15.0);
+        let r = MagnitudeHypot.combine(&a, &b);
+        assert!((r.r - 5.0).abs() < 1e-5);
+        assert!((r.g - 13.0).abs() < 1e-5);
+        assert!((r.b - 17.0).abs() < 1e-5);
     }
 
     // ══════════════════════════════════════════════════════════════════════

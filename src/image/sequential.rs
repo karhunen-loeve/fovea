@@ -3653,7 +3653,7 @@ mod tests {
 }
 
 // ──────────────────────────────────────────────────────────────────────────
-// ADR-0051: OriginInvariantPixel gate — behavioural coverage
+// OriginInvariantPixel gate — behavioural coverage
 // ──────────────────────────────────────────────────────────────────────────
 //
 // The exhaustive *compile-time* proof that every pixel family implements the

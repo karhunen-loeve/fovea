@@ -21,7 +21,7 @@ where
 }
 
 fn criterion_benchmark(c: &mut Criterion) {
-    // ADR-0045 Phase S4: `u8` no longer implements `LinearPixel`, so the
+    // `u8` no longer implements `LinearPixel`, so the
     // bilinear resize bench inputs migrated from `Image<u8>` to
     // `Image<Mono8>`. `Mono8` is `#[repr(transparent)]` over
     // `Saturating<u8>`, so the bench layout and numerical path are

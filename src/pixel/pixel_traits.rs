@@ -298,7 +298,7 @@ pub trait ZeroablePixel: Sized + Copy {
 /// ([`RasterImage`](crate::image::RasterImage)) are **not** gated — they do
 /// not move the origin and stay available for every `T: Copy`.
 ///
-/// # Why a separate trait (Philosophy §2, §3)
+/// # Why a separate trait
 ///
 /// Origin-invariance is its own axis, orthogonal to the existing pixel
 /// roles, and each trait adds exactly one guarantee:
@@ -315,7 +315,7 @@ pub trait ZeroablePixel: Sized + Copy {
 /// [`BinaryImage`](crate::image::BinaryImage) — is origin-invariant yet is
 /// not part of the plain-layout pixel family.
 ///
-/// # Safe trait (Philosophy §11)
+/// # Safe trait
 ///
 /// `OriginInvariantPixel` is a **safe** trait. A wrong impl does not cause
 /// undefined behaviour or reinterpret bytes; it only re-admits a region API
@@ -332,16 +332,13 @@ pub trait ZeroablePixel: Sized + Copy {
 /// families, plus `bool`.
 ///
 /// It is **not** implemented for raw channel primitives (`u8`, `u16`,
-/// `f32`, …): those are channels, not pixels (Philosophy §9). It is also the
-/// opt-out point for coordinate-dependent pixels such as Bayer CFA mosaics
-/// (ADR-0037): an ROI at an odd origin shifts the 2×2 mosaic phase, so
+/// `f32`, …): those are channels, not pixels. It is also the
+/// opt-out point for coordinate-dependent pixels such as Bayer CFA mosaics:
+/// an ROI at an odd origin shifts the 2×2 mosaic phase, so
 /// returning the same pattern type would lie about the data. Such pixels
 /// remain usable as [`ImageView`](crate::image::ImageView) /
 /// [`RasterImage`](crate::image::RasterImage) storage and reach for named,
 /// phase-aware ROI APIs instead.
-///
-/// The design is recorded in ADR-0051; the ROI/tiling split it builds on is
-/// ADR-0017.
 ///
 /// # Examples
 ///
@@ -384,7 +381,7 @@ pub trait OriginInvariantPixel: Copy {}
 /// into ordinary [`SubView`](crate::image::SubView) /
 /// [`SubViewMut`](crate::image::SubViewMut) access without repeating the
 /// empty impl by hand. Membership is the whole specification: a
-/// coordinate-dependent pixel (e.g. a future Bayer CFA type, ADR-0037) is
+/// coordinate-dependent pixel (e.g. a future Bayer CFA type) is
 /// simply left off the list and therefore never gains ordinary `roi()`.
 ///
 /// Const-generic families (`Mono<BITS>`, `Rgb<BITS>`, …) implement the
@@ -398,6 +395,80 @@ macro_rules! impl_origin_invariant_pixel {
     };
 }
 pub(crate) use impl_origin_invariant_pixel;
+
+// ──────────────────────────────────────────────────────────────────────────
+// Single-channel marker
+// ──────────────────────────────────────────────────────────────────────────
+
+/// Sealing module for [`SingleChannel`].
+pub(crate) mod single_channel_sealed {
+    pub trait Sealed {}
+}
+
+/// A [`HomogeneousPixel`] with exactly one channel.
+///
+/// `SingleChannel` turns "this operation only makes sense on a monochrome
+/// image" into a bound the compiler checks, instead of a `CHANNEL_COUNT`
+/// assertion that fires at runtime. Every implementor satisfies
+/// `CHANNEL_COUNT == 1`; channel 0 is the only channel, so reading it is
+/// the whole pixel.
+///
+/// It is deliberately *wider* than "monochrome intensity": [`Label32`] and
+/// [`Indexed8`] are single-channel but are not intensities, and the
+/// primitive scalars are single-channel channel-role types. Operations that
+/// additionally need arithmetic or ordering state that separately (e.g.
+/// `P::Channel: PartialOrd`).
+///
+/// This trait is **sealed**: it cannot be implemented outside this crate.
+/// Membership is the specification, and a multi-channel type simply never
+/// appears on the list.
+///
+/// [`Label32`]: crate::pixel::Label32
+/// [`Indexed8`]: crate::pixel::Indexed8
+///
+/// # Examples
+///
+/// A single-channel pixel is accepted:
+///
+/// ```
+/// use fovea::analyze::threshold::hysteresis_threshold;
+/// use fovea::image::Image;
+/// use fovea::pixel::MonoF32;
+///
+/// let img = Image::fill(4, 4, MonoF32::new(0.5));
+/// let _mask = hysteresis_threshold(&img, 0.2f32, 0.8f32);
+/// ```
+///
+/// A multi-channel pixel is rejected at compile time, not at runtime:
+///
+/// ```compile_fail
+/// use fovea::analyze::threshold::hysteresis_threshold;
+/// use fovea::image::Image;
+/// use fovea::pixel::RgbF32;
+///
+/// let img = Image::fill(4, 4, RgbF32::new(0.5, 0.5, 0.5));
+/// // ERROR: `RgbF32: SingleChannel` is not satisfied.
+/// let _mask = hysteresis_threshold(&img, 0.2f32, 0.8f32);
+/// ```
+pub trait SingleChannel: HomogeneousPixel + single_channel_sealed::Sealed {}
+
+/// Implements the sealed [`SingleChannel`] marker for each listed type.
+///
+/// Const-generic families (`Mono<BITS>`) implement the marker by hand next
+/// to their other generic impls, since this macro takes concrete types only.
+macro_rules! impl_single_channel {
+    ($($t:ty),+ $(,)?) => {
+        $(
+            impl $crate::pixel::single_channel_sealed::Sealed for $t {}
+            impl $crate::pixel::SingleChannel for $t {}
+        )+
+    };
+}
+pub(crate) use impl_single_channel;
+
+// The primitive channel-role scalars that are also pixels. Every one of
+// them has `CHANNELS == &[_]` of length 1.
+impl_single_channel!(u8, u16, u32, u64, i8, i16, i32, i64);
 
 // ──────────────────────────────────────────────────────────────────────────
 // Label pixel role
@@ -428,10 +499,9 @@ pub(crate) use impl_origin_invariant_pixel;
 /// `LabelPixel` is a **safe** trait. A wrong impl produces numerically
 /// wrong labels or a wrong [`LabelOverflow`](crate::Error::LabelOverflow)
 /// boundary, never undefined behaviour. Compare [`PlainPixel`], which is
-/// `unsafe` because a wrong impl reinterprets bytes. Philosophy §11
-/// ("if it can be written without unsafe, it must be") therefore keeps
-/// the trait safe and pushes the correctness obligation to the
-/// implementor's documentation.
+/// `unsafe` because a wrong impl reinterprets bytes. If it can be written
+/// without `unsafe`, it must be — so the trait stays safe and pushes the
+/// correctness obligation to the implementor's documentation.
 ///
 /// # Deliberate non-extension
 ///
@@ -440,8 +510,8 @@ pub(crate) use impl_origin_invariant_pixel;
 /// [`FromLinear`]. Labels are not intensities — averaging two labels,
 /// gamma-converting them, inverting them, or thresholding them is
 /// meaningless. Excluding those traits is the type-level fence that
-/// makes such operations *fail to compile* on label images
-/// (Philosophy §1). Label-image capacity is exposed via
+/// makes such operations *fail to compile* on label images.
+/// Label-image capacity is exposed via
 /// [`MAX_LABEL`](Self::MAX_LABEL) instead — a different,
 /// label-specific concept from `BoundedChannel::MAX`.
 pub trait LabelPixel: Copy + Eq + Ord + core::hash::Hash + ZeroablePixel {
@@ -628,7 +698,7 @@ pub trait BoundedChannel: Copy {
 /// implement `WhiteChannel`. Floating-point pixels have no intrinsic
 /// "white" in this library — the `[0.0, 1.0]` convention is a
 /// downstream assumption that belongs at the call site, not in the type
-/// system (Philosophy §8 — "Surface information, don't decide").
+/// system — the information is surfaced, the decision is the caller's.
 ///
 /// # Rationale
 ///
