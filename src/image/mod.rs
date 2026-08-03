@@ -15,6 +15,16 @@
 //! | [`ContiguousImage`](crate::image::ContiguousImage) | one dense pixel slice | You need the fastest whole-buffer path. |
 //! | [`PlainImage`](crate::image::PlainImage) | byte access to `PlainPixel` storage | You write camera, file, FFI, or GPU boundaries. |
 //!
+//! ## Multi-image structures
+//!
+//! [`ImagePlanes`](crate::image::ImagePlanes) holds one plane per channel,
+//! [`ImageArray`](crate::image::ImageArray) is a compile-time-sized image, and
+//! [`Pyramid`](crate::image::Pyramid) chains levels at decreasing resolution
+//! (built via [`PyramidMethod`](crate::transform::PyramidMethod) strategies
+//! in [`crate::transform`]). Levels opt into scale metadata through the
+//! [`Decimated`](crate::image::Decimated) /
+//! [`ScaleLevel`](crate::image::ScaleLevel) capability traits.
+//!
 //! ## Views do not allocate
 //!
 //! [`SubView::roi`](crate::image::SubView::roi) returns a borrowed region of interest. [`SubView::tiles`](crate::image::SubView::tiles)
@@ -28,6 +38,7 @@
 pub mod border;
 mod image_view;
 mod neighborhood;
+mod pyramid;
 mod separable;
 pub(crate) mod tiles;
 mod zip;
@@ -41,6 +52,7 @@ pub use neighborhood::{
     Neighborhood, PositionsIter,
 };
 pub use planar::ImagePlanes;
+pub use pyramid::{Decimated, GaussianPyramid, Pyramid, PyramidLevel, ScaleLevel, ScaledImage};
 pub use separable::{
     GaussianKernel1D, MAX_RADIUS, SeparableKernel, gaussian_kernel_1d, gaussian_kernel_size,
 };

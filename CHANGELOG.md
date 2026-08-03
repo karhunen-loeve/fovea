@@ -7,7 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.3.0] — 2026-07-27
+### Added
+
+- Image pyramids. `image::Pyramid<L>` is a multi-resolution container
+  generic over its level type, never empty, with `depth`, `level`/`get`,
+  `finest`/`coarsest`, `iter`, and a `from_levels` constructor for custom
+  builders. `image::PyramidLevel` is the base level trait; `Image<P>`
+  implements it directly, so a Gaussian pyramid is `Pyramid<Image<P>>`
+  (aliased `image::GaussianPyramid<P>`) with no wrapper cost.
+- `transform::pyr_down` / `transform::pyr_up`: the standard
+  resolution-halving and -doubling primitives. Both use the pinned binomial
+  5-tap kernel `[1, 4, 6, 4, 1] / 16` per axis (effective σ exactly 1.0)
+  with reflect-without-edge-duplication borders, matching OpenCV's
+  `pyrDown`/`pyrUp`. `pyr_down` output size is ceiling division
+  (`(n + 1) / 2`, even-sample decimation); `pyr_up` takes an **explicit
+  target size** so odd-sized parents reconstruct exactly instead of
+  guessing between `2·n` and `2·n − 1`. Both require `LinearSpace`
+  (linearize sRGB first; Bayer CFA data is rejected at compile time).
+- `transform::PyramidMethod<P>`: pyramid construction strategy trait,
+  consumed at build time and not stored in the result. `transform::Gaussian`
+  is the first strategy: repeated `pyr_down`, level 0 a copy of the input.
+  `max_depth` is an upper bound — builds clamp at the minimum usable level
+  size (1×1) instead of erroring, and always contain at least one level.
+- Scale capability traits for pyramid levels: `image::Decimated` exposes
+  the full affine level→base mapping (`pixel_distance`, `origin_offset`,
+  `to_base`) in the pixel-center convention, so keypoints found on a coarse
+  level lift exactly into base-image coordinates instead of hand-rolled
+  `x · 2^level` math; `image::ScaleLevel` exposes the absolute Gaussian σ
+  in base-image pixels. A plain `Pyramid<Image<P>>` implements neither and
+  pays nothing; the new `image::ScaledImage<P>` wrapper carries the
+  metadata for callers who need it.
 
 ### Added
 

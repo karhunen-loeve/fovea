@@ -70,6 +70,16 @@
 //! [`image_max`](crate::transform::image_max)) are provided as
 //! discoverability shortcuts.
 //!
+//! ## Pyramids
+//!
+//! [`pyr_down`](crate::transform::pyr_down) blurs with the pinned binomial
+//! 5×5 kernel and decimates by 2;
+//! [`pyr_up`](crate::transform::pyr_up) zero-inserts and interpolates back
+//! to an explicit target size. The
+//! [`Gaussian`](crate::transform::Gaussian) strategy composes `pyr_down`
+//! into a [`Pyramid`](crate::image::Pyramid) via the
+//! [`PyramidMethod`](crate::transform::PyramidMethod) trait.
+//!
 //! ## Neighbourhood transforms
 //!
 //! Each output pixel is computed from a window of input pixels centred at
@@ -101,6 +111,7 @@ mod fold;
 mod geometry;
 mod map_neighborhood;
 mod morphology;
+mod pyramid;
 mod resize;
 mod template_match;
 
@@ -119,13 +130,13 @@ pub use convert::{
 };
 pub use convolve::{convolve, convolve_into, correlate, correlate_into};
 pub use convolve_separable::{convolve_separable, convolve_separable_into};
+pub(crate) use filters::non_maximum_suppression_from_gradients;
 pub use filters::{
     DEFAULT_TRUNCATE, box_blur_3x3, box_blur_5x5, emboss, gaussian_blur, gaussian_blur_3x3,
     gaussian_blur_5x5, gaussian_blur_into, gaussian_blur_with, gaussian_blur_with_into,
     gradient_direction, gradient_magnitude, laplacian, laplacian_8, non_maximum_suppression,
     prewitt_x, prewitt_y, scharr_x, scharr_y, sharpen, sobel_x, sobel_y,
 };
-pub(crate) use filters::non_maximum_suppression_from_gradients;
 pub use fold::{
     ClosureFold, FoldItem, FoldOp, fold_neighborhood, fold_neighborhood_fn,
     fold_neighborhood_fn_into, fold_neighborhood_into,
@@ -142,5 +153,6 @@ pub use morphology::{
     black_hat, closing, closing_into, dilate, dilate_into, erode, erode_into, median_filter,
     morphological_gradient, opening, opening_into, top_hat,
 };
+pub use pyramid::{Gaussian, PyramidMethod, pyr_down, pyr_up};
 pub use resize::{Bilinear, NearestNeighbor, ResizeMethod, resize, resize_into};
 pub use template_match::{MatchMethod, NCC, SAD, SSD, match_template, match_template_into};
