@@ -11,8 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Image pyramids. `image::Pyramid<L>` is a multi-resolution container
   generic over its level type, never empty, with `depth`, `level`/`get`,
-  `finest`/`coarsest`, `iter`, and a `from_levels` constructor for custom
-  builders. `image::PyramidLevel` is the base level trait; `Image<P>`
+  `finest`/`coarsest`, `iter`, and a `try_from_levels` constructor for
+  custom builders. The constructor **validates** its input instead of
+  trusting it: an empty list is `Error::EmptyPyramid`, and levels that
+  grow along either axis (they must be ordered finest → coarsest;
+  equal sizes are allowed) are `Error::PyramidLevelOrder` naming the
+  first offending index — levels are never silently re-sorted.
+  `image::PyramidLevel` is the base level trait; `Image<P>`
   implements it directly, so a Gaussian pyramid is `Pyramid<Image<P>>`
   (aliased `image::GaussianPyramid<P>`) with no wrapper cost.
 - `transform::pyr_down` / `transform::pyr_up`: the standard
@@ -40,7 +45,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `x · 2^level` math; `image::ScaleLevel` exposes the absolute Gaussian σ
   in base-image pixels. A plain `Pyramid<Image<P>>` implements neither and
   pays nothing; the new `image::ScaledImage<P>` wrapper carries the
-  metadata for callers who need it.
+  metadata for callers who need it. Its constructor is **total**: it takes
+  the invariant-carrying `PixelDistance` and `Sigma` parameter types (see
+  below), so an invalid value is caught where it is constructed, not where
+  the level is wrapped. `Decimated::pixel_distance()` and
+  `ScaleLevel::sigma()` return the same types, so metadata flows through
+  chains without re-validation.
+- `Sigma` and `PixelDistance`: **invariant-carrying parameter types**
+  (finite and strictly positive), the `std::num::NonZeroUsize` pattern
+  applied to algorithm parameters. Literals use the `const fn new`
+  (in a `const` context an invalid literal **fails to compile**; at
+  runtime it panics deterministically on first execution); values
+  computed from data use `try_new`, which returns the new
+  `Error::InvalidParameter` so a NaN from an estimator or a formula chain
+  is a value, not a crash. Functions taking these types are total in
+  them: `gaussian_blur` / `gaussian_blur_with` (+ `_into` variants),
+  `gaussian_kernel_1d` / `gaussian_kernel_size`, and `canny` now take
+  `Sigma` instead of a raw `f32` and no longer document a `sigma <= 0`
+  panic. (`truncate` stays a plain `f32` — a structural kernel-shape
+  constant — and the `MAX_RADIUS` capacity bound remains a documented
+  panic, testable up front via `gaussian_kernel_size`.)
 
 ### Added
 
@@ -97,7 +121,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   quantised gradient direction (sectors 0°/45°/90°/135°). Ties are kept
   (inclusive `>=`, OpenCV-compatible); border pixels whose along-gradient
   neighbour is out of bounds are suppressed. Generic over single-channel float
-  pixels; panics on a magnitude/direction size mismatch.
+  pixels; returns `Err(Error::SizeMismatch)` on a magnitude/direction size
+  mismatch, like the other two-image operations.
 - `transform::Direction` (and the sealed `transform::DirectionChannel` trait):
   a `CombinePixels` strategy computing channel-wise `atan2(b, a)` in radians on
   `(-π, π]`, the directional companion to the existing `Magnitude` strategy.
@@ -138,7 +163,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (radius `= round(truncate · sigma)`, default `truncate = 4.0`). The kernel
   is generated allocation-free into a bounded stack buffer; a `sigma` whose
   radius exceeds `MAX_RADIUS` (64, i.e. `sigma > MAX_RADIUS / truncate`)
-  panics, as does `sigma <= 0`. The kernel generator is exposed at the image
+  panics. `sigma` is the validated `Sigma` parameter type, so a
+  non-positive or non-finite value is unrepresentable (see the `Sigma` /
+  `PixelDistance` entry). The kernel generator is exposed at the image
   layer as `gaussian_kernel_1d`, `gaussian_kernel_size`, `GaussianKernel1D`,
   and the `MAX_RADIUS` bound. The fixed `gaussian_blur_3x3` /
   `gaussian_blur_5x5` paths remain as fast const-sized convenience
@@ -154,6 +181,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** the error-handling convention was sharpened: a `panic!` is
+  reserved for contracts that are locally decidable at the call site
+  (indexed access with a `get` alternative, caller-allocated `_into`
+  output buffers, structural constants, internal invariant backstops);
+  everything whose validity depends on data — validating constructors and
+  relations between separately obtained runtime values — returns
+  `Result<_, Error>`. Three previously panicking sites move accordingly:
+  - `match_template` / `match_template_into` report a zero-width or
+    zero-height template as the new `Error::EmptyTemplate` instead of
+    panicking — the template is data (typically a crop or a file), and its
+    other data failure (`TemplateTooLarge`) was already an error.
+  - `ImagePlanes::replace_plane` returns `Result<Image<_>, Error>`:
+    a size-mismatched replacement plane is `Error::SizeMismatch` (the
+    plane is data); an out-of-range plane *index* still panics, the same
+    data-vs-constant split as `i32::from_str_radix` (`Err` for the
+    string, panic for the radix).
+  - `otsu_binary_mask` is bound on `pixel::SingleChannel` instead of
+    asserting `CHANNEL_COUNT == 1` at runtime — a multi-channel pixel
+    type is now a compile error, matching `hysteresis_threshold`.
+- **Breaking:** `gaussian_blur` / `gaussian_blur_with` (+ `_into`
+  variants), `gaussian_kernel_1d` / `gaussian_kernel_size`, and `canny`
+  take the new `Sigma` parameter type instead of a raw `f32` σ (see
+  *Added*). Wrap literals in `Sigma::new(…)`; validate computed values
+  with `Sigma::try_new(…)?` where they are produced.
 - **Breaking:** `ComponentStats::centroid` returns `CoordinateF64` instead
   of `(f64, f64)`. Destructuring call sites (`let (cx, cy) =
   stats.centroid();`) no longer compile; use `let c = stats.centroid();`

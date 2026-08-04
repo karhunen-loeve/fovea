@@ -80,5 +80,5 @@ pub mod analyze;
 pub mod guide;
 
 // ── Core vocabulary types (module-agnostic, kept at root) ────────────────────
-pub use common::{Coordinate, CoordinateF64, Rectangle, Size, Stride};
+pub use common::{Coordinate, CoordinateF64, PixelDistance, Rectangle, Sigma, Size, Stride};
 pub use error::Error;

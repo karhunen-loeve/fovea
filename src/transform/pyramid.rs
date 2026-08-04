@@ -170,7 +170,7 @@ where
 /// [`ResizeMethod`](crate::transform::ResizeMethod) and
 /// [`ConvertPixel`](crate::transform::ConvertPixel). Implement this trait
 /// for custom decomposition schemes; assemble the result with
-/// [`Pyramid::from_levels`].
+/// [`Pyramid::try_from_levels`](crate::image::Pyramid::try_from_levels).
 ///
 /// # Example
 ///
@@ -253,7 +253,8 @@ where
             let next = pyr_down(prev);
             levels.push(next);
         }
-        Pyramid::from_levels(levels)
+        Pyramid::try_from_levels(levels)
+            .expect("Gaussian::build produces non-empty, strictly shrinking levels")
     }
 }
 
@@ -262,9 +263,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::CoordinateF64;
     use crate::image::{Decimated, PyramidLevel, ScaledImage};
     use crate::pixel::{Mono8, MonoF32};
+    use crate::{CoordinateF64, PixelDistance, Sigma};
 
     // ── pyr_down: size contract ─────────────────────────────────────────
 
@@ -545,7 +546,12 @@ mod tests {
 
         let mut level: Image<MonoF32> = pyr_down(&src);
         level = pyr_down(&level);
-        let scaled = ScaledImage::new(level, 4.0, CoordinateF64::new(0.0, 0.0), 1.0);
+        let scaled = ScaledImage::new(
+            level,
+            PixelDistance::new(4.0),
+            CoordinateF64::new(0.0, 0.0),
+            Sigma::new(1.0),
+        );
 
         // Find the argmax on the coarse level.
         let img = scaled.as_image();

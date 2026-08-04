@@ -15,8 +15,9 @@
 //! [`Decimated`] / [`ScaleLevel`] capability traits, implemented by the thin
 //! [`ScaledImage<P>`] wrapper.
 
+use crate::error::Error;
 use crate::image::{Image, ImageView};
-use crate::{CoordinateF64, Size};
+use crate::{CoordinateF64, PixelDistance, Sigma, Size};
 
 // ─── PyramidLevel ────────────────────────────────────────────────────────────
 
@@ -109,10 +110,21 @@ impl<L: PyramidLevel> Pyramid<L> {
     /// [`PyramidMethod`](crate::transform::PyramidMethod) implementations
     /// use to assemble their result.
     ///
-    /// # Panics
+    /// The levels are validated, never reordered: they must already be
+    /// sorted finest to coarsest, meaning each level's width and height are
+    /// less than or equal to its predecessor's. Equal sizes are allowed —
+    /// same-size levels occur in scale stacks and sub-band decompositions —
+    /// so an automatic sort would be ambiguous; a wrong order is reported
+    /// as an error instead. What the ordering *means* (which decomposition
+    /// produced the levels) remains the builder's responsibility.
     ///
-    /// Panics if `levels` is empty — a pyramid always contains at least one
-    /// level (programmer bug).
+    /// # Errors
+    ///
+    /// - [`Error::EmptyPyramid`] if `levels` is empty — a pyramid always
+    ///   contains at least one level.
+    /// - [`Error::PyramidLevelOrder`] if a level is larger than its
+    ///   predecessor along either axis; the error names the first
+    ///   offending index and both sizes.
     ///
     /// # Example
     ///
@@ -121,15 +133,26 @@ impl<L: PyramidLevel> Pyramid<L> {
     /// use fovea::pixel::Mono8;
     ///
     /// let levels = vec![Image::<Mono8>::zero(8, 8), Image::<Mono8>::zero(4, 4)];
-    /// let pyramid = Pyramid::from_levels(levels);
+    /// let pyramid = Pyramid::try_from_levels(levels)?;
     /// assert_eq!(pyramid.depth(), 2);
+    /// # Ok::<(), fovea::Error>(())
     /// ```
-    pub fn from_levels(levels: Vec<L>) -> Self {
-        assert!(
-            !levels.is_empty(),
-            "Pyramid::from_levels: a pyramid must contain at least one level"
-        );
-        Self { levels }
+    pub fn try_from_levels(levels: Vec<L>) -> Result<Self, Error> {
+        if levels.is_empty() {
+            return Err(Error::EmptyPyramid);
+        }
+        for (index, pair) in levels.windows(2).enumerate() {
+            let previous = pair[0].as_image().size();
+            let current = pair[1].as_image().size();
+            if current.width > previous.width || current.height > previous.height {
+                return Err(Error::PyramidLevelOrder {
+                    index: index + 1,
+                    previous,
+                    current,
+                });
+            }
+        }
+        Ok(Self { levels })
     }
 
     /// Returns the number of levels in the pyramid.
@@ -222,7 +245,7 @@ pub type GaussianPyramid<P> = Pyramid<Image<P>>;
 /// # Example
 ///
 /// ```
-/// use fovea::CoordinateF64;
+/// use fovea::{CoordinateF64, PixelDistance, Sigma};
 /// use fovea::image::{Decimated, Image, ScaledImage};
 /// use fovea::pixel::MonoF32;
 ///
@@ -230,9 +253,9 @@ pub type GaussianPyramid<P> = Pyramid<Image<P>>;
 /// // adjacent samples are 2 base pixels apart, grid origin unshifted.
 /// let level = ScaledImage::new(
 ///     Image::<MonoF32>::zero(4, 4),
-///     2.0,
+///     PixelDistance::new(2.0),
 ///     CoordinateF64::new(0.0, 0.0),
-///     1.0,
+///     Sigma::new(1.0),
 /// );
 ///
 /// let base = level.to_base(CoordinateF64::new(1.5, 3.0));
@@ -242,7 +265,11 @@ pub trait Decimated: PyramidLevel {
     /// Distance between two adjacent samples of this level, measured in
     /// base-image pixels. `2.0` for octave 1 of a 2× pyramid, `0.5` for an
     /// upsampled octave −1.
-    fn pixel_distance(&self) -> f64;
+    ///
+    /// Returned as the invariant-carrying [`PixelDistance`], so the value
+    /// can flow into further constructors without re-validation; use
+    /// [`PixelDistance::get`] for arithmetic.
+    fn pixel_distance(&self) -> PixelDistance;
 
     /// Position of this level's pixel-(0,0) center in base-image
     /// coordinates. `(0.0, 0.0)` for even-sample decimation (the
@@ -257,7 +284,7 @@ pub trait Decimated: PyramidLevel {
     /// This is the mapping a detector uses to report keypoints found on
     /// this level in base-image coordinates.
     fn to_base(&self, local: CoordinateF64) -> CoordinateF64 {
-        let d = self.pixel_distance();
+        let d = self.pixel_distance().get();
         let o = self.origin_offset();
         CoordinateF64::new(o.x + d * local.x, o.y + d * local.y)
     }
@@ -274,21 +301,26 @@ pub trait Decimated: PyramidLevel {
 /// # Example
 ///
 /// ```
-/// use fovea::CoordinateF64;
+/// use fovea::{CoordinateF64, PixelDistance, Sigma};
 /// use fovea::image::{Image, ScaledImage, ScaleLevel};
 /// use fovea::pixel::MonoF32;
 ///
 /// let level = ScaledImage::new(
 ///     Image::<MonoF32>::zero(8, 8),
-///     1.0,
+///     PixelDistance::new(1.0),
 ///     CoordinateF64::new(0.0, 0.0),
-///     1.6,
+///     Sigma::new(1.6),
 /// );
-/// assert_eq!(level.sigma(), 1.6);
+/// assert_eq!(level.sigma().get(), 1.6);
 /// ```
 pub trait ScaleLevel: PyramidLevel {
     /// Absolute Gaussian σ, expressed in *base-image* pixels.
-    fn sigma(&self) -> f32;
+    ///
+    /// Returned as the invariant-carrying [`Sigma`], so the value can flow
+    /// into further constructors (or a
+    /// [`gaussian_blur`](crate::transform::gaussian_blur)) without
+    /// re-validation; use [`Sigma::get`] for arithmetic.
+    fn sigma(&self) -> Sigma;
 }
 
 // ─── ScaledImage ────────────────────────────────────────────────────────────
@@ -308,7 +340,7 @@ pub trait ScaleLevel: PyramidLevel {
 /// # Example
 ///
 /// ```
-/// use fovea::CoordinateF64;
+/// use fovea::{CoordinateF64, PixelDistance, Sigma};
 /// use fovea::image::{Decimated, Image, ImageView, ScaledImage, ScaleLevel};
 /// use fovea::pixel::MonoF32;
 /// use fovea::transform::pyr_down;
@@ -317,11 +349,16 @@ pub trait ScaleLevel: PyramidLevel {
 /// let coarse: Image<MonoF32> = pyr_down(&base);
 ///
 /// // pyr_down keeps even samples: distance 2, origin unshifted, σ = 1.
-/// let level = ScaledImage::new(coarse, 2.0, CoordinateF64::new(0.0, 0.0), 1.0);
+/// let level = ScaledImage::new(
+///     coarse,
+///     PixelDistance::new(2.0),
+///     CoordinateF64::new(0.0, 0.0),
+///     Sigma::new(1.0),
+/// );
 ///
 /// assert_eq!(level.size().width, 8);
-/// assert_eq!(level.pixel_distance(), 2.0);
-/// assert_eq!(level.sigma(), 1.0);
+/// assert_eq!(level.pixel_distance().get(), 2.0);
+/// assert_eq!(level.sigma().get(), 1.0);
 /// assert_eq!(
 ///     level.to_base(CoordinateF64::new(3.0, 4.0)),
 ///     CoordinateF64::new(6.0, 8.0),
@@ -330,9 +367,9 @@ pub trait ScaleLevel: PyramidLevel {
 #[derive(Clone)]
 pub struct ScaledImage<P: Copy> {
     image: Image<P>,
-    pixel_distance: f64,
+    pixel_distance: PixelDistance,
     origin_offset: CoordinateF64,
-    sigma: f32,
+    sigma: Sigma,
 }
 
 impl<P: Copy> ScaledImage<P> {
@@ -345,24 +382,16 @@ impl<P: Copy> ScaledImage<P> {
     /// - `sigma` — absolute Gaussian σ in base-image pixels (see
     ///   [`ScaleLevel::sigma`]).
     ///
-    /// # Panics
-    ///
-    /// Panics if `pixel_distance` is not finite and positive, or if `sigma`
-    /// is not finite and positive (programmer bug).
+    /// This constructor is **total**: the parameter invariants live in
+    /// [`PixelDistance`] and [`Sigma`] and were checked when those values
+    /// were constructed — literals via their const `new`, computed values
+    /// via their `try_new`. Nothing can fail here.
     pub fn new(
         image: Image<P>,
-        pixel_distance: f64,
+        pixel_distance: PixelDistance,
         origin_offset: CoordinateF64,
-        sigma: f32,
+        sigma: Sigma,
     ) -> Self {
-        assert!(
-            pixel_distance.is_finite() && pixel_distance > 0.0,
-            "ScaledImage::new: pixel_distance must be finite and positive, got {pixel_distance}"
-        );
-        assert!(
-            sigma.is_finite() && sigma > 0.0,
-            "ScaledImage::new: sigma must be finite and positive, got {sigma}"
-        );
         Self {
             image,
             pixel_distance,
@@ -398,7 +427,7 @@ impl<P: Copy> PyramidLevel for ScaledImage<P> {
 
 impl<P: Copy> Decimated for ScaledImage<P> {
     #[inline]
-    fn pixel_distance(&self) -> f64 {
+    fn pixel_distance(&self) -> PixelDistance {
         self.pixel_distance
     }
 
@@ -410,7 +439,7 @@ impl<P: Copy> Decimated for ScaledImage<P> {
 
 impl<P: Copy> ScaleLevel for ScaledImage<P> {
     #[inline]
-    fn sigma(&self) -> f32 {
+    fn sigma(&self) -> Sigma {
         self.sigma
     }
 }
@@ -423,10 +452,11 @@ mod tests {
     use crate::pixel::{Mono8, MonoF32};
 
     fn two_level_pyramid() -> Pyramid<Image<Mono8>> {
-        Pyramid::from_levels(vec![
+        Pyramid::try_from_levels(vec![
             Image::fill(8, 6, Mono8::new(10)),
             Image::fill(4, 3, Mono8::new(20)),
         ])
+        .unwrap()
     }
 
     // ── PyramidLevel ────────────────────────────────────────────────────
@@ -448,9 +478,55 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "at least one level")]
-    fn from_levels_empty_panics() {
-        let _ = Pyramid::<Image<Mono8>>::from_levels(vec![]);
+    fn try_from_levels_empty_is_error() {
+        let result = Pyramid::<Image<Mono8>>::try_from_levels(vec![]);
+        assert_eq!(result.err().unwrap(), Error::EmptyPyramid);
+    }
+
+    #[test]
+    fn try_from_levels_rejects_growing_levels() {
+        // Coarsest-first is the realistic builder bug: reported, not sorted.
+        let result = Pyramid::try_from_levels(vec![
+            Image::fill(4, 3, Mono8::new(0)),
+            Image::fill(8, 6, Mono8::new(0)),
+        ]);
+        assert_eq!(
+            result.err().unwrap(),
+            Error::PyramidLevelOrder {
+                index: 1,
+                previous: Size::new(4, 3),
+                current: Size::new(8, 6),
+            }
+        );
+    }
+
+    #[test]
+    fn try_from_levels_rejects_single_growing_axis() {
+        // Width shrinks but height grows — still not a coarser level.
+        let result = Pyramid::try_from_levels(vec![
+            Image::fill(8, 6, Mono8::new(0)),
+            Image::fill(4, 7, Mono8::new(0)),
+        ]);
+        assert_eq!(
+            result.err().unwrap(),
+            Error::PyramidLevelOrder {
+                index: 1,
+                previous: Size::new(8, 6),
+                current: Size::new(4, 7),
+            }
+        );
+    }
+
+    #[test]
+    fn try_from_levels_allows_equal_sizes() {
+        // Same-size levels are legitimate (scale stacks, sub-bands).
+        let p = Pyramid::try_from_levels(vec![
+            Image::fill(8, 8, Mono8::new(1)),
+            Image::fill(8, 8, Mono8::new(2)),
+            Image::fill(4, 4, Mono8::new(3)),
+        ])
+        .unwrap();
+        assert_eq!(p.depth(), 3);
     }
 
     #[test]
@@ -484,7 +560,7 @@ mod tests {
 
     #[test]
     fn finest_equals_coarsest_for_single_level() {
-        let p = Pyramid::from_levels(vec![Image::fill(3, 3, Mono8::new(1))]);
+        let p = Pyramid::try_from_levels(vec![Image::fill(3, 3, Mono8::new(1))]).unwrap();
         assert_eq!(p.finest().size(), p.coarsest().size());
         assert_eq!(p.depth(), 1);
     }
@@ -516,15 +592,15 @@ mod tests {
     fn scaled_image_accessors() {
         let level = ScaledImage::new(
             Image::fill(4, 4, MonoF32::new(0.5)),
-            2.0,
+            PixelDistance::new(2.0),
             CoordinateF64::new(0.0, 0.0),
-            1.0,
+            Sigma::new(1.0),
         );
         assert_eq!(level.size(), Size::new(4, 4));
         assert_eq!(level.image().pixel_at(1, 1), MonoF32::new(0.5));
-        assert_eq!(level.pixel_distance(), 2.0);
+        assert_eq!(level.pixel_distance(), PixelDistance::new(2.0));
         assert_eq!(level.origin_offset(), CoordinateF64::new(0.0, 0.0));
-        assert_eq!(level.sigma(), 1.0);
+        assert_eq!(level.sigma(), Sigma::new(1.0));
         let img = level.into_image();
         assert_eq!(img.size(), Size::new(4, 4));
     }
@@ -534,9 +610,9 @@ mod tests {
         // pyr_down convention: coarse pixel k sits at base pixel 2k.
         let level = ScaledImage::new(
             Image::<MonoF32>::zero(4, 4),
-            2.0,
+            PixelDistance::new(2.0),
             CoordinateF64::new(0.0, 0.0),
-            1.0,
+            Sigma::new(1.0),
         );
         assert_eq!(
             level.to_base(CoordinateF64::new(0.0, 0.0)),
@@ -554,9 +630,9 @@ mod tests {
         // fine ones — the offset is the whole point of the affine map.
         let level = ScaledImage::new(
             Image::<MonoF32>::zero(4, 4),
-            2.0,
+            PixelDistance::new(2.0),
             CoordinateF64::new(0.5, 0.5),
-            1.0,
+            Sigma::new(1.0),
         );
         assert_eq!(
             level.to_base(CoordinateF64::new(0.0, 0.0)),
@@ -573,9 +649,9 @@ mod tests {
         // An upsampled "octave −1" is an ordinary level with distance 0.5.
         let level = ScaledImage::new(
             Image::<MonoF32>::zero(16, 16),
-            0.5,
+            PixelDistance::new(0.5),
             CoordinateF64::new(0.0, 0.0),
-            0.8,
+            Sigma::new(0.8),
         );
         assert_eq!(
             level.to_base(CoordinateF64::new(6.0, 10.0)),
@@ -589,42 +665,20 @@ mod tests {
         let levels = vec![
             ScaledImage::new(
                 Image::<MonoF32>::zero(8, 8),
-                1.0,
+                PixelDistance::new(1.0),
                 CoordinateF64::new(0.0, 0.0),
-                0.5,
+                Sigma::new(0.5),
             ),
             ScaledImage::new(
                 Image::<MonoF32>::zero(4, 4),
-                2.0,
+                PixelDistance::new(2.0),
                 CoordinateF64::new(0.0, 0.0),
-                1.0,
+                Sigma::new(1.0),
             ),
         ];
-        let p = Pyramid::from_levels(levels);
+        let p = Pyramid::try_from_levels(levels).unwrap();
         assert_eq!(p.depth(), 2);
-        assert_eq!(p.level(1).pixel_distance(), 2.0);
-        assert_eq!(p.level(1).sigma(), 1.0);
-    }
-
-    #[test]
-    #[should_panic(expected = "pixel_distance")]
-    fn scaled_image_rejects_zero_distance() {
-        let _ = ScaledImage::new(
-            Image::<MonoF32>::zero(4, 4),
-            0.0,
-            CoordinateF64::new(0.0, 0.0),
-            1.0,
-        );
-    }
-
-    #[test]
-    #[should_panic(expected = "sigma")]
-    fn scaled_image_rejects_negative_sigma() {
-        let _ = ScaledImage::new(
-            Image::<MonoF32>::zero(4, 4),
-            1.0,
-            CoordinateF64::new(0.0, 0.0),
-            -1.0,
-        );
+        assert_eq!(p.level(1).pixel_distance(), PixelDistance::new(2.0));
+        assert_eq!(p.level(1).sigma(), Sigma::new(1.0));
     }
 }

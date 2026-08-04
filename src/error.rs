@@ -84,6 +84,46 @@ pub enum Error {
         target: Size,
     },
 
+    /// A pyramid was constructed from an empty level list.
+    ///
+    /// Returned by
+    /// [`Pyramid::try_from_levels`](crate::image::Pyramid::try_from_levels) —
+    /// a pyramid always contains at least one level.
+    EmptyPyramid,
+
+    /// Pyramid levels are not ordered finest to coarsest.
+    ///
+    /// Returned by
+    /// [`Pyramid::try_from_levels`](crate::image::Pyramid::try_from_levels)
+    /// when a level is larger than its predecessor along either axis.
+    /// Levels must be non-increasing in both width and height (equal sizes
+    /// are allowed — same-size levels occur in scale stacks and sub-band
+    /// decompositions). Levels are never reordered automatically: a wrong
+    /// order is reported, not silently normalized.
+    PyramidLevelOrder {
+        /// Index of the first level that violates the ordering.
+        index: usize,
+        /// The dimensions of the preceding level.
+        previous: Size,
+        /// The dimensions of the offending level.
+        current: Size,
+    },
+
+    /// A computed value violates a parameter type's invariant.
+    ///
+    /// Returned by the `try_new` constructors of invariant-carrying
+    /// parameter types ([`Sigma`](crate::Sigma),
+    /// [`PixelDistance`](crate::PixelDistance)) when the value is zero,
+    /// negative, NaN, or infinite — conditions that arise when the
+    /// parameter is derived from a computation over image data. (Literal
+    /// parameters use the types' const `new` constructors instead, which
+    /// fail at compile time in const contexts.)
+    ///
+    /// The contained string describes the specific reason. Treat it as
+    /// human-readable diagnostic text, not as a stable machine-readable
+    /// tag.
+    InvalidParameter(String),
+
     /// The template is larger than the image in one or both dimensions.
     ///
     /// Returned by [`match_template`](crate::transform::match_template) when
@@ -92,6 +132,17 @@ pub enum Error {
         /// The dimensions of the source image.
         image_size: Size,
         /// The dimensions of the template that does not fit.
+        template_size: Size,
+    },
+
+    /// The template has zero width or height.
+    ///
+    /// Returned by [`match_template`](crate::transform::match_template) and
+    /// [`match_template_into`](crate::transform::match_template_into) —
+    /// an empty template (for example a degenerate user crop) has no
+    /// defined score.
+    EmptyTemplate {
+        /// The dimensions of the degenerate template.
         template_size: Size,
     },
 
@@ -193,6 +244,34 @@ impl fmt::Display for Error {
                     f,
                     "invalid pyr_up target: {}x{} is not a size whose pyr_down is {}x{}",
                     target.width, target.height, source.width, source.height
+                )
+            }
+            Error::EmptyPyramid => {
+                write!(
+                    f,
+                    "empty pyramid: a pyramid must contain at least one level"
+                )
+            }
+            Error::PyramidLevelOrder {
+                index,
+                previous,
+                current,
+            } => {
+                write!(
+                    f,
+                    "pyramid level order: level {} is {}x{}, larger than its \
+                     predecessor {}x{} (levels must be finest to coarsest)",
+                    index, current.width, current.height, previous.width, previous.height
+                )
+            }
+            Error::InvalidParameter(reason) => {
+                write!(f, "invalid parameter: {}", reason)
+            }
+            Error::EmptyTemplate { template_size } => {
+                write!(
+                    f,
+                    "empty template: {}x{} has zero width or height",
+                    template_size.width, template_size.height
                 )
             }
             Error::TemplateTooLarge {
@@ -334,6 +413,48 @@ mod tests {
         };
         assert_eq!(a, b);
         assert_ne!(a, c);
+    }
+
+    #[test]
+    fn display_empty_pyramid() {
+        assert_eq!(
+            Error::EmptyPyramid.to_string(),
+            "empty pyramid: a pyramid must contain at least one level"
+        );
+    }
+
+    #[test]
+    fn display_pyramid_level_order() {
+        let err = Error::PyramidLevelOrder {
+            index: 2,
+            previous: Size::new(4, 3),
+            current: Size::new(8, 6),
+        };
+        assert_eq!(
+            err.to_string(),
+            "pyramid level order: level 2 is 8x6, larger than its \
+             predecessor 4x3 (levels must be finest to coarsest)"
+        );
+    }
+
+    #[test]
+    fn display_invalid_parameter() {
+        let err = Error::InvalidParameter("sigma must be positive, got -1".to_string());
+        assert_eq!(
+            err.to_string(),
+            "invalid parameter: sigma must be positive, got -1"
+        );
+    }
+
+    #[test]
+    fn display_empty_template() {
+        let err = Error::EmptyTemplate {
+            template_size: Size::new(0, 5),
+        };
+        assert_eq!(
+            err.to_string(),
+            "empty template: 0x5 has zero width or height"
+        );
     }
 
     #[test]

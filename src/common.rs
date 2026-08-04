@@ -1,3 +1,5 @@
+use crate::error::Error;
+
 /// The `Size` struct represents the dimensions of an image.
 ///
 /// # Example
@@ -256,9 +258,200 @@ impl From<(usize, usize)> for Stride {
     }
 }
 
+/// A validated Gaussian σ: finite and strictly positive.
+///
+/// `Sigma` is an invariant-carrying parameter type: the validation
+/// happens once, where the value is born, and every function taking a
+/// `Sigma` is total in it — the same idea as `std::num::NonZeroUsize`.
+///
+/// - Literals use [`Sigma::new`], a `const fn`: in a `const` context an
+///   invalid literal fails to **compile**; at runtime it panics on first
+///   execution (a deterministic programmer error, not a data condition).
+/// - Values computed from data (an estimator, a scale-space formula, an
+///   image statistic) use [`Sigma::try_new`] and handle the error where
+///   the computation produced the bad value.
+///
+/// # Example
+///
+/// ```
+/// use fovea::Sigma;
+///
+/// const BLUR: Sigma = Sigma::new(1.4); // checked at compile time
+///
+/// let estimated = 0.8_f32 * 2.0;
+/// let sigma = Sigma::try_new(estimated)?; // checked where it is computed
+/// assert_eq!(sigma.get(), 1.6);
+/// # Ok::<(), fovea::Error>(())
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
+pub struct Sigma(f32);
+
+impl Sigma {
+    /// Creates a `Sigma` from a literal or otherwise proven-valid value.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `value` is not finite and strictly positive. As a
+    /// `const fn`, this is a **compile error** when evaluated in a
+    /// `const` context. For values computed from data, use
+    /// [`Self::try_new`].
+    #[must_use]
+    pub const fn new(value: f32) -> Self {
+        assert!(
+            value.is_finite() && value > 0.0,
+            "Sigma::new: sigma must be finite and positive"
+        );
+        Self(value)
+    }
+
+    /// Creates a `Sigma` from a computed value, validating it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidParameter`] if `value` is zero, negative,
+    /// NaN, or infinite.
+    pub fn try_new(value: f32) -> Result<Self, Error> {
+        if value.is_finite() && value > 0.0 {
+            Ok(Self(value))
+        } else {
+            Err(Error::InvalidParameter(format!(
+                "sigma must be finite and positive, got {value}"
+            )))
+        }
+    }
+
+    /// Returns the raw value.
+    #[must_use]
+    pub const fn get(self) -> f32 {
+        self.0
+    }
+}
+
+/// A validated sampling distance in base-image pixels: finite and
+/// strictly positive.
+///
+/// Carries the [`Decimated`](crate::image::Decimated) grid spacing —
+/// `2.0` for octave 1 of a 2× pyramid, `0.5` for an upsampled
+/// octave −1. Same construction discipline as [`Sigma`]:
+/// [`PixelDistance::new`] (const, panics — a compile error in `const`
+/// contexts) for literals, [`PixelDistance::try_new`] for values derived
+/// from a decimation chain.
+///
+/// # Example
+///
+/// ```
+/// use fovea::PixelDistance;
+///
+/// const OCTAVE_1: PixelDistance = PixelDistance::new(2.0);
+/// assert_eq!(OCTAVE_1.get(), 2.0);
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
+pub struct PixelDistance(f64);
+
+impl PixelDistance {
+    /// Creates a `PixelDistance` from a literal or otherwise proven-valid
+    /// value.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `value` is not finite and strictly positive. As a
+    /// `const fn`, this is a **compile error** when evaluated in a
+    /// `const` context. For values computed from data, use
+    /// [`Self::try_new`].
+    #[must_use]
+    pub const fn new(value: f64) -> Self {
+        assert!(
+            value.is_finite() && value > 0.0,
+            "PixelDistance::new: pixel distance must be finite and positive"
+        );
+        Self(value)
+    }
+
+    /// Creates a `PixelDistance` from a computed value, validating it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidParameter`] if `value` is zero, negative,
+    /// NaN, or infinite.
+    pub fn try_new(value: f64) -> Result<Self, Error> {
+        if value.is_finite() && value > 0.0 {
+            Ok(Self(value))
+        } else {
+            Err(Error::InvalidParameter(format!(
+                "pixel distance must be finite and positive, got {value}"
+            )))
+        }
+    }
+
+    /// Returns the raw value.
+    #[must_use]
+    pub const fn get(self) -> f64 {
+        self.0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sigma_valid_values_round_trip() {
+        assert_eq!(Sigma::new(1.4).get(), 1.4);
+        assert_eq!(Sigma::try_new(0.5).unwrap().get(), 0.5);
+        // Const construction: an invalid literal here would not compile.
+        const S: Sigma = Sigma::new(2.0);
+        assert_eq!(S.get(), 2.0);
+    }
+
+    #[test]
+    fn sigma_try_new_rejects_invalid_values() {
+        // Zero, negative, NaN, infinite: each can flow out of a
+        // computation over data, so each is an error value.
+        for value in [0.0, -1.0, f32::NAN, f32::INFINITY] {
+            let err = Sigma::try_new(value).unwrap_err();
+            match err {
+                Error::InvalidParameter(reason) => assert!(
+                    reason.contains("sigma"),
+                    "reason {reason:?} does not mention sigma"
+                ),
+                other => panic!("expected InvalidParameter, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "finite and positive")]
+    fn sigma_new_panics_on_invalid_literal() {
+        let _ = Sigma::new(-1.5);
+    }
+
+    #[test]
+    fn pixel_distance_valid_values_round_trip() {
+        assert_eq!(PixelDistance::new(2.0).get(), 2.0);
+        assert_eq!(PixelDistance::try_new(0.5).unwrap().get(), 0.5);
+        const D: PixelDistance = PixelDistance::new(0.5);
+        assert_eq!(D.get(), 0.5);
+    }
+
+    #[test]
+    fn pixel_distance_try_new_rejects_invalid_values() {
+        for value in [0.0, -2.0, f64::NAN, f64::INFINITY] {
+            let err = PixelDistance::try_new(value).unwrap_err();
+            match err {
+                Error::InvalidParameter(reason) => assert!(
+                    reason.contains("pixel distance"),
+                    "reason {reason:?} does not mention pixel distance"
+                ),
+                other => panic!("expected InvalidParameter, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "finite and positive")]
+    fn pixel_distance_new_panics_on_invalid_literal() {
+        let _ = PixelDistance::new(0.0);
+    }
 
     #[test]
     fn test_size_new() {

@@ -14,7 +14,7 @@ use crate::Error;
 use crate::analyze::histogram::strategy::BinningStrategy;
 use crate::analyze::histogram::{Histogram, NaturalBins, histogram};
 use crate::image::{BinaryImage, RasterImage};
-use crate::pixel::HomogeneousPixel;
+use crate::pixel::SingleChannel;
 use crate::transform::{BinaryMask, convert_image};
 
 /// Compute Otsu's optimal threshold from a 256-bin histogram.
@@ -130,10 +130,9 @@ where
 /// room for 16-bit overloads that take a caller-supplied
 /// [`LinearBins`](crate::analyze::histogram::LinearBins).
 ///
-/// # Panics
-///
-/// Panics if `P::CHANNEL_COUNT != 1` (Tier 3 — programmer bug; callers
-/// with multi-channel images must convert to single channel first).
+/// The single-channel requirement is a compile-time bound
+/// ([`SingleChannel`]): calling this with a multi-channel pixel type does
+/// not panic — it does not compile. Convert to a single channel first.
 ///
 /// # Examples
 ///
@@ -155,17 +154,10 @@ where
 pub fn otsu_binary_mask<I, P>(image: &I) -> Result<(u8, BinaryImage), Error>
 where
     I: RasterImage<Pixel = P>,
-    P: HomogeneousPixel + From<u8>,
+    P: SingleChannel + From<u8>,
     P::Channel: Ord,
     NaturalBins: BinningStrategy<P::Channel>,
 {
-    assert_eq!(
-        P::CHANNEL_COUNT,
-        1,
-        "otsu_binary_mask: requires a single-channel pixel; got CHANNEL_COUNT = {}",
-        P::CHANNEL_COUNT
-    );
-
     let h: Histogram<NaturalBins, P::Channel> = histogram(image, &NaturalBins)?;
     let t = otsu_threshold(&h).unwrap_or(0);
     let thresh = P::from(t);

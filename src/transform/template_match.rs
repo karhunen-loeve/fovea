@@ -72,26 +72,25 @@ pub trait MatchMethod<I: ImageView, T: ImageView, O: ImageViewMut> {
 ///
 /// # Errors
 ///
-/// Returns [`Error::TemplateTooLarge`] if the template does not fit in
-/// `image` along either axis. Tier-2 (data-dependent) per
-/// `AGENTS.md`.
+/// - [`Error::EmptyTemplate`] if the template has zero width or height —
+///   a degenerate template (for example an empty user crop) is a property
+///   of the template data, not a locally decidable caller contract.
+/// - [`Error::TemplateTooLarge`] if the template does not fit in `image`
+///   along either axis.
 ///
-/// # Panics
-///
-/// Panics if the template has zero width or height (Tier-3 programmer
-/// bug).
+/// Both are Tier-2 (data-dependent) failures: the template is an image
+/// value that typically originates outside the caller's code.
 #[inline]
 pub(super) fn match_template_preflight<I, T>(image: &I, template: &T) -> Result<(), Error>
 where
     I: ImageView,
     T: ImageView,
 {
-    assert!(
-        template.width() > 0 && template.height() > 0,
-        "template must have non-zero dimensions, got {}x{}",
-        template.width(),
-        template.height()
-    );
+    if template.width() == 0 || template.height() == 0 {
+        return Err(Error::EmptyTemplate {
+            template_size: template.size(),
+        });
+    }
     if template.width() > image.width() || template.height() > image.height() {
         return Err(Error::TemplateTooLarge {
             image_size: image.size(),
@@ -109,15 +108,17 @@ where
 ///
 /// # Errors
 ///
-/// Returns [`Error::TemplateTooLarge`] if the template does not fit inside
-/// `image` (data-dependent failure — Tier 2).
+/// - [`Error::EmptyTemplate`] if the template has zero width or height.
+/// - [`Error::TemplateTooLarge`] if the template does not fit inside
+///   `image`.
+///
+/// Both are data-dependent failures (Tier 2): the template is an image
+/// value, typically from a crop or a file.
 ///
 /// # Panics
 ///
 /// Panics if `output` dimensions do not match the expected score map size
-/// (programmer precondition — Tier 3).
-///
-/// Panics if the template has zero width or height (Tier 3).
+/// (programmer precondition — Tier 3: the caller allocated the buffer).
 pub fn match_template_into<I, T, O, M>(
     image: &I,
     template: &T,
@@ -130,18 +131,7 @@ where
     O: ImageViewMut,
     M: MatchMethod<I, T, O>,
 {
-    assert!(
-        template.width() > 0 && template.height() > 0,
-        "template must have non-zero dimensions, got {}x{}",
-        template.width(),
-        template.height()
-    );
-    if template.width() > image.width() || template.height() > image.height() {
-        return Err(Error::TemplateTooLarge {
-            image_size: image.size(),
-            template_size: template.size(),
-        });
-    }
+    match_template_preflight(image, template)?;
     method.match_into(image, template, output)
 }
 
@@ -150,12 +140,14 @@ where
 /// The returned image has dimensions
 /// `(image_w - template_w + 1, image_h - template_h + 1)`.
 ///
-/// Returns `Err` if the template is larger than the image in either
-/// dimension (Tier 2 — data-dependent failure).
+/// # Errors
 ///
-/// # Panics
+/// - [`Error::EmptyTemplate`] if the template has zero width or height.
+/// - [`Error::TemplateTooLarge`] if the template is larger than the image
+///   in either dimension.
 ///
-/// Panics if the template has zero width or height (Tier 3 — programmer bug).
+/// Both are data-dependent failures (Tier 2): the template is an image
+/// value, typically from a crop or a file.
 ///
 /// # Examples
 ///
@@ -176,19 +168,7 @@ where
     S: ZeroablePixel,
     M: MatchMethod<I, T, Image<S>>,
 {
-    assert!(
-        template.width() > 0 && template.height() > 0,
-        "template must have non-zero dimensions, got {}x{}",
-        template.width(),
-        template.height()
-    );
-
-    if template.width() > image.width() || template.height() > image.height() {
-        return Err(Error::TemplateTooLarge {
-            image_size: image.size(),
-            template_size: template.size(),
-        });
-    }
+    match_template_preflight(image, template)?;
 
     let out_w = image.width() - template.width() + 1;
     let out_h = image.height() - template.height() + 1;
@@ -625,6 +605,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Size;
     use crate::image::{Image, ImageView};
     use crate::pixel::{Mono8, Rgb8};
     use std::num::Saturating;
@@ -963,11 +944,18 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
-    fn zero_size_template_panics() {
+    fn zero_size_template_is_error() {
+        // A degenerate template (e.g. an empty user crop) is data, not a
+        // caller contract: reported as a value, not a crash.
         let image = Image::fill(5, 5, Mono8::new(0));
         let template = Image::<Mono8>::zero(0, 3);
-        let _ = match_template(&image, &template, SAD);
+        let result = match_template(&image, &template, SAD);
+        assert_eq!(
+            result.unwrap_err(),
+            Error::EmptyTemplate {
+                template_size: Size::new(0, 3),
+            }
+        );
     }
 
     // ── NCC tests ───────────────────────────────────────────────────

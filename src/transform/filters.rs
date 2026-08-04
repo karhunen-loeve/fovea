@@ -15,6 +15,7 @@
 //! Functions that produce blurred / sharpened output preserve the input
 //! pixel type by default (using [`FromLinear`] for the final conversion).
 
+use crate::Sigma;
 use crate::border::BorderPolicy;
 use crate::error::Error;
 use crate::image::{
@@ -225,15 +226,23 @@ pub const DEFAULT_TRUNCATE: f32 = 4.0;
 ///
 /// Use [`gaussian_blur_with`] to override `truncate`.
 ///
+/// σ is the invariant-carrying [`Sigma`] type: literals use
+/// [`Sigma::new`] (checked at compile time in const contexts), computed
+/// values use [`Sigma::try_new`] and handle the error where the value was
+/// produced — this function itself cannot see an invalid σ.
+///
 /// # Panics
 ///
-/// Panics (Tier 3 precondition) if `sigma <= 0.0`, or if the derived radius
-/// exceeds [`MAX_RADIUS`](crate::image::MAX_RADIUS) (i.e. `sigma` is larger
-/// than `MAX_RADIUS / truncate`).
+/// Panics if the derived radius exceeds
+/// [`MAX_RADIUS`](crate::image::MAX_RADIUS) (i.e. `sigma` is larger than
+/// `MAX_RADIUS / truncate`) — a capacity bound of the stack-allocated
+/// kernel, testable up front with
+/// [`gaussian_kernel_size`](crate::image::gaussian_kernel_size).
 ///
 /// # Example
 ///
 /// ```
+/// use fovea::Sigma;
 /// use fovea::image::{Image, ImageView};
 /// use fovea::border::Clamp;
 /// use fovea::pixel::MonoF32;
@@ -241,7 +250,7 @@ pub const DEFAULT_TRUNCATE: f32 = 4.0;
 ///
 /// // A flat image is returned unchanged (brightness preserved).
 /// let src = Image::fill(16, 16, MonoF32::new(0.7));
-/// let result: Image<MonoF32> = gaussian_blur(&src, 2.0, &Clamp);
+/// let result: Image<MonoF32> = gaussian_blur(&src, Sigma::new(2.0), &Clamp);
 /// for y in 0..result.height() {
 ///     for x in 0..result.width() {
 ///         assert!((result.pixel_at(x, y).0 - 0.7).abs() < 1e-4);
@@ -249,7 +258,7 @@ pub const DEFAULT_TRUNCATE: f32 = 4.0;
 /// }
 /// ```
 #[must_use]
-pub fn gaussian_blur<I, B, P, Acc, Out>(image: &I, sigma: f32, border: &B) -> Image<Out>
+pub fn gaussian_blur<I, B, P, Acc, Out>(image: &I, sigma: Sigma, border: &B) -> Image<Out>
 where
     I: RasterImage<Pixel = P>,
     P: Copy + LinearPixel<f32, Accumulator = Acc>,
@@ -273,25 +282,26 @@ where
 ///
 /// # Panics
 ///
-/// Panics if `sigma <= 0.0` or `truncate <= 0.0`, or if the derived radius
-/// exceeds [`MAX_RADIUS`](crate::image::MAX_RADIUS).
+/// Panics if `truncate <= 0.0` (a structural kernel-shape constant), or
+/// if the derived radius exceeds [`MAX_RADIUS`](crate::image::MAX_RADIUS).
 ///
 /// # Example
 ///
 /// ```
+/// use fovea::Sigma;
 /// use fovea::image::{Image, ImageView};
 /// use fovea::border::Clamp;
 /// use fovea::pixel::MonoF32;
 /// use fovea::transform::gaussian_blur_with;
 ///
 /// let src = Image::fill(16, 16, MonoF32::new(0.5));
-/// let result: Image<MonoF32> = gaussian_blur_with(&src, 1.5, 3.0, &Clamp);
+/// let result: Image<MonoF32> = gaussian_blur_with(&src, Sigma::new(1.5), 3.0, &Clamp);
 /// assert_eq!(result.size(), src.size());
 /// ```
 #[must_use]
 pub fn gaussian_blur_with<I, B, P, Acc, Out>(
     image: &I,
-    sigma: f32,
+    sigma: Sigma,
     truncate: f32,
     border: &B,
 ) -> Image<Out>
@@ -326,10 +336,10 @@ where
 ///
 /// # Panics
 ///
-/// Panics if `sigma <= 0.0`, if the derived radius exceeds
+/// Panics if the derived radius exceeds
 /// [`MAX_RADIUS`](crate::image::MAX_RADIUS), or if `output` is too small for
 /// the region produced by the border policy.
-pub fn gaussian_blur_into<I, B, O, P, Acc, Out>(image: &I, sigma: f32, border: &B, output: &mut O)
+pub fn gaussian_blur_into<I, B, O, P, Acc, Out>(image: &I, sigma: Sigma, border: &B, output: &mut O)
 where
     I: RasterImage<Pixel = P>,
     P: Copy + LinearPixel<f32, Accumulator = Acc>,
@@ -353,12 +363,12 @@ where
 ///
 /// # Panics
 ///
-/// Panics if `sigma <= 0.0` or `truncate <= 0.0`, if the derived radius
-/// exceeds [`MAX_RADIUS`](crate::image::MAX_RADIUS), or if `output` is too
-/// small for the region produced by the border policy.
+/// Panics if `truncate <= 0.0`, if the derived radius exceeds
+/// [`MAX_RADIUS`](crate::image::MAX_RADIUS), or if `output` is too small
+/// for the region produced by the border policy.
 pub fn gaussian_blur_with_into<I, B, O, P, Acc, Out>(
     image: &I,
-    sigma: f32,
+    sigma: Sigma,
     truncate: f32,
     border: &B,
     output: &mut O,
@@ -1003,9 +1013,11 @@ where
 /// `MonoF64`); the result is a raw float container suitable as input to a
 /// hysteresis threshold.
 ///
-/// # Panics
+/// # Errors
 ///
-/// Panics if `magnitude` and `direction` differ in dimensions.
+/// Returns [`Error::SizeMismatch`] if `magnitude` and `direction` differ
+/// in dimensions — two separately produced input images, the same
+/// input-vs-input relation as [`combine_images`](crate::transform::combine_images).
 ///
 /// # Example
 ///
@@ -1022,13 +1034,13 @@ where
 /// )
 /// .unwrap();
 /// let dir = Image::fill(3, 1, MonoF32::new(0.0));
-/// let thin = non_maximum_suppression(&mag, &dir);
+/// let thin = non_maximum_suppression(&mag, &dir)?;
 /// assert_eq!(thin.pixel_at(0, 0).value(), 0.0); // left border → suppressed
 /// assert_eq!(thin.pixel_at(1, 0).value(), 2.0); // local maximum kept
 /// assert_eq!(thin.pixel_at(2, 0).value(), 0.0); // right border → suppressed
+/// # Ok::<(), fovea::Error>(())
 /// ```
-#[must_use]
-pub fn non_maximum_suppression<IM, IA, P>(magnitude: &IM, direction: &IA) -> Image<P>
+pub fn non_maximum_suppression<IM, IA, P>(magnitude: &IM, direction: &IA) -> Result<Image<P>, Error>
 where
     IM: RasterImage<Pixel = P>,
     IA: RasterImage<Pixel = P>,
@@ -1036,11 +1048,12 @@ where
     P::Channel: PartialOrd,
     f64: From<P::Channel>,
 {
-    assert_eq!(
-        magnitude.size(),
-        direction.size(),
-        "non_maximum_suppression: magnitude and direction must have the same size",
-    );
+    if magnitude.size() != direction.size() {
+        return Err(Error::SizeMismatch {
+            expected: magnitude.size(),
+            actual: direction.size(),
+        });
+    }
 
     let (w, h) = (magnitude.width(), magnitude.height());
     let mut out = Image::fill(w, h, P::zero());
@@ -1057,7 +1070,7 @@ where
             }
         }
     }
-    out
+    Ok(out)
 }
 
 /// [`non_maximum_suppression`] driven by the raw gradient pair instead of a
@@ -1121,6 +1134,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Size;
     use crate::border::{Clamp, Constant, Skip};
     use crate::image::{ImageView, ImageViewMut, gaussian_kernel_1d};
     use crate::pixel::{Mono8, MonoF32};
@@ -1289,7 +1303,7 @@ mod tests {
     #[test]
     fn gaussian_blur_uniform_image_preserved_f32() {
         let src = Image::fill(16, 16, MonoF32::new(0.7));
-        let result: Image<MonoF32> = gaussian_blur(&src, 2.0, &Clamp);
+        let result: Image<MonoF32> = gaussian_blur(&src, Sigma::new(2.0), &Clamp);
         assert_eq!(result.size(), src.size());
         for y in 0..result.height() {
             for x in 0..result.width() {
@@ -1305,7 +1319,7 @@ mod tests {
     #[test]
     fn gaussian_blur_uniform_image_preserved_u8() {
         let src = Image::fill(16, 16, Mono8::new(120));
-        let result: Image<Mono8> = gaussian_blur(&src, 1.5, &Clamp);
+        let result: Image<Mono8> = gaussian_blur(&src, Sigma::new(1.5), &Clamp);
         for y in 0..result.height() {
             for x in 0..result.width() {
                 assert_eq!(result.pixel_at(x, y), Mono8::new(120));
@@ -1318,7 +1332,7 @@ mod tests {
         // A single bright pixel on a black field, blurred, should reproduce
         // the 2-D Gaussian (outer product of the 1-D kernel) — interior
         // only, with a zero border so nothing bleeds in.
-        let sigma = 1.0;
+        let sigma = Sigma::new(1.0);
         let truncate = 2.0; // radius 2, 5 taps
         let kernel = gaussian_kernel_1d(sigma, truncate);
         let w = kernel.weights();
@@ -1350,7 +1364,7 @@ mod tests {
         // Separability: the two-pass blur must equal a non-separable 2-D
         // convolution with the outer-product kernel. Checked on interior
         // pixels (where the border policy has no effect).
-        let sigma = 1.0;
+        let sigma = Sigma::new(1.0);
         let truncate = 2.0; // radius 2
         let kernel = gaussian_kernel_1d(sigma, truncate);
         let w = kernel.weights();
@@ -1388,7 +1402,7 @@ mod tests {
         });
 
         let max_slope = |sigma: f32| -> f32 {
-            let blurred: Image<MonoF32> = gaussian_blur(&src, sigma, &Clamp);
+            let blurred: Image<MonoF32> = gaussian_blur(&src, Sigma::new(sigma), &Clamp);
             let mut m = 0.0f32;
             for y in 0..blurred.height() {
                 for x in 1..blurred.width() {
@@ -1413,10 +1427,10 @@ mod tests {
     fn gaussian_blur_into_matches_owned() {
         let src = Image::generate(12, 12, |x, y| MonoF32::new((x + y) as f32));
 
-        let owned: Image<MonoF32> = gaussian_blur(&src, 1.5, &Clamp);
+        let owned: Image<MonoF32> = gaussian_blur(&src, Sigma::new(1.5), &Clamp);
 
         let mut into = Image::<MonoF32>::zero(owned.width(), owned.height());
-        gaussian_blur_into(&src, 1.5, &Clamp, &mut into);
+        gaussian_blur_into(&src, Sigma::new(1.5), &Clamp, &mut into);
 
         for y in 0..owned.height() {
             for x in 0..owned.width() {
@@ -1428,26 +1442,22 @@ mod tests {
         }
     }
 
-    #[test]
-    #[should_panic(expected = "sigma must be > 0.0")]
-    fn gaussian_blur_zero_sigma_panics() {
-        let src = Image::fill(8, 8, MonoF32::new(1.0));
-        let _: Image<MonoF32> = gaussian_blur(&src, 0.0, &Clamp);
-    }
+    // An invalid sigma is unrepresentable in the `Sigma` parameter type;
+    // its rejection is tested at the type's constructors in `common.rs`.
 
     #[test]
     #[should_panic(expected = "exceeds MAX_RADIUS")]
     fn gaussian_blur_over_radius_sigma_panics() {
         let src = Image::fill(8, 8, MonoF32::new(1.0));
         // radius = round(4.0 * 20.0) = 80 > MAX_RADIUS (64).
-        let _: Image<MonoF32> = gaussian_blur(&src, 20.0, &Clamp);
+        let _: Image<MonoF32> = gaussian_blur(&src, Sigma::new(20.0), &Clamp);
     }
 
     #[test]
     fn gaussian_blur_tiny_sigma_is_near_identity() {
         // round(4 * 0.05) = 0 ⇒ 1-tap identity kernel ⇒ input unchanged.
         let src = Image::generate(8, 8, |x, y| MonoF32::new((x * 2 + y) as f32));
-        let result: Image<MonoF32> = gaussian_blur(&src, 0.05, &Clamp);
+        let result: Image<MonoF32> = gaussian_blur(&src, Sigma::new(0.05), &Clamp);
         for y in 0..result.height() {
             for x in 0..result.width() {
                 assert!((result.pixel_at(x, y).0 - src.pixel_at(x, y).0).abs() < 1e-6);
@@ -1460,8 +1470,8 @@ mod tests {
         // Qualitative: a flat image is preserved regardless of truncate, and
         // both truncate values run without panicking on the same input.
         let src = Image::fill(20, 20, MonoF32::new(0.5));
-        let r4: Image<MonoF32> = gaussian_blur_with(&src, 2.0, 4.0, &Clamp);
-        let r3: Image<MonoF32> = gaussian_blur_with(&src, 2.0, 3.0, &Clamp);
+        let r4: Image<MonoF32> = gaussian_blur_with(&src, Sigma::new(2.0), 4.0, &Clamp);
+        let r3: Image<MonoF32> = gaussian_blur_with(&src, Sigma::new(2.0), 3.0, &Clamp);
         for y in 0..src.height() {
             for x in 0..src.width() {
                 assert!((r4.pixel_at(x, y).0 - 0.5).abs() < 1e-4);
@@ -1847,7 +1857,7 @@ mod tests {
         // Horizontal gradient (θ = 0): a [1,2,3,2,1] ridge keeps only the peak.
         let mag = mag_grid(5, 1, &[1.0, 2.0, 3.0, 2.0, 1.0]);
         let dir = Image::fill(5, 1, MonoF32::new(0.0));
-        let thin = non_maximum_suppression(&mag, &dir);
+        let thin = non_maximum_suppression(&mag, &dir).unwrap();
         let row: Vec<f32> = (0..5).map(|x| thin.pixel_at(x, 0).0).collect();
         assert_eq!(row, vec![0.0, 0.0, 3.0, 0.0, 0.0]);
     }
@@ -1858,7 +1868,7 @@ mod tests {
         // (a strict `>` would erase this flat ridge).
         let mag = mag_grid(3, 1, &[2.0, 2.0, 2.0]);
         let dir = Image::fill(3, 1, MonoF32::new(0.0));
-        let thin = non_maximum_suppression(&mag, &dir);
+        let thin = non_maximum_suppression(&mag, &dir).unwrap();
         assert_eq!(thin.pixel_at(1, 0).0, 2.0);
     }
 
@@ -1868,7 +1878,7 @@ mod tests {
         // out-of-bounds neighbour and are suppressed; the centre survives.
         let mag = Image::fill(3, 3, MonoF32::new(5.0));
         let dir = Image::fill(3, 3, MonoF32::new(0.0));
-        let thin = non_maximum_suppression(&mag, &dir);
+        let thin = non_maximum_suppression(&mag, &dir).unwrap();
         for y in 0..3 {
             assert_eq!(thin.pixel_at(0, y).0, 0.0, "left border at y={y}");
             assert_eq!(thin.pixel_at(2, y).0, 0.0, "right border at y={y}");
@@ -1921,7 +1931,7 @@ mod tests {
             let mut mag = Image::fill(3, 3, MonoF32::new(0.0));
             *mag.pixel_at_mut(1, 1) = MonoF32::new(5.0);
             *mag.pixel_at_mut(case.along[0].0, case.along[0].1) = MonoF32::new(9.0);
-            let thin = non_maximum_suppression(&mag, &dir);
+            let thin = non_maximum_suppression(&mag, &dir).unwrap();
             assert_eq!(thin.pixel_at(1, 1).0, 0.0, "case {i}: should suppress");
 
             // Higher neighbours only OFF the gradient ⇒ centre kept.
@@ -1930,7 +1940,7 @@ mod tests {
             for &(x, y) in &case.off {
                 *mag.pixel_at_mut(x, y) = MonoF32::new(9.0);
             }
-            let thin = non_maximum_suppression(&mag, &dir);
+            let thin = non_maximum_suppression(&mag, &dir).unwrap();
             assert_eq!(thin.pixel_at(1, 1).0, 5.0, "case {i}: should keep");
         }
     }
@@ -1951,15 +1961,29 @@ mod tests {
         )
         .unwrap();
         let dir = Image::fill(5, 1, MonoF64::new(0.0));
-        let thin = non_maximum_suppression(&mag, &dir);
+        let thin = non_maximum_suppression(&mag, &dir).unwrap();
         let row: Vec<f64> = (0..5).map(|x| thin.pixel_at(x, 0).0).collect();
         assert_eq!(row, vec![0.0, 0.0, 3.0, 0.0, 0.0]);
 
         // A vertical gradient on the same accumulator: θ = π/2 compares
         // up/down, so a single-row image suppresses everything.
         let dir = Image::fill(5, 1, MonoF64::new(std::f64::consts::FRAC_PI_2));
-        let thin = non_maximum_suppression(&mag, &dir);
+        let thin = non_maximum_suppression(&mag, &dir).unwrap();
         assert!((0..5).all(|x| thin.pixel_at(x, 0).0 == 0.0));
+    }
+
+    #[test]
+    fn nms_size_mismatch_is_error() {
+        let mag = Image::fill(4, 4, MonoF32::new(1.0));
+        let dir = Image::fill(3, 4, MonoF32::new(0.0));
+        let result: Result<Image<MonoF32>, Error> = non_maximum_suppression(&mag, &dir);
+        assert_eq!(
+            result.unwrap_err(),
+            Error::SizeMismatch {
+                expected: Size::new(4, 4),
+                actual: Size::new(3, 4),
+            }
+        );
     }
 
     // ── fused (gradient-driven) suppression ─────────────────────────────
@@ -2015,15 +2039,11 @@ mod tests {
         let mag = gradient_magnitude(&gx, &gy).unwrap();
         let dir = gradient_direction(&gx, &gy).unwrap();
 
-        let staged = non_maximum_suppression(&mag, &dir);
+        let staged = non_maximum_suppression(&mag, &dir).unwrap();
         let fused = non_maximum_suppression_from_gradients(&mag, &gx, &gy);
         for y in 0..9 {
             for x in 0..11 {
-                assert_eq!(
-                    staged.pixel_at(x, y).0,
-                    fused.pixel_at(x, y).0,
-                    "({x},{y})"
-                );
+                assert_eq!(staged.pixel_at(x, y).0, fused.pixel_at(x, y).0, "({x},{y})");
             }
         }
     }

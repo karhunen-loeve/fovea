@@ -26,6 +26,8 @@
 //! assert_eq!(kernel.v_anchor(), 1);
 //! ```
 
+use crate::Sigma;
+
 /// A separable convolution kernel: two 1D weight arrays (horizontal and
 /// vertical) plus their anchor positions.
 ///
@@ -402,8 +404,7 @@ impl core::fmt::Debug for GaussianKernel1D {
     }
 }
 
-/// Computes the radius of a Gaussian kernel for `(sigma, truncate)`,
-/// validating both arguments.
+/// Computes the radius of a Gaussian kernel for `(sigma, truncate)`.
 ///
 /// Uses the SciPy / scikit-image convention `radius = floor(truncate *
 /// sigma + 0.5)` (round-to-nearest), which is what those libraries
@@ -414,19 +415,19 @@ impl core::fmt::Debug for GaussianKernel1D {
 /// the caller's job, and only the kernel *builders* do it. See
 /// [`gaussian_kernel_size`] for why the size query stays total.
 ///
+/// σ needs no check here — [`Sigma`] carries the finite-and-positive
+/// invariant by construction.
+///
 /// # Panics
 ///
-/// Panics if `sigma <= 0.0` or `truncate <= 0.0` (Tier 3 precondition).
-fn gaussian_radius(sigma: f32, truncate: f32) -> usize {
-    assert!(
-        sigma > 0.0,
-        "gaussian kernel: sigma must be > 0.0 (got {sigma})"
-    );
+/// Panics if `truncate <= 0.0` (a structural kernel-shape constant, not a
+/// data-derived value).
+fn gaussian_radius(sigma: Sigma, truncate: f32) -> usize {
     assert!(
         truncate > 0.0,
         "gaussian kernel: truncate must be > 0.0 (got {truncate})"
     );
-    (truncate * sigma + 0.5).floor() as usize
+    (truncate * sigma.get() + 0.5).floor() as usize
 }
 
 /// Returns the odd tap count of the Gaussian kernel derived from `sigma`
@@ -446,31 +447,33 @@ fn gaussian_radius(sigma: f32, truncate: f32) -> usize {
 /// means "this `sigma` is out of range", not "allocate a bigger buffer":
 ///
 /// ```
+/// use fovea::Sigma;
 /// use fovea::image::{MAX_RADIUS, gaussian_kernel_size};
 ///
 /// let supported = |sigma, truncate| {
 ///     gaussian_kernel_size(sigma, truncate) <= 2 * MAX_RADIUS + 1
 /// };
-/// assert!(supported(16.0, 4.0));
-/// assert!(!supported(20.0, 4.0)); // 161 taps — `gaussian_blur` would panic
+/// assert!(supported(Sigma::new(16.0), 4.0));
+/// assert!(!supported(Sigma::new(20.0), 4.0)); // 161 taps — `gaussian_blur` would panic
 /// ```
 ///
 /// # Panics
 ///
-/// Panics if `sigma <= 0.0` or `truncate <= 0.0`.
+/// Panics if `truncate <= 0.0`.
 ///
 /// # Example
 ///
 /// ```
+/// use fovea::Sigma;
 /// use fovea::image::gaussian_kernel_size;
 ///
 /// // radius = round(4.0 * 1.0) = 4 → 9 taps
-/// assert_eq!(gaussian_kernel_size(1.0, 4.0), 9);
+/// assert_eq!(gaussian_kernel_size(Sigma::new(1.0), 4.0), 9);
 /// // tiny sigma rounds down to radius 0 → 1 tap (identity)
-/// assert_eq!(gaussian_kernel_size(0.05, 4.0), 1);
+/// assert_eq!(gaussian_kernel_size(Sigma::new(0.05), 4.0), 1);
 /// ```
 #[must_use]
-pub fn gaussian_kernel_size(sigma: f32, truncate: f32) -> usize {
+pub fn gaussian_kernel_size(sigma: Sigma, truncate: f32) -> usize {
     2 * gaussian_radius(sigma, truncate) + 1
 }
 
@@ -484,16 +487,20 @@ pub fn gaussian_kernel_size(sigma: f32, truncate: f32) -> usize {
 ///
 /// # Panics
 ///
-/// - `sigma <= 0.0` or `truncate <= 0.0` — undefined for a Gaussian.
+/// - `truncate <= 0.0` — a structural kernel-shape constant. (σ carries
+///   its finite-and-positive invariant in the [`Sigma`] type; construct
+///   computed values with [`Sigma::try_new`].)
 /// - radius exceeds [`MAX_RADIUS`] — the kernel would not fit the bounded
-///   stack buffer; the message names the largest supported `sigma`.
+///   stack buffer; the message names the largest supported `sigma`. Test
+///   admissibility up front with [`gaussian_kernel_size`].
 ///
 /// # Example
 ///
 /// ```
+/// use fovea::Sigma;
 /// use fovea::image::gaussian_kernel_1d;
 ///
-/// let k = gaussian_kernel_1d(1.0, 4.0);
+/// let k = gaussian_kernel_1d(Sigma::new(1.0), 4.0);
 /// assert_eq!(k.len(), 9);
 /// assert_eq!(k.anchor(), 4);
 /// // Normalized: the weights sum to 1.
@@ -503,8 +510,9 @@ pub fn gaussian_kernel_size(sigma: f32, truncate: f32) -> usize {
 /// assert!((k.weights()[0] - k.weights()[8]).abs() < 1e-7);
 /// ```
 #[must_use]
-pub fn gaussian_kernel_1d(sigma: f32, truncate: f32) -> GaussianKernel1D {
+pub fn gaussian_kernel_1d(sigma: Sigma, truncate: f32) -> GaussianKernel1D {
     let radius = gaussian_radius(sigma, truncate);
+    let sigma = sigma.get();
     assert!(
         radius <= MAX_RADIUS,
         "gaussian kernel: sigma {sigma} (truncate {truncate}) needs radius {radius}, \
@@ -848,7 +856,7 @@ mod tests {
         // The DC / normalization invariant — the single most important
         // property (brightness preservation).
         for &sigma in &[0.5f32, 0.8, 1.0, 1.7, 3.0, 8.0] {
-            let k = gaussian_kernel_1d(sigma, 4.0);
+            let k = gaussian_kernel_1d(Sigma::new(sigma), 4.0);
             let sum: f32 = k.weights().iter().sum();
             assert!(
                 (sum - 1.0).abs() < 1e-6,
@@ -859,7 +867,7 @@ mod tests {
 
     #[test]
     fn gaussian_kernel_weights_symmetric() {
-        let k = gaussian_kernel_1d(1.5, 4.0);
+        let k = gaussian_kernel_1d(Sigma::new(1.5), 4.0);
         let w = k.weights();
         let n = w.len();
         for i in 0..n {
@@ -877,7 +885,7 @@ mod tests {
         // Compare to an independent brute-force normalized reference.
         let sigma = 1.3f32;
         let truncate = 4.0f32;
-        let k = gaussian_kernel_1d(sigma, truncate);
+        let k = gaussian_kernel_1d(Sigma::new(sigma), truncate);
         let radius = k.radius();
         let n = k.len();
 
@@ -900,49 +908,40 @@ mod tests {
     #[test]
     fn gaussian_kernel_size_follows_truncate() {
         // size = 2 * round(truncate * sigma) + 1
-        assert_eq!(gaussian_kernel_size(1.0, 4.0), 9); // radius 4
-        assert_eq!(gaussian_kernel_size(2.0, 3.0), 13); // radius 6
-        assert_eq!(gaussian_kernel_size(1.0, 3.0), 7); // radius 3
+        assert_eq!(gaussian_kernel_size(Sigma::new(1.0), 4.0), 9); // radius 4
+        assert_eq!(gaussian_kernel_size(Sigma::new(2.0), 3.0), 13); // radius 6
+        assert_eq!(gaussian_kernel_size(Sigma::new(1.0), 3.0), 7); // radius 3
         // size() agrees with the built kernel's tap count.
         assert_eq!(
-            gaussian_kernel_1d(1.0, 4.0).len(),
-            gaussian_kernel_size(1.0, 4.0)
+            gaussian_kernel_1d(Sigma::new(1.0), 4.0).len(),
+            gaussian_kernel_size(Sigma::new(1.0), 4.0)
         );
     }
 
     #[test]
     fn gaussian_kernel_tiny_sigma_is_identity() {
         // sigma small enough that round(truncate * sigma) == 0 ⇒ 1 tap [1.0].
-        let k = gaussian_kernel_1d(0.05, 4.0);
+        let k = gaussian_kernel_1d(Sigma::new(0.05), 4.0);
         assert_eq!(k.len(), 1);
         assert_eq!(k.radius(), 0);
         assert_eq!(k.anchor(), 0);
         assert!((k.weights()[0] - 1.0).abs() < 1e-7);
     }
 
-    #[test]
-    #[should_panic(expected = "sigma must be > 0.0")]
-    fn gaussian_kernel_zero_sigma_panics() {
-        let _ = gaussian_kernel_1d(0.0, 4.0);
-    }
-
-    #[test]
-    #[should_panic(expected = "sigma must be > 0.0")]
-    fn gaussian_kernel_negative_sigma_panics() {
-        let _ = gaussian_kernel_1d(-1.0, 4.0);
-    }
+    // Invalid sigma is unrepresentable in the `Sigma` parameter type —
+    // its rejection is tested at the type's constructors in `common.rs`.
 
     #[test]
     #[should_panic(expected = "truncate must be > 0.0")]
     fn gaussian_kernel_zero_truncate_panics() {
-        let _ = gaussian_kernel_1d(1.0, 0.0);
+        let _ = gaussian_kernel_1d(Sigma::new(1.0), 0.0);
     }
 
     #[test]
     #[should_panic(expected = "exceeds MAX_RADIUS")]
     fn gaussian_kernel_over_radius_panics() {
         // radius = round(4.0 * 20.0) = 80 > MAX_RADIUS (64).
-        let _ = gaussian_kernel_1d(20.0, 4.0);
+        let _ = gaussian_kernel_1d(Sigma::new(20.0), 4.0);
     }
 
     #[test]
@@ -950,16 +949,19 @@ mod tests {
         // The size query is total where the builder is not: it must report
         // the derived size for an out-of-range sigma so callers can test
         // admissibility instead of catching a panic.
-        assert_eq!(gaussian_kernel_size(20.0, 4.0), 161);
-        assert!(gaussian_kernel_size(20.0, 4.0) > 2 * MAX_RADIUS + 1);
+        assert_eq!(gaussian_kernel_size(Sigma::new(20.0), 4.0), 161);
+        assert!(gaussian_kernel_size(Sigma::new(20.0), 4.0) > 2 * MAX_RADIUS + 1);
         // The largest admissible sigma sits exactly on the bound.
-        assert_eq!(gaussian_kernel_size(16.0, 4.0), 2 * MAX_RADIUS + 1);
+        assert_eq!(
+            gaussian_kernel_size(Sigma::new(16.0), 4.0),
+            2 * MAX_RADIUS + 1
+        );
     }
 
     #[test]
     fn gaussian_kernel_at_max_radius_is_ok() {
         // radius exactly MAX_RADIUS must succeed: round(4.0 * 16.0) = 64.
-        let k = gaussian_kernel_1d(16.0, 4.0);
+        let k = gaussian_kernel_1d(Sigma::new(16.0), 4.0);
         assert_eq!(k.radius(), MAX_RADIUS);
         assert_eq!(k.len(), 2 * MAX_RADIUS + 1);
         let sum: f32 = k.weights().iter().sum();
