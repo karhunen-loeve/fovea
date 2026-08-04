@@ -18,6 +18,7 @@
 
 use crate::Size;
 use crate::border::Mirror;
+use crate::error::Error;
 use crate::image::{Image, ImageView, ImageViewMut, Pyramid, RasterImage, SeparableKernel};
 use crate::pixel::{FromLinear, LinearPixel, LinearSpace, ZeroablePixel};
 use crate::transform::convolve_separable::convolve_separable;
@@ -100,11 +101,13 @@ where
 /// Because the interpolation blends neighboring samples, the pixel type
 /// must live in a linear space ([`LinearSpace`]) — linearize sRGB first.
 ///
-/// # Panics
+/// # Errors
 ///
-/// Panics if `target.width ∉ {2·w − 1, 2·w}` or
-/// `target.height ∉ {2·h − 1, 2·h}` (programmer bug — the caller named a
-/// size this image cannot be the `pyr_down` of).
+/// Returns [`Error::InvalidPyrUpTarget`] if `target.width ∉ {2·w − 1, 2·w}`
+/// or `target.height ∉ {2·h − 1, 2·h}` — the caller named a size this
+/// image cannot be the `pyr_down` of. Because the valid target is a
+/// relation between two runtime sizes (often originating from camera or
+/// file dimensions), this is a recoverable error, not a panic.
 ///
 /// # Example
 ///
@@ -119,12 +122,12 @@ where
 /// assert_eq!(half.size(), Size::new(5, 4));
 ///
 /// // The explicit target restores the odd parent size exactly.
-/// let restored: Image<MonoF32> = pyr_up(&half, src.size());
+/// let restored: Image<MonoF32> = pyr_up(&half, src.size())?;
 /// assert_eq!(restored.size(), Size::new(9, 7));
 /// assert!((restored.pixel_at(4, 3).0 - 0.25).abs() < 1e-6);
+/// # Ok::<(), fovea::Error>(())
 /// ```
-#[must_use]
-pub fn pyr_up<I, P, Acc>(image: &I, target: Size) -> Image<P>
+pub fn pyr_up<I, P, Acc>(image: &I, target: Size) -> Result<Image<P>, Error>
 where
     I: RasterImage<Pixel = P>,
     P: LinearPixel<f32, Accumulator = Acc> + LinearSpace + ZeroablePixel + FromLinear<Acc>,
@@ -135,16 +138,14 @@ where
         + std::ops::Add<Output = Acc>,
 {
     let (w, h) = (image.width(), image.height());
-    assert!(
-        target.width == 2 * w || target.width + 1 == 2 * w,
-        "pyr_up: target width {} is not 2·{w} − 1 or 2·{w} (a size whose pyr_down is this image)",
-        target.width,
-    );
-    assert!(
-        target.height == 2 * h || target.height + 1 == 2 * h,
-        "pyr_up: target height {} is not 2·{h} − 1 or 2·{h} (a size whose pyr_down is this image)",
-        target.height,
-    );
+    let width_ok = target.width == 2 * w || target.width + 1 == 2 * w;
+    let height_ok = target.height == 2 * h || target.height + 1 == 2 * h;
+    if !width_ok || !height_ok {
+        return Err(Error::InvalidPyrUpTarget {
+            source: image.size(),
+            target,
+        });
+    }
 
     // Zero-insertion: every input sample keeps its even-even position; the
     // in-between positions start at zero and are filled by the smoothing.
@@ -157,7 +158,7 @@ where
     }
 
     let kernel = SeparableKernel::symmetric(PYR_UP_WEIGHTS);
-    convolve_separable(&upsampled, &kernel, &Mirror)
+    Ok(convolve_separable(&upsampled, &kernel, &Mirror))
 }
 
 // ─── PyramidMethod strategy ─────────────────────────────────────────────────
@@ -366,31 +367,28 @@ mod tests {
     #[test]
     fn pyr_up_accepts_both_valid_widths() {
         let src = Image::fill(4, 4, MonoF32::new(0.5));
-        let a: Image<MonoF32> = pyr_up(&src, Size::new(8, 8));
+        let a: Image<MonoF32> = pyr_up(&src, Size::new(8, 8)).unwrap();
         assert_eq!(a.size(), Size::new(8, 8));
-        let b: Image<MonoF32> = pyr_up(&src, Size::new(7, 7));
+        let b: Image<MonoF32> = pyr_up(&src, Size::new(7, 7)).unwrap();
         assert_eq!(b.size(), Size::new(7, 7));
     }
 
     #[test]
-    #[should_panic(expected = "target width")]
-    fn pyr_up_rejects_too_large_width() {
+    fn pyr_up_rejects_invalid_targets() {
+        // Too-large width, too-small width, invalid height: each must
+        // report the rejected target and the source size.
         let src = Image::fill(4, 4, MonoF32::new(0.5));
-        let _: Image<MonoF32> = pyr_up(&src, Size::new(9, 8));
-    }
-
-    #[test]
-    #[should_panic(expected = "target width")]
-    fn pyr_up_rejects_too_small_width() {
-        let src = Image::fill(4, 4, MonoF32::new(0.5));
-        let _: Image<MonoF32> = pyr_up(&src, Size::new(6, 8));
-    }
-
-    #[test]
-    #[should_panic(expected = "target height")]
-    fn pyr_up_rejects_invalid_height() {
-        let src = Image::fill(4, 4, MonoF32::new(0.5));
-        let _: Image<MonoF32> = pyr_up(&src, Size::new(8, 10));
+        for target in [Size::new(9, 8), Size::new(6, 8), Size::new(8, 10)] {
+            let result: Result<Image<MonoF32>, Error> = pyr_up(&src, target);
+            assert_eq!(
+                result.unwrap_err(),
+                Error::InvalidPyrUpTarget {
+                    source: Size::new(4, 4),
+                    target,
+                },
+                "target {target:?} must be rejected"
+            );
+        }
     }
 
     #[test]
@@ -399,7 +397,7 @@ mod tests {
         let src = Image::fill(9, 7, MonoF32::new(0.25));
         let half: Image<MonoF32> = pyr_down(&src);
         assert_eq!(half.size(), Size::new(5, 4));
-        let restored: Image<MonoF32> = pyr_up(&half, src.size());
+        let restored: Image<MonoF32> = pyr_up(&half, src.size()).unwrap();
         assert_eq!(restored.size(), src.size());
     }
 
@@ -412,7 +410,7 @@ mod tests {
         // parities.
         let src = Image::fill(5, 4, MonoF32::new(0.6));
         for target in [Size::new(10, 8), Size::new(9, 7)] {
-            let out: Image<MonoF32> = pyr_up(&src, target);
+            let out: Image<MonoF32> = pyr_up(&src, target).unwrap();
             for y in 0..out.height() {
                 for x in 0..out.width() {
                     assert!(
@@ -437,7 +435,7 @@ mod tests {
                 MonoF32::new(0.0)
             }
         });
-        let out: Image<MonoF32> = pyr_up(&src, Size::new(6, 6));
+        let out: Image<MonoF32> = pyr_up(&src, Size::new(6, 6)).unwrap();
         // Even-even: center weight 0.75².
         assert!((out.pixel_at(2, 2).0 - 0.5625).abs() < 1e-6);
         // Odd-even: 0.5 · 0.75.
@@ -449,7 +447,7 @@ mod tests {
     #[test]
     fn pyr_up_mono8_flat() {
         let src = Image::fill(6, 6, Mono8::new(80));
-        let out: Image<Mono8> = pyr_up(&src, Size::new(12, 12));
+        let out: Image<Mono8> = pyr_up(&src, Size::new(12, 12)).unwrap();
         for y in 0..out.height() {
             for x in 0..out.width() {
                 assert_eq!(out.pixel_at(x, y), Mono8::new(80));

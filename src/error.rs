@@ -68,6 +68,22 @@ pub enum Error {
         actual: usize,
     },
 
+    /// The requested `pyr_up` target is not a size whose `pyr_down`
+    /// result is the source image's size.
+    ///
+    /// Returned by [`pyr_up`](crate::transform::pyr_up) when
+    /// `target.width ∉ {2·w − 1, 2·w}` or
+    /// `target.height ∉ {2·h − 1, 2·h}` for a `w`×`h` source image.
+    /// Because `pyr_down` uses ceiling division, both the odd and the
+    /// even parent dimension are valid targets — anything else cannot
+    /// be the parent of this image.
+    InvalidPyrUpTarget {
+        /// The dimensions of the source image being upsampled.
+        source: Size,
+        /// The rejected target dimensions.
+        target: Size,
+    },
+
     /// The template is larger than the image in one or both dimensions.
     ///
     /// Returned by [`match_template`](crate::transform::match_template) when
@@ -170,6 +186,13 @@ impl fmt::Display for Error {
                     f,
                     "channel count mismatch: expected {} channels, got {}",
                     expected, actual
+                )
+            }
+            Error::InvalidPyrUpTarget { source, target } => {
+                write!(
+                    f,
+                    "invalid pyr_up target: {}x{} is not a size whose pyr_down is {}x{}",
+                    target.width, target.height, source.width, source.height
                 )
             }
             Error::TemplateTooLarge {
@@ -281,6 +304,33 @@ mod tests {
         let c = Error::LengthMismatch {
             expected: 100,
             actual: 99,
+        };
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+    }
+
+    #[test]
+    fn display_invalid_pyr_up_target() {
+        let err = Error::InvalidPyrUpTarget {
+            source: Size::new(4, 4),
+            target: Size::new(9, 8),
+        };
+        assert_eq!(
+            err.to_string(),
+            "invalid pyr_up target: 9x8 is not a size whose pyr_down is 4x4"
+        );
+    }
+
+    #[test]
+    fn invalid_pyr_up_target_equality_and_clone() {
+        let a = Error::InvalidPyrUpTarget {
+            source: Size::new(4, 4),
+            target: Size::new(9, 8),
+        };
+        let b = a.clone();
+        let c = Error::InvalidPyrUpTarget {
+            source: Size::new(4, 4),
+            target: Size::new(6, 8),
         };
         assert_eq!(a, b);
         assert_ne!(a, c);

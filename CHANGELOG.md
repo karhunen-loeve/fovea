@@ -22,8 +22,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `pyrDown`/`pyrUp`. `pyr_down` output size is ceiling division
   (`(n + 1) / 2`, even-sample decimation); `pyr_up` takes an **explicit
   target size** so odd-sized parents reconstruct exactly instead of
-  guessing between `2·n` and `2·n − 1`. Both require `LinearSpace`
-  (linearize sRGB first; Bayer CFA data is rejected at compile time).
+  guessing between `2·n` and `2·n − 1`, and returns
+  `Result<Image<P>, Error>` — a target that cannot be the parent of the
+  input is reported as the new `Error::InvalidPyrUpTarget` (a relation
+  between two runtime sizes is a recoverable data error, not a panic).
+  Both require `LinearSpace` (linearize sRGB first; Bayer CFA data is
+  rejected at compile time).
 - `transform::PyramidMethod<P>`: pyramid construction strategy trait,
   consumed at build time and not stored in the result. `transform::Gaussian`
   is the first strategy: repeated `pyr_down`, level 0 a copy of the input.
