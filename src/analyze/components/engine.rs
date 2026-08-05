@@ -844,7 +844,7 @@ mod tests {
         assert_eq!(m[0].area, 1);
         assert_eq!(m[0].perimeter, 1);
         assert_eq!(m[0].eccentricity(), 0.0);
-        assert!(m[0].orientation().is_finite());
+        assert!(m[0].orientation().radians().is_finite());
         assert!(m[0].circularity().is_finite());
     }
 

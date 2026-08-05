@@ -76,9 +76,23 @@ pub mod transform;
 /// data *about* an image (counts, scalars, descriptors), not new images.
 pub mod analyze;
 
+/// Keypoints: the capability traits and concrete types feature detectors
+/// produce and descriptors consume.
+///
+/// Start with [`features::Corner`] for single-resolution detectors and
+/// [`features::ScaleKeypoint`] when the detection selects a scale. Consumers
+/// bind the minimum capability they need — [`features::HasPosition`],
+/// [`features::HasResponse`], [`features::HasScale`],
+/// [`features::HasOrientation`] — instead of accepting one struct with
+/// conditionally-valid fields.
+pub mod features;
+
 #[cfg(doc)]
 pub mod guide;
 
 // ── Core vocabulary types (module-agnostic, kept at root) ────────────────────
-pub use common::{Coordinate, CoordinateF64, PixelDistance, Rectangle, Sigma, Size, Stride};
+pub use common::{
+    AxialOrientation, Coordinate, CoordinateF64, Orientation, PixelDistance, Rectangle, Sigma,
+    Size, Stride,
+};
 pub use error::Error;

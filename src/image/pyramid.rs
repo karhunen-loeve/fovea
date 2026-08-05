@@ -230,9 +230,10 @@ pub type GaussianPyramid<P> = Pyramid<Image<P>>;
 /// Resolution and scale are orthogonal axes, so this trait carries only the
 /// **sampling geometry**: how far apart this level's samples sit in the base
 /// image, and where its grid origin lies. Together they form the affine
-/// level→base coordinate map [`to_base`](Self::to_base) — the single place
-/// the conversion is defined, so callers never hand-roll `x * 2^level`
-/// lifting (which silently drops the grid-alignment offset).
+/// level↔base coordinate map — [`to_base`](Self::to_base) out of the level,
+/// [`to_local`](Self::to_local) back into it — the single place the
+/// conversion is defined, so callers never hand-roll `x * 2^level` lifting
+/// (which silently drops the grid-alignment offset).
 ///
 /// All coordinates use the **pixel-center convention**: coordinate
 /// `(0.0, 0.0)` is the *center* of pixel `(0, 0)`.
@@ -287,6 +288,40 @@ pub trait Decimated: PyramidLevel {
         let d = self.pixel_distance().get();
         let o = self.origin_offset();
         CoordinateF64::new(o.x + d * local.x, o.y + d * local.y)
+    }
+
+    /// Projects a base-image point back into this level's local
+    /// coordinates: `local = (base − origin_offset) / pixel_distance`.
+    ///
+    /// The exact inverse of [`to_base`](Self::to_base), and the other half
+    /// of the same affine map. Detection lifts *out* of a level; anything
+    /// that samples *into* one — a descriptor reading a patch around a
+    /// keypoint whose position is in base-image coordinates — comes back
+    /// through here, so neither direction is re-derived at a call site.
+    ///
+    /// The division is total: [`PixelDistance`] cannot be zero.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use fovea::{CoordinateF64, PixelDistance, Sigma};
+    /// use fovea::image::{Decimated, Image, ScaledImage};
+    /// use fovea::pixel::MonoF32;
+    ///
+    /// let level = ScaledImage::new(
+    ///     Image::<MonoF32>::zero(4, 4),
+    ///     PixelDistance::new(2.0),
+    ///     CoordinateF64::new(0.5, 0.5),
+    ///     Sigma::new(1.0),
+    /// );
+    ///
+    /// let local = CoordinateF64::new(1.5, 3.0);
+    /// assert_eq!(level.to_local(level.to_base(local)), local);
+    /// ```
+    fn to_local(&self, base: CoordinateF64) -> CoordinateF64 {
+        let d = self.pixel_distance().get();
+        let o = self.origin_offset();
+        CoordinateF64::new((base.x - o.x) / d, (base.y - o.y) / d)
     }
 }
 
@@ -656,6 +691,58 @@ mod tests {
         assert_eq!(
             level.to_base(CoordinateF64::new(6.0, 10.0)),
             CoordinateF64::new(3.0, 5.0)
+        );
+    }
+
+    #[test]
+    fn to_local_inverts_to_base() {
+        // Round-trip on the offset convention, where a ratio-only inverse
+        // would be wrong: the offset must be subtracted before dividing.
+        let level = ScaledImage::new(
+            Image::<MonoF32>::zero(4, 4),
+            PixelDistance::new(2.0),
+            CoordinateF64::new(0.5, 0.5),
+            Sigma::new(1.0),
+        );
+        for local in [
+            CoordinateF64::new(0.0, 0.0),
+            CoordinateF64::new(1.5, 3.0),
+            CoordinateF64::new(3.25, 0.75),
+        ] {
+            assert_eq!(level.to_local(level.to_base(local)), local);
+        }
+    }
+
+    #[test]
+    fn to_local_projects_base_coordinates_into_the_level() {
+        let level = ScaledImage::new(
+            Image::<MonoF32>::zero(4, 4),
+            PixelDistance::new(2.0),
+            CoordinateF64::new(0.0, 0.0),
+            Sigma::new(1.0),
+        );
+        assert_eq!(
+            level.to_local(CoordinateF64::new(6.0, 8.0)),
+            CoordinateF64::new(3.0, 4.0)
+        );
+        // Base points between this level's samples land on fractions.
+        assert_eq!(
+            level.to_local(CoordinateF64::new(3.0, 1.0)),
+            CoordinateF64::new(1.5, 0.5)
+        );
+    }
+
+    #[test]
+    fn to_local_on_an_upsampled_level() {
+        let level = ScaledImage::new(
+            Image::<MonoF32>::zero(16, 16),
+            PixelDistance::new(0.5),
+            CoordinateF64::new(0.0, 0.0),
+            Sigma::new(0.8),
+        );
+        assert_eq!(
+            level.to_local(CoordinateF64::new(3.0, 5.0)),
+            CoordinateF64::new(6.0, 10.0)
         );
     }
 

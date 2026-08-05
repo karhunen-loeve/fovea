@@ -12,7 +12,7 @@
 //! `f64`. All of it comes from the *same* single accumulation pass — no
 //! separate contour extraction.
 
-use crate::{Coordinate, CoordinateF64, Rectangle, Size};
+use crate::{AxialOrientation, Coordinate, CoordinateF64, Rectangle, Size};
 
 /// Shape descriptors for one connected component.
 ///
@@ -192,7 +192,7 @@ impl BlobMeasurements {
         2.0 * (self.area as f64 / std::f64::consts::PI).sqrt()
     }
 
-    /// Orientation of the major axis, in radians.
+    /// Orientation of the major axis, as an [`AxialOrientation`].
     ///
     /// `orientation = ½·atan2(2·μ11, μ20 − μ02)`, giving a value in
     /// `(−π/2, π/2]` measured from the +x axis **in image (y-down)
@@ -200,9 +200,16 @@ impl BlobMeasurements {
     /// screen). Note the y-down flip versus math-convention plots, or the
     /// sign reads backwards. A rotationally-symmetric or single-pixel blob
     /// returns `0`.
-    pub fn orientation(&self) -> f64 {
+    ///
+    /// The return type is *axial*, not directed: an ellipse's major axis has
+    /// no head and no tail, so `+80°` and `−100°` are the same axis. That is
+    /// why comparing two blobs' orientations goes through
+    /// [`AxialOrientation::signed_difference`], which wraps at π — a raw
+    /// subtraction would read those two as `160°` apart instead of `20°`.
+    /// Call [`AxialOrientation::radians`] for the bare angle.
+    pub fn orientation(&self) -> AxialOrientation {
         let (mu20, mu02, mu11) = self.central_moments();
-        0.5 * (2.0 * mu11).atan2(mu20 - mu02)
+        AxialOrientation::from_half_atan2(2.0 * mu11, mu20 - mu02)
     }
 
     /// Eccentricity of the equivalent ellipse, in `[0, 1]`.
@@ -302,7 +309,7 @@ mod tests {
         assert_eq!(m.centroid(), CoordinateF64::new(3.0, 5.0));
         // No NaN / div-by-zero for a degenerate blob.
         assert_eq!(m.eccentricity(), 0.0);
-        assert_eq!(m.orientation(), 0.0);
+        assert_eq!(m.orientation().radians(), 0.0);
         assert!(m.circularity().is_finite());
         let (mu20, mu02, mu11) = m.central_moments();
         assert_eq!((mu20, mu02, mu11), (0.0, 0.0, 0.0));
@@ -340,7 +347,11 @@ mod tests {
         // 11-wide, 1-tall bar → major axis along x → orientation ≈ 0.
         let pixels: Vec<(usize, usize)> = (0..11).map(|x| (x, 0)).collect();
         let m = from_pixels(&pixels);
-        assert!(m.orientation().abs() < 1e-9, "got {}", m.orientation());
+        assert!(
+            m.orientation().radians().abs() < 1e-9,
+            "got {:?}",
+            m.orientation()
+        );
     }
 
     #[test]
@@ -349,8 +360,8 @@ mod tests {
         let pixels: Vec<(usize, usize)> = (0..11).map(|y| (0, y)).collect();
         let m = from_pixels(&pixels);
         assert!(
-            (m.orientation().abs() - PI / 2.0).abs() < 1e-9,
-            "got {}",
+            (m.orientation().radians().abs() - PI / 2.0).abs() < 1e-9,
+            "got {:?}",
             m.orientation()
         );
     }
@@ -361,18 +372,20 @@ mod tests {
         // y-down image coords) → orientation +π/4. Pins the sign convention.
         let pixels: Vec<(usize, usize)> = (0..11).map(|i| (i, i)).collect();
         let m = from_pixels(&pixels);
+        let expected = AxialOrientation::from_radians(PI / 4.0).unwrap();
         assert!(
-            (m.orientation() - PI / 4.0).abs() < 1e-9,
-            "got {}",
+            m.orientation().signed_difference(expected).abs() < 1e-9,
+            "got {:?}",
             m.orientation()
         );
 
         // Anti-diagonal along x==-y (top-right → bottom-left) → −π/4.
         let pixels: Vec<(usize, usize)> = (0..11).map(|i| (10 - i, i)).collect();
         let m = from_pixels(&pixels);
+        let expected = AxialOrientation::from_radians(-PI / 4.0).unwrap();
         assert!(
-            (m.orientation() + PI / 4.0).abs() < 1e-9,
-            "got {}",
+            m.orientation().signed_difference(expected).abs() < 1e-9,
+            "got {:?}",
             m.orientation()
         );
     }

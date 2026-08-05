@@ -390,6 +390,288 @@ impl PixelDistance {
     }
 }
 
+/// Canonicalizes a radian value into `(−π, π]`.
+fn wrap_two_pi(radians: f32) -> f32 {
+    const PI: f32 = core::f32::consts::PI;
+    let wrapped = radians.rem_euclid(2.0 * PI); // [0, 2π)
+    if wrapped > PI {
+        wrapped - 2.0 * PI
+    } else {
+        wrapped
+    }
+}
+
+/// Canonicalizes a radian value into `(−π/2, π/2]`.
+fn wrap_pi(radians: f64) -> f64 {
+    const PI: f64 = core::f64::consts::PI;
+    let wrapped = radians.rem_euclid(PI); // [0, π)
+    if wrapped > PI / 2.0 {
+        wrapped - PI
+    } else {
+        wrapped
+    }
+}
+
+/// A **direction** in the image plane: an angle modulo 2π, canonicalized to
+/// `(−π, π]`.
+///
+/// Use this for quantities that distinguish a direction from its opposite —
+/// a gradient direction, a dominant feature orientation. For an *undirected*
+/// axis, where θ and θ + π mean the same thing, use [`AxialOrientation`].
+/// The two are separate types precisely because they are not
+/// interchangeable: they wrap at different moduli, so subtracting one from
+/// the other is meaningless, and the type system is the only thing that can
+/// say so.
+///
+/// Angles are measured from the +x axis in **image (y-down) coordinates**,
+/// so a positive angle rotates toward +y — *downward* on screen. This is the
+/// flip versus math-convention plots; read the sign accordingly.
+///
+/// # Why a type and not `f32`
+///
+/// A raw float leaves both the unit and — the load-bearing part — the
+/// *modulus* unstated. Canonicalizing at construction is what makes `==`
+/// mean "the same direction" instead of "the same float": without it, `0`
+/// and `2π` compare unequal. The seam is also where hand-rolled arithmetic
+/// goes wrong: directions at `179°` and `−179°` are `2°` apart, not `358°`,
+/// which is why the subtraction lives in
+/// [`signed_difference`](Self::signed_difference) rather than at call sites.
+///
+/// Canonicalization makes equality *meaningful*, not *exact* — wrapping
+/// rounds, so two mathematically equal angles built by different routes can
+/// still differ in the last bit. Compare with
+/// `a.signed_difference(b).abs() < tolerance`, not `==`. There is
+/// deliberately no `PartialOrd`: on a circle there is no least angle, and
+/// `a < b` would invite reading "counter-clockwise of", which it is not.
+///
+/// # Example
+///
+/// ```
+/// use fovea::Orientation;
+///
+/// // Any finite angle is valid — it wraps rather than being rejected.
+/// let turned = Orientation::from_radians(3.0 * core::f32::consts::PI)?;
+/// let half = Orientation::from_radians(core::f32::consts::PI)?;
+/// // Compare by difference, not `==`: wrapping rounds, so these agree to
+/// // within an ULP rather than bit-exactly.
+/// assert!(turned.signed_difference(half).abs() < 1e-6);
+///
+/// // The ±π seam is 2 degrees wide, not 358.
+/// let east = Orientation::from_radians(179_f32.to_radians())?;
+/// let west = Orientation::from_radians((-179_f32).to_radians())?;
+/// let apart = east.signed_difference(west).abs().to_degrees();
+/// assert!((apart - 2.0).abs() < 1e-3, "got {apart}");
+/// # Ok::<(), fovea::Error>(())
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Orientation(f32);
+
+impl Orientation {
+    /// Creates an orientation from radians, wrapping into `(−π, π]`.
+    ///
+    /// Unlike [`Sigma`] or [`PixelDistance`], whose invariants *reject*
+    /// out-of-range input, this constructor **normalizes**: `7.0` radians
+    /// is not an invalid angle, it is `0.717` radians. Only a value that
+    /// cannot be canonicalized at all is an error.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidParameter`] if `radians` is NaN or infinite.
+    pub fn from_radians(radians: f32) -> Result<Self, Error> {
+        if radians.is_finite() {
+            Ok(Self(wrap_two_pi(radians)))
+        } else {
+            Err(Error::InvalidParameter(format!(
+                "orientation must be a finite angle in radians, got {radians}"
+            )))
+        }
+    }
+
+    /// Creates an orientation from a gradient vector, as `atan2(y, x)`.
+    ///
+    /// The dominant construction site, and **total**: `atan2` already
+    /// returns a value in `(−π, π]`, so no wrapping is performed and
+    /// nothing can fail. (`atan2(0, 0)` is `0` — an arbitrary but defined
+    /// direction for a zero-length vector, matching [`f32::atan2`].)
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use fovea::Orientation;
+    ///
+    /// // Gradient pointing along +x.
+    /// assert_eq!(Orientation::from_atan2(0.0, 1.0).radians(), 0.0);
+    /// ```
+    #[must_use]
+    pub fn from_atan2(y: f32, x: f32) -> Self {
+        Self(y.atan2(x))
+    }
+
+    /// Returns the angle in radians, in `(−π, π]`.
+    #[must_use]
+    pub const fn radians(self) -> f32 {
+        self.0
+    }
+
+    /// Returns the signed angle **from `other` to `self`**, in `(−π, π]`.
+    ///
+    /// Wraps across the ±π seam, so the result is always the shorter of the
+    /// two ways round and its magnitude never exceeds π.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use fovea::Orientation;
+    ///
+    /// let a = Orientation::from_radians(0.5)?;
+    /// let b = Orientation::from_radians(0.2)?;
+    /// assert!((a.signed_difference(b) - 0.3).abs() < 1e-6);
+    /// # Ok::<(), fovea::Error>(())
+    /// ```
+    #[must_use]
+    pub fn signed_difference(self, other: Self) -> f32 {
+        wrap_two_pi(self.0 - other.0)
+    }
+
+    /// Discards the sense of direction, yielding the undirected axis this
+    /// orientation lies along.
+    ///
+    /// Well-defined in this direction only: θ and θ + π collapse onto one
+    /// axis. The reverse is not a function — an axis corresponds to *two*
+    /// opposite directions — which is why [`AxialOrientation`] has no
+    /// `to_directed`.
+    ///
+    /// Widening `f32` to `f64` moves the ±π/2 boundary by an ULP, so an
+    /// input sitting exactly on it may be reported at either end of the
+    /// canonical range (`+π/2` or `−π/2`). Both name the same axis, and
+    /// [`AxialOrientation::signed_difference`] reads them as zero apart —
+    /// but it is another reason to compare by difference rather than `==`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use fovea::Orientation;
+    ///
+    /// let north = Orientation::from_radians(core::f32::consts::FRAC_PI_2)?;
+    /// let south = Orientation::from_radians(-core::f32::consts::FRAC_PI_2)?;
+    /// // Opposite directions, one axis.
+    /// assert!(north.to_axial().signed_difference(south.to_axial()).abs() < 1e-6);
+    /// # Ok::<(), fovea::Error>(())
+    /// ```
+    #[must_use]
+    pub fn to_axial(self) -> AxialOrientation {
+        AxialOrientation(wrap_pi(f64::from(self.0)))
+    }
+}
+
+/// An **undirected axis** in the image plane: an angle modulo π,
+/// canonicalized to `(−π/2, π/2]`.
+///
+/// Use this for quantities where an angle and its opposite are the same
+/// thing — the major axis of a region's equivalent ellipse, an edge's
+/// orientation. An ellipse's axis has no head and no tail, so `+80°` and
+/// `−100°` are *the same axis*, and a type that wrapped at 2π would treat
+/// them as nearly opposite.
+///
+/// The sibling type for directed quantities is [`Orientation`]. They are
+/// deliberately not interchangeable, and the conversion runs one way only
+/// ([`Orientation::to_axial`]): folding a direction onto an axis loses
+/// information that cannot be recovered.
+///
+/// Angles are measured from the +x axis in **image (y-down) coordinates**,
+/// so a positive angle rotates toward +y — *downward* on screen.
+///
+/// The same equality and ordering caveats as [`Orientation`] apply:
+/// canonicalization makes `==` meaningful but not bit-exact, so compare via
+/// [`signed_difference`](Self::signed_difference); and there is no
+/// `PartialOrd`.
+///
+/// # Example
+///
+/// ```
+/// use fovea::AxialOrientation;
+///
+/// let a = AxialOrientation::from_radians(80_f64.to_radians())?;
+/// let b = AxialOrientation::from_radians((-100_f64).to_radians())?;
+/// // Same axis, reached from opposite directions.
+/// assert!(a.signed_difference(b).abs() < 1e-12);
+/// # Ok::<(), fovea::Error>(())
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AxialOrientation(f64);
+
+impl AxialOrientation {
+    /// Creates an axis orientation from radians, wrapping into
+    /// `(−π/2, π/2]`.
+    ///
+    /// **Normalizes** rather than rejects, for the reason given on
+    /// [`Orientation::from_radians`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidParameter`] if `radians` is NaN or infinite.
+    pub fn from_radians(radians: f64) -> Result<Self, Error> {
+        if radians.is_finite() {
+            Ok(Self(wrap_pi(radians)))
+        } else {
+            Err(Error::InvalidParameter(format!(
+                "axis orientation must be a finite angle in radians, got {radians}"
+            )))
+        }
+    }
+
+    /// Creates an axis orientation as `½·atan2(y, x)`.
+    ///
+    /// The half-angle form that second-moment axis extraction produces.
+    /// **Total**: `atan2` returns `(−π, π]`, so the halved result already
+    /// lies in `(−π/2, π/2]` and no wrapping is performed.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use fovea::AxialOrientation;
+    ///
+    /// // A horizontal major axis.
+    /// assert_eq!(AxialOrientation::from_half_atan2(0.0, 1.0).radians(), 0.0);
+    /// ```
+    #[must_use]
+    pub fn from_half_atan2(y: f64, x: f64) -> Self {
+        Self(0.5 * y.atan2(x))
+    }
+
+    /// Returns the angle in radians, in `(−π/2, π/2]`.
+    #[must_use]
+    pub const fn radians(self) -> f64 {
+        self.0
+    }
+
+    /// Returns the signed angle **from `other` to `self`**, in
+    /// `(−π/2, π/2]`.
+    ///
+    /// Wraps at π, not 2π: two axes are never more than a quarter turn
+    /// apart, so the magnitude never exceeds π/2. This is the operation
+    /// that a raw float gets wrong — subtracting `−80°` from `80°` reads as
+    /// `160°` when the axes are in fact `20°` apart.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use fovea::AxialOrientation;
+    ///
+    /// let a = AxialOrientation::from_radians(80_f64.to_radians())?;
+    /// let b = AxialOrientation::from_radians((-80_f64).to_radians())?;
+    /// // 20° apart, not 160°. (The sign says which way round: the axis at
+    /// // 80° is a fifth of a quarter-turn clockwise of the one at −80°.)
+    /// let apart = a.signed_difference(b).abs().to_degrees();
+    /// assert!((apart - 20.0).abs() < 1e-9, "got {apart}");
+    /// # Ok::<(), fovea::Error>(())
+    /// ```
+    #[must_use]
+    pub fn signed_difference(self, other: Self) -> f64 {
+        wrap_pi(self.0 - other.0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -451,6 +733,217 @@ mod tests {
     #[should_panic(expected = "finite and positive")]
     fn pixel_distance_new_panics_on_invalid_literal() {
         let _ = PixelDistance::new(0.0);
+    }
+
+    // ───────────────────────────────────────────────────────────────────
+    // Orientation (mod 2π) and AxialOrientation (mod π)
+    // ───────────────────────────────────────────────────────────────────
+
+    const PI32: f32 = core::f32::consts::PI;
+    const PI64: f64 = core::f64::consts::PI;
+
+    #[test]
+    fn orientation_canonicalizes_into_half_open_range() {
+        // The upper bound is inclusive, the lower exclusive: −π folds to +π.
+        assert_eq!(Orientation::from_radians(PI32).unwrap().radians(), PI32);
+        assert_eq!(Orientation::from_radians(-PI32).unwrap().radians(), PI32);
+        assert_eq!(Orientation::from_radians(0.0).unwrap().radians(), 0.0);
+
+        // Every canonical value lies in (−π, π].
+        for turns in [-3.0, -1.5, -0.25, 0.0, 0.75, 2.0, 5.5] {
+            let a = Orientation::from_radians(turns * PI32).unwrap();
+            assert!(
+                a.radians() > -PI32 && a.radians() <= PI32,
+                "{turns} turns → {}",
+                a.radians()
+            );
+        }
+    }
+
+    #[test]
+    fn orientation_wraps_full_turns_to_the_same_direction() {
+        // The point of the type: 0 and 2π are one direction, not two.
+        let zero = Orientation::from_radians(0.0).unwrap();
+        let full = Orientation::from_radians(2.0 * PI32).unwrap();
+        assert_eq!(zero, full); // exact here: 2π wraps to a clean 0
+
+        // 3π and π agree to within an ULP, not bit-exactly — wrapping
+        // rounds, which is why the documented comparison is by difference.
+        let three_halves = Orientation::from_radians(3.0 * PI32).unwrap();
+        let half = Orientation::from_radians(PI32).unwrap();
+        assert!(three_halves.signed_difference(half).abs() < 1e-6);
+    }
+
+    #[test]
+    fn orientation_from_radians_rejects_non_finite() {
+        for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let err = Orientation::from_radians(value).unwrap_err();
+            match err {
+                Error::InvalidParameter(reason) => assert!(
+                    reason.contains("orientation"),
+                    "reason {reason:?} does not mention orientation"
+                ),
+                other => panic!("expected InvalidParameter, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn orientation_from_atan2_is_total_and_canonical() {
+        assert_eq!(Orientation::from_atan2(0.0, 1.0).radians(), 0.0);
+        assert_eq!(Orientation::from_atan2(1.0, 0.0).radians(), PI32 / 2.0);
+        assert_eq!(Orientation::from_atan2(0.0, -1.0).radians(), PI32);
+        // A zero-length gradient is defined, not NaN.
+        assert_eq!(Orientation::from_atan2(0.0, 0.0).radians(), 0.0);
+    }
+
+    #[test]
+    fn orientation_signed_difference_crosses_the_seam() {
+        // The bug this type exists to prevent: 2° apart, not 358°.
+        let east = Orientation::from_radians(179_f32.to_radians()).unwrap();
+        let west = Orientation::from_radians((-179_f32).to_radians()).unwrap();
+        let delta = east.signed_difference(west).to_degrees();
+        assert!((delta.abs() - 2.0).abs() < 1e-3, "got {delta}");
+    }
+
+    #[test]
+    fn orientation_signed_difference_is_signed_and_directed() {
+        let a = Orientation::from_radians(0.5).unwrap();
+        let b = Orientation::from_radians(0.2).unwrap();
+        assert!((a.signed_difference(b) - 0.3).abs() < 1e-6);
+        assert!((b.signed_difference(a) + 0.3).abs() < 1e-6);
+        assert_eq!(a.signed_difference(a), 0.0);
+    }
+
+    #[test]
+    fn orientation_signed_difference_never_exceeds_pi() {
+        for degrees in [0.0_f32, 45.0, 90.0, 179.0, 181.0, 270.0, 359.0] {
+            let a = Orientation::from_radians(degrees.to_radians()).unwrap();
+            let b = Orientation::from_radians(0.0).unwrap();
+            assert!(
+                a.signed_difference(b).abs() <= PI32 + 1e-6,
+                "{degrees}° → {}",
+                a.signed_difference(b)
+            );
+        }
+    }
+
+    #[test]
+    fn orientation_to_axial_collapses_opposite_directions() {
+        // Opposite directions share one axis. Compared by difference: these
+        // sit exactly on the ±π/2 boundary, where the f32→f64 widening can
+        // report either end of the canonical range — both naming the same
+        // axis, which is precisely what `signed_difference` sees.
+        let north = Orientation::from_radians(PI32 / 2.0).unwrap();
+        let south = Orientation::from_radians(-PI32 / 2.0).unwrap();
+        assert!(north.to_axial().signed_difference(south.to_axial()).abs() < 1e-6);
+
+        let east = Orientation::from_radians(0.0).unwrap();
+        let west = Orientation::from_radians(PI32).unwrap();
+        assert!(east.to_axial().signed_difference(west.to_axial()).abs() < 1e-6);
+
+        // ...and the two axes are a quarter turn apart, not the same.
+        let apart = north.to_axial().signed_difference(east.to_axial()).abs();
+        assert!((apart - PI64 / 2.0).abs() < 1e-6, "got {apart}");
+    }
+
+    #[test]
+    fn orientation_is_copy_and_debug() {
+        let a = Orientation::from_radians(1.0).unwrap();
+        let b = a; // Copy
+        assert_eq!(a, b);
+        assert!(format!("{a:?}").contains("Orientation"));
+    }
+
+    #[test]
+    fn axial_orientation_canonicalizes_into_quarter_turn_range() {
+        let half_pi = PI64 / 2.0;
+        assert_eq!(
+            AxialOrientation::from_radians(half_pi).unwrap().radians(),
+            half_pi
+        );
+        // −π/2 is the same axis as +π/2 and folds onto it.
+        assert_eq!(
+            AxialOrientation::from_radians(-half_pi).unwrap().radians(),
+            half_pi
+        );
+
+        for turns in [-2.0, -0.75, 0.0, 0.3, 1.0, 3.5] {
+            let a = AxialOrientation::from_radians(turns * PI64).unwrap();
+            assert!(
+                a.radians() > -half_pi && a.radians() <= half_pi,
+                "{turns}·π → {}",
+                a.radians()
+            );
+        }
+    }
+
+    #[test]
+    fn axial_orientation_treats_opposite_angles_as_one_axis() {
+        // An axis has no head or tail: θ and θ + π are equal.
+        let a = AxialOrientation::from_radians(0.4).unwrap();
+        let b = AxialOrientation::from_radians(0.4 + PI64).unwrap();
+        assert!(a.signed_difference(b).abs() < 1e-12);
+
+        // 80° and −100° are the same axis, reached the other way round.
+        let c = AxialOrientation::from_radians(80_f64.to_radians()).unwrap();
+        let d = AxialOrientation::from_radians((-100_f64).to_radians()).unwrap();
+        assert!(c.signed_difference(d).abs() < 1e-12);
+    }
+
+    #[test]
+    fn axial_orientation_from_radians_rejects_non_finite() {
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let err = AxialOrientation::from_radians(value).unwrap_err();
+            match err {
+                Error::InvalidParameter(reason) => assert!(
+                    reason.contains("axis orientation"),
+                    "reason {reason:?} does not mention axis orientation"
+                ),
+                other => panic!("expected InvalidParameter, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn axial_orientation_from_half_atan2_is_total_and_canonical() {
+        assert_eq!(AxialOrientation::from_half_atan2(0.0, 1.0).radians(), 0.0);
+        // atan2(0, −1) = π → halved = π/2, the vertical axis.
+        assert_eq!(
+            AxialOrientation::from_half_atan2(0.0, -1.0).radians(),
+            PI64 / 2.0
+        );
+        assert_eq!(AxialOrientation::from_half_atan2(0.0, 0.0).radians(), 0.0);
+    }
+
+    #[test]
+    fn axial_orientation_difference_never_exceeds_a_quarter_turn() {
+        // The axial seam: this is what a raw float subtraction gets wrong,
+        // reading 160° where the axes are 20° apart.
+        let a = AxialOrientation::from_radians(80_f64.to_radians()).unwrap();
+        let b = AxialOrientation::from_radians((-80_f64).to_radians()).unwrap();
+        // 20° apart, not 160°. The sign is negative: the axis at 80° is
+        // reached from the one at −80° (≡ 100°) by turning back 20°.
+        let delta = a.signed_difference(b).to_degrees();
+        assert!((delta.abs() - 20.0).abs() < 1e-9, "got {delta}");
+
+        for degrees in [0.0_f64, 10.0, 89.0, 91.0, 170.0, 269.0] {
+            let x = AxialOrientation::from_radians(degrees.to_radians()).unwrap();
+            let y = AxialOrientation::from_radians(0.0).unwrap();
+            assert!(
+                x.signed_difference(y).abs() <= PI64 / 2.0 + 1e-12,
+                "{degrees}° → {}",
+                x.signed_difference(y)
+            );
+        }
+    }
+
+    #[test]
+    fn axial_orientation_is_copy_and_debug() {
+        let a = AxialOrientation::from_radians(1.0).unwrap();
+        let b = a; // Copy
+        assert_eq!(a, b);
+        assert!(format!("{a:?}").contains("AxialOrientation"));
     }
 
     #[test]

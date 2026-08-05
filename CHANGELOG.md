@@ -65,6 +65,117 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   panic. (`truncate` stays a plain `f32` — a structural kernel-shape
   constant — and the `MAX_RADIUS` capacity bound remains a documented
   panic, testable up front via `gaussian_kernel_size`.)
+- New `features` module: the keypoint data model feature detectors produce
+  and descriptors consume. Each property a keypoint may carry is one trait
+  adding one guarantee — `features::HasPosition` (sub-pixel location),
+  `features::HasResponse` (detector strength, ranking only),
+  `features::HasScale` (characteristic σ in base-image pixels) and
+  `features::HasOrientation` (a directed `Orientation`) — instead of one struct
+  whose fields are meaningless for half of its producers. Detectors return
+  the precise type they can justify, consumers bind the minimum they
+  require, and the mismatch is a **compile error**: `features::Corner`
+  (position + response, for single-resolution detectors such as Harris,
+  Shi-Tomasi and FAST) does not implement `HasScale`, so it cannot reach an
+  operation that sizes a patch from a detected scale.
+  `features::ScaleKeypoint` (position + response + scale) is the
+  scale-selecting counterpart, carrying its σ as the invariant-carrying
+  `Sigma` so it flows on — into a `gaussian_blur`, into a patch size —
+  without re-validation. `HasOrientation` is defined but has no implementor
+  yet: it is the capability rotation-invariant descriptors will bind
+  against, and nothing in this release can compute an orientation
+  honestly.
+- `features::Corner::from_level` / `features::ScaleKeypoint::from_level`:
+  the named level→base lift. A keypoint detected on a coarse pyramid level
+  is *reported* in base-image coordinates, so keypoints from different
+  levels are comparable, and the conversion happens in exactly one place —
+  `image::Decimated::to_base` — rather than being re-derived as
+  `x · 2^level` per detector, which drops the grid-origin term and drifts
+  half a pixel per octave. `ScaleKeypoint::from_level` additionally takes
+  the level's σ from `image::ScaleLevel::sigma`, which is already absolute
+  in base-image pixels and so is *not* rescaled. Both are total.
+- `image::Decimated::to_local`: the inverse of `to_base`
+  (`local = (base − origin_offset) / pixel_distance`), completing the
+  affine level↔base map. Detection lifts out of a level; anything sampling
+  back into one — a descriptor reading a patch around a base-frame
+  keypoint — comes back through here, so neither direction is hand-rolled
+  at a call site. Total: a `PixelDistance` cannot be zero.
+- `features::retain_top_n`, `features::sort_by_response` and the
+  `features::by_response_then_position` comparator: **deterministic**
+  keypoint selection. Ordering is by response descending with a tie-break
+  on `(y, x)` ascending, because exact response ties are the rule rather
+  than the exception on synthetic images — without the tie-break, "the
+  strongest 50 corners" would depend on the order the detector happened to
+  visit pixels in, and could not be asserted in a test. Comparisons use
+  `total_cmp`, so a NaN response from a misbehaving detector still yields a
+  consistent total order instead of a sort that silently loses keypoints;
+  the sort is stable, so keypoints identical in response *and* position
+  keep the order they were produced in.
+- `Orientation` and `AxialOrientation`: **angle vocabulary types** that state
+  the one thing a bare float cannot — the **modulus**. `Orientation` is a
+  *directed* angle mod 2π, canonicalized to (−π, π] (a gradient direction, a
+  dominant feature orientation); `AxialOrientation` is an *undirected* axis
+  mod π, canonicalized to (−π/2, π/2] (a region's major axis, which has no
+  head or tail, so +80° and −100° are the same axis). They are separate
+  types because they are not interchangeable: they wrap at different moduli,
+  so subtracting one from the other is meaningless, and only the type system
+  can say so. Both own the operation that hand-rolled float arithmetic gets
+  wrong — `signed_difference`, which wraps across the seam: two directions at
+  179° and −179° are 2° apart, not 358°, and two axes at 80° and −80° are 20°
+  apart, not 160°. Construction **normalizes** rather than rejects (unlike
+  `Sigma`, whose invariant makes σ ≤ 0 meaningless, 7.0 radians is not an
+  invalid angle — it is 0.717): `from_radians` wraps and returns
+  `Error::InvalidParameter` only for NaN/∞, while `Orientation::from_atan2`
+  and `AxialOrientation::from_half_atan2` are **total** — `atan2`'s range is
+  already canonical, so the hot path (a per-sample gradient angle) does no
+  wrapping at all. `Orientation::to_axial` folds a direction onto its axis;
+  the reverse is deliberately absent, since an axis names two opposite
+  directions. Note that canonicalizing makes `==` *meaningful* (the same
+  direction compares equal) but not bit-exact — wrapping rounds — so compare
+  with `signed_difference(…).abs() < tolerance`. Neither type implements
+  `PartialOrd`: on a circle there is no least angle, and `a < b` would invite
+  reading "counter-clockwise of", which it is not.
+
+### Changed
+
+- **Breaking:** the error-handling convention was sharpened: a `panic!` is
+  reserved for contracts that are locally decidable at the call site
+  (indexed access with a `get` alternative, caller-allocated `_into`
+  output buffers, structural constants, internal invariant backstops);
+  everything whose validity depends on data — validating constructors and
+  relations between separately obtained runtime values — returns
+  `Result<_, Error>`. Three previously panicking sites move accordingly:
+  - `match_template` / `match_template_into` report a zero-width or
+    zero-height template as the new `Error::EmptyTemplate` instead of
+    panicking — the template is data (typically a crop or a file), and its
+    other data failure (`TemplateTooLarge`) was already an error.
+  - `ImagePlanes::replace_plane` returns `Result<Image<_>, Error>`:
+    a size-mismatched replacement plane is `Error::SizeMismatch` (the
+    plane is data); an out-of-range plane *index* still panics, the same
+    data-vs-constant split as `i32::from_str_radix` (`Err` for the
+    string, panic for the radix).
+  - `otsu_binary_mask` is bound on `pixel::SingleChannel` instead of
+    asserting `CHANNEL_COUNT == 1` at runtime — a multi-channel pixel
+    type is now a compile error, matching `hysteresis_threshold`.
+  - `non_maximum_suppression` returns `Result<Image<P>, Error>`: a
+    magnitude/direction size mismatch is `Error::SizeMismatch` rather than
+    a panic, since it is a relation between two separately obtained runtime
+    sizes.
+- **Breaking:** `BlobMeasurements::orientation` returns `AxialOrientation`
+  instead of a raw `f64` (see *Added*). The value, range and y-down sign
+  convention are unchanged — `½·atan2(2·μ11, μ20 − μ02)` in (−π/2, π/2] — but
+  the type now states that the angle is an **axis**, not a direction, which a
+  bare `f64` could not: nothing previously stopped a blob's orientation being
+  compared against, or subtracted from, a mod-2π feature orientation, and the
+  result would have been silently wrong near the seam. Call `.radians()` for
+  the bare angle, or prefer `.signed_difference(other)` when comparing two
+  blobs' axes, which wraps at π instead of reading 80° and −80° as 160° apart.
+- **Breaking:** `gaussian_blur` / `gaussian_blur_with` (+ `_into`
+  variants), `gaussian_kernel_1d` / `gaussian_kernel_size`, and `canny`
+  take the new `Sigma` parameter type instead of a raw `f32` σ (see
+  *Added*). Wrap literals in `Sigma::new(…)`; validate computed values
+  with `Sigma::try_new(…)?` where they are produced.
+
+## [0.3.0] — 2026-07-27
 
 ### Added
 
@@ -121,8 +232,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   quantised gradient direction (sectors 0°/45°/90°/135°). Ties are kept
   (inclusive `>=`, OpenCV-compatible); border pixels whose along-gradient
   neighbour is out of bounds are suppressed. Generic over single-channel float
-  pixels; returns `Err(Error::SizeMismatch)` on a magnitude/direction size
-  mismatch, like the other two-image operations.
+  pixels; panics on a magnitude/direction size mismatch.
 - `transform::Direction` (and the sealed `transform::DirectionChannel` trait):
   a `CombinePixels` strategy computing channel-wise `atan2(b, a)` in radians on
   `(-π, π]`, the directional companion to the existing `Magnitude` strategy.
@@ -163,9 +273,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (radius `= round(truncate · sigma)`, default `truncate = 4.0`). The kernel
   is generated allocation-free into a bounded stack buffer; a `sigma` whose
   radius exceeds `MAX_RADIUS` (64, i.e. `sigma > MAX_RADIUS / truncate`)
-  panics. `sigma` is the validated `Sigma` parameter type, so a
-  non-positive or non-finite value is unrepresentable (see the `Sigma` /
-  `PixelDistance` entry). The kernel generator is exposed at the image
+  panics, as does `sigma <= 0`. The kernel generator is exposed at the image
   layer as `gaussian_kernel_1d`, `gaussian_kernel_size`, `GaussianKernel1D`,
   and the `MAX_RADIUS` bound. The fixed `gaussian_blur_3x3` /
   `gaussian_blur_5x5` paths remain as fast const-sized convenience
@@ -181,30 +289,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Breaking:** the error-handling convention was sharpened: a `panic!` is
-  reserved for contracts that are locally decidable at the call site
-  (indexed access with a `get` alternative, caller-allocated `_into`
-  output buffers, structural constants, internal invariant backstops);
-  everything whose validity depends on data — validating constructors and
-  relations between separately obtained runtime values — returns
-  `Result<_, Error>`. Three previously panicking sites move accordingly:
-  - `match_template` / `match_template_into` report a zero-width or
-    zero-height template as the new `Error::EmptyTemplate` instead of
-    panicking — the template is data (typically a crop or a file), and its
-    other data failure (`TemplateTooLarge`) was already an error.
-  - `ImagePlanes::replace_plane` returns `Result<Image<_>, Error>`:
-    a size-mismatched replacement plane is `Error::SizeMismatch` (the
-    plane is data); an out-of-range plane *index* still panics, the same
-    data-vs-constant split as `i32::from_str_radix` (`Err` for the
-    string, panic for the radix).
-  - `otsu_binary_mask` is bound on `pixel::SingleChannel` instead of
-    asserting `CHANNEL_COUNT == 1` at runtime — a multi-channel pixel
-    type is now a compile error, matching `hysteresis_threshold`.
-- **Breaking:** `gaussian_blur` / `gaussian_blur_with` (+ `_into`
-  variants), `gaussian_kernel_1d` / `gaussian_kernel_size`, and `canny`
-  take the new `Sigma` parameter type instead of a raw `f32` σ (see
-  *Added*). Wrap literals in `Sigma::new(…)`; validate computed values
-  with `Sigma::try_new(…)?` where they are produced.
 - **Breaking:** `ComponentStats::centroid` returns `CoordinateF64` instead
   of `(f64, f64)`. Destructuring call sites (`let (cx, cy) =
   stats.centroid();`) no longer compile; use `let c = stats.centroid();`
