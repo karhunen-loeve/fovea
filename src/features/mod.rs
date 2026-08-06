@@ -31,6 +31,19 @@
 //! silently wrong patch size — and a new capability (an affine shape, say)
 //! arrives as a new trait without editing any existing type.
 //!
+//! ## Where the keypoints come from
+//!
+//! [`detect`](crate::features::detect) holds the detectors themselves.
+//! Today that is the
+//! structure-tensor family: [`Harris`](crate::features::detect::Harris) and
+//! [`ShiTomasi`](crate::features::detect::ShiTomasi) are two responses over
+//! one shared pipeline, reached through
+//! [`detect_corners`](crate::features::detect::detect_corners) for a single
+//! image and
+//! [`detect_corners_in_level`](crate::features::detect::detect_corners_in_level)
+//! for a pyramid level. Both produce [`Corner`](crate::features::Corner):
+//! they localize and score, and select no scale.
+//!
 //! ## Positions live in the base-image frame
 //!
 //! A keypoint detected on a coarse pyramid level is *reported* in the frame
@@ -91,6 +104,8 @@
 //! retain_top_n(&mut corners, 1);
 //! assert_eq!(corners[0].position(), CoordinateF64::new(7.0, 4.0));
 //! ```
+
+pub mod detect;
 
 mod keypoint;
 

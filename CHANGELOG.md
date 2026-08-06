@@ -110,6 +110,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   consistent total order instead of a sort that silently loses keypoints;
   the sort is stable, so keypoints identical in response *and* position
   keep the order they were produced in.
+- `features::detect`: the first corner detectors, and the first producers of
+  the keypoint model above. `features::detect::Harris` (the classical
+  `det(M) − k·tr(M)²`) and `features::detect::ShiTomasi` (`λ_min(M)`, no `k`
+  to tune) are two **response strategies** over one shared pipeline rather
+  than two detectors: `features::detect::detect_corners(&image, &method,
+  params)` runs Sobel gradients → gradient products → Gaussian window →
+  response → threshold and peak selection, and returns `Vec<Corner>` in
+  raster order. A third measure is an implementation of the open
+  `features::detect::CornerResponse` trait, not a copied pipeline; the
+  arithmetic is generic over `f32` and `f64` accumulators through the sealed
+  `features::detect::CornerResponseChannel`, the same two-trait split
+  `Magnitude` / `MagnitudeChannel` uses. Single-channel input is a
+  compile-time requirement (`pixel::SingleChannel`), not a runtime check.
+- `features::detect::Harris` and `features::detect::CornerParams` are
+  **invariant-carrying parameter types** (the `Sigma` pattern, ADR-0025
+  category E): `const fn new` for literals, `try_new` returning
+  `Error::InvalidParameter` for computed values. `Harris` owns its own
+  sensitivity, and its domain `0 < k < 0.25` is a consequence rather than a
+  convention — `det ≤ tr²/4` for a symmetric 2×2 matrix, so at `k ≥ 0.25`
+  the response is non-positive for *every* tensor and the detector can never
+  fire, while at `k ≤ 0` the edge penalty becomes an edge reward. Both ends
+  fail silently, which is why they are rejected at construction.
+  `CornerParams` carries the window σ, the absolute response threshold
+  (finite — a NaN threshold would reject every pixel and look like an empty
+  image) and the suppression radius (at least 1). There is deliberately no
+  `Default`: a default σ and threshold would be a claim about *your* images.
+- `features::detect::StructureTensor` and
+  `features::detect::corner_response_map`: the detector's stages, public in
+  their own right the way `canny`'s are. `StructureTensor::from_gradients`
+  takes **your** gradient images (so Scharr or Prewitt instead of Sobel is a
+  choice, not a fork) and windows their products with a Gaussian;
+  `StructureTensor::from_smoothed` takes the three already-windowed products,
+  so a box window computed from an integral image needs no new API. Both
+  report a `Error::SizeMismatch` rather than panicking when the inputs
+  disagree. `corner_response_map` returns the cornerness image itself — for
+  visualization, for a different thresholding rule, and for calibrating a
+  threshold, which the documentation recommends over guessing: the response
+  scales with the gradient operator's gain and the image contrast raised to
+  the measure's own power (squared for Shi-Tomasi, *fourth* for Harris), so
+  the same picture as `Mono8` rather than `MonoF32` scores ≈ 255⁴ higher.
+- `features::detect::corner_peaks`: threshold-and-local-maximum selection
+  over any response map, shared by every detector in the module. The radius
+  is the minimum separation between two reported corners; the comparison
+  window is **clipped** at the image border rather than skipped, so a corner
+  against the frame edge is still reported. Ties are resolved
+  asymmetrically — strictly greater than neighbours earlier in raster order,
+  greater or equal to later ones — so a flat plateau yields exactly one
+  corner (its raster-first pixel) instead of all of them under `>=` or none
+  under `>`. A `NaN` compares false against everything, so it neither wins a
+  plateau nor survives its own threshold test.
+- `features::detect::detect_corners_in_level`: the same detector on a
+  `image::Decimated` pyramid level, with every position lifted into the
+  base-image frame through `Corner::from_level`, so results from different
+  levels are comparable and concatenate. Multi-resolution search
+  deliberately still returns `Corner` and **not** `ScaleKeypoint`: the
+  level's σ was imposed by whoever built the pyramid, not selected by the
+  detector, and a scale the detector did not choose is exactly the
+  conditionally-valid field the capability traits exist to prevent.
+  Cross-level duplicate suppression is the caller's policy — the same
+  physical corner legitimately appears once per level.
 - `Orientation` and `AxialOrientation`: **angle vocabulary types** that state
   the one thing a bare float cannot — the **modulus**. `Orientation` is a
   *directed* angle mod 2π, canonicalized to (−π, π] (a gradient direction, a
@@ -174,6 +234,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   take the new `Sigma` parameter type instead of a raw `f32` σ (see
   *Added*). Wrap literals in `Sigma::new(…)`; validate computed values
   with `Sigma::try_new(…)?` where they are produced.
+
+### Fixed
+
+- `canny`'s documentation listed the wrong accumulator for `Mono16`: it
+  claimed `Mono16` widens to `MonoF64` like `Mono32` and `Mono64`, when in
+  fact `Mono16` — and `Mono<BITS>` — accumulate in `MonoF32`. Documentation
+  only; the bound the compiler enforces never changed, so no behaviour or
+  signature moves with this. Corrected while writing the same sentence for
+  the corner detectors, which do widen `Mono32` and up.
 
 ## [0.3.0] — 2026-07-27
 

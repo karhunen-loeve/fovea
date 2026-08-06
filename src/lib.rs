@@ -76,11 +76,13 @@ pub mod transform;
 /// data *about* an image (counts, scalars, descriptors), not new images.
 pub mod analyze;
 
-/// Keypoints: the capability traits and concrete types feature detectors
-/// produce and descriptors consume.
+/// Feature detection: the detectors, plus the keypoint types they produce
+/// and descriptors consume.
 ///
-/// Start with [`features::Corner`] for single-resolution detectors and
-/// [`features::ScaleKeypoint`] when the detection selects a scale. Consumers
+/// Start with [`features::detect::detect_corners`] and a response strategy
+/// ([`features::detect::Harris`], [`features::detect::ShiTomasi`]) to find
+/// corners, and with [`features::Corner`] /
+/// [`features::ScaleKeypoint`] to understand what comes back. Consumers
 /// bind the minimum capability they need — [`features::HasPosition`],
 /// [`features::HasResponse`], [`features::HasScale`],
 /// [`features::HasOrientation`] — instead of accepting one struct with

@@ -67,9 +67,10 @@ use crate::analyze::threshold::hysteresis_threshold;
 /// stable, kernel-independent meaning across `sigma`.
 ///
 /// Works for any single-channel input whose linear accumulator is a float
-/// pixel — `Mono8` and `MonoF32` accumulate in `MonoF32`; `Mono16` / `Mono32`
-/// / `Mono64` / `MonoF64` accumulate in `MonoF64`. The thresholds are taken as
-/// `f32` for ergonomics and widened to the accumulator's channel as needed.
+/// pixel — `Mono8`, `Mono16`, `Mono<BITS>` and `MonoF32` accumulate in
+/// `MonoF32`; `Mono32`, `Mono64` and `MonoF64` accumulate in `MonoF64`. The
+/// thresholds are taken as `f32` for ergonomics and widened to the
+/// accumulator's channel as needed.
 ///
 /// Scharr is used for the gradient (better rotational symmetry than Sobel)
 /// and [`Clamp`] for every border (so the output keeps the input size). To
