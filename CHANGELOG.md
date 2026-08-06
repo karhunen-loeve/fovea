@@ -124,8 +124,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Magnitude` / `MagnitudeChannel` uses. Single-channel input is a
   compile-time requirement (`pixel::SingleChannel`), not a runtime check.
 - `features::detect::Harris` and `features::detect::CornerParams` are
-  **invariant-carrying parameter types** (the `Sigma` pattern, ADR-0025
-  category E): `const fn new` for literals, `try_new` returning
+  **invariant-carrying parameter types** (the same discipline as `Sigma` and
+  `std::num::NonZeroUsize`): `const fn new` for literals, `try_new` returning
   `Error::InvalidParameter` for computed values. `Harris` owns its own
   sensitivity, and its domain `0 < k < 0.25` is a consequence rather than a
   convention — `det ≤ tr²/4` for a symmetric 2×2 matrix, so at `k ≥ 0.25`

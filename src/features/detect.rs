@@ -262,11 +262,12 @@ pub trait CornerResponse<C> {
 /// (and more edges), larger values fewer. `0.04` is the conventional
 /// starting point, `0.04..=0.06` the usual range.
 ///
-/// This type *is* the invariant-carrying parameter type for `k` (ADR-0025
-/// category E): the strategy that consumes the value also owns its
-/// validation, so there is no separate newtype to thread through.
-/// Literals use the `const fn` [`new`](Self::new); values computed from data
-/// use [`try_new`](Self::try_new).
+/// This type *is* the invariant-carrying parameter type for `k` — the same
+/// discipline as [`Sigma`](crate::Sigma) and `std::num::NonZeroUsize`, with
+/// the strategy that consumes the value also owning its validation, so
+/// there is no separate newtype to thread through the API. Literals use the
+/// `const fn` [`new`](Self::new); values computed from data use
+/// [`try_new`](Self::try_new).
 ///
 /// # Why `0 < k < 0.25`
 ///
@@ -613,8 +614,9 @@ impl<P: Copy> StructureTensor<P> {
 ///   maximum of, in pixels. It sets the *minimum separation* between two
 ///   reported corners.
 ///
-/// The type carries the invariants so the detectors are total in it
-/// (ADR-0025 category E). `threshold` must be finite, because a `NaN`
+/// The type carries the invariants so the detectors are total in it — the
+/// same discipline as [`Sigma`](crate::Sigma), which is one of its fields.
+/// `threshold` must be finite, because a `NaN`
 /// threshold silently rejects every pixel — an empty result that looks like
 /// "no corners here" rather than like the mistake it is. `nms_radius` must
 /// be at least 1, since a radius of zero asks for the local maximum of a
@@ -1604,8 +1606,9 @@ mod tests {
         // localization: the window averages the two edges meeting at a
         // corner, and the average is strongest slightly *inside* it. At
         // σ = 1.0 the peak is on the corner pixel; by σ = 1.6 it has moved a
-        // pixel in along both axes. Sub-pixel refinement, not a bigger
-        // window, is the answer to that (Roadmap v0.4.0 item 12).
+        // pixel in along both axes. The answer to that is a refinement step
+        // reading the gradient field, not a smaller window — and a
+        // refinement step is deliberately not this function's job.
         let image = square(24, 8, 16);
         let corners_of = |sigma: Sigma| {
             let map: Image<MonoF32> = corner_response_map(&image, &ShiTomasi, sigma);
