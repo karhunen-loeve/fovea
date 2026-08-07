@@ -33,16 +33,25 @@
 //!
 //! ## Where the keypoints come from
 //!
-//! [`detect`](crate::features::detect) holds the detectors themselves.
-//! Today that is the
-//! structure-tensor family: [`Harris`](crate::features::detect::Harris) and
+//! [`detect`](crate::features::detect) holds the detectors themselves, in two
+//! families. The structure-tensor family reads the *gradient*:
+//! [`Harris`](crate::features::detect::Harris) and
 //! [`ShiTomasi`](crate::features::detect::ShiTomasi) are two responses over
 //! one shared pipeline, reached through
-//! [`detect_corners`](crate::features::detect::detect_corners) for a single
-//! image and
-//! [`detect_corners_in_level`](crate::features::detect::detect_corners_in_level)
-//! for a pyramid level. Both produce [`Corner`](crate::features::Corner):
-//! they localize and score, and select no scale.
+//! [`detect_corners`](crate::features::detect::detect_corners). The segment
+//! test reads 16 *raw intensities* on a ring —
+//! [`SegmentTest`](crate::features::detect::SegmentTest), the detector known
+//! as FAST, reached through [`fast`](crate::features::detect::fast). Each has
+//! a pyramid-level variant
+//! ([`detect_corners_in_level`](crate::features::detect::detect_corners_in_level),
+//! [`fast_in_level`](crate::features::detect::fast_in_level)).
+//!
+//! All of them produce [`Corner`](crate::features::Corner): they localize and
+//! score, and select no scale. That the two families — one that averages
+//! gradients over a window, one that does no arithmetic at all — need the
+//! same keypoint type and the same
+//! [`corner_peaks`](crate::features::detect::corner_peaks) stage is the
+//! evidence that this model is not shaped around a single algorithm.
 //!
 //! ## Positions live in the base-image frame
 //!

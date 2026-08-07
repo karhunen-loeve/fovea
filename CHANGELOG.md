@@ -170,6 +170,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   conditionally-valid field the capability traits exist to prevent.
   Cross-level duplicate suppression is the caller's policy — the same
   physical corner legitimately appears once per level.
+- **FAST**, the segment-test detector, as a second family in
+  `features::detect` sharing the first's keypoint type and peak stage
+  unchanged. `features::detect::fast(&image, params, &Skip)` scores every
+  pixel against the 16-pixel radius-3 ring and returns `Vec<Corner>` in
+  raster order; `fast_in_level` is the base-frame pyramid variant, and stays
+  `Corner` for the same reason `detect_corners_in_level` does. That two
+  detectors this unalike — one averaging gradients over a Gaussian window,
+  one reading seventeen raw samples — need no change to `Corner`,
+  `HasResponse`, `corner_peaks` or `retain_top_n` is the evidence the
+  keypoint model was not shaped around Harris.
+- `features::detect::SegmentTest` and `features::detect::FastParams` are
+  **invariant-carrying parameter types**, matching `Harris` / `CornerParams`:
+  `const fn new` for literals, `try_new` returning `Error::InvalidParameter`
+  for computed values. `SegmentTest` owns the threshold and the arc length
+  because neither decides anything alone, and both its domains are
+  consequences rather than conventions. The threshold must be strictly
+  positive — at `t = 0` every pixel of a flat field passes on all 16 ring
+  positions, so the detector would report the whole image. The arc length
+  must satisfy `9 <= n <= 16`: above 16 no arc exists and the detector is
+  dead, and at `n <= 8` a straight step edge (which puts up to 8 contiguous
+  ring pixels on one side) passes, so the detector stops distinguishing
+  corners from edges. As with `Harris`, both failures are silent, which is
+  why they are rejected at construction.
+- The **threshold is in intensity units**, unlike the structure tensor's:
+  `20.0` on a `Mono8` image means twenty grey levels and `0.08` on a
+  `MonoF32` image in `0.0..=1.0` means eight per cent contrast. No operator
+  gain and no squaring enter it, so it can be reasoned about — from a noise
+  estimate, say — instead of calibrated against a response map. Widening
+  uses `LinearPixel::to_accumulator`, which does not rescale, so the score is
+  reported in those same units.
+- `features::detect::fast_score_map` and `features::detect::fast_score_at`:
+  the detector's stages, public the way `corner_response_map` is. The score
+  is the **largest threshold at which the pixel still passes**, so a pixel is
+  a corner at `t` exactly when its score is at least `t` — one number serves
+  as both the segment test's threshold and the peak stage's, and raising the
+  threshold on an already-computed map is exact. The map is always the
+  input's size (so a position in it is a position in the image) and is
+  `Image<MonoF32>` whatever the input is, because `HasResponse::response`
+  is `f32` and precision the keypoint cannot carry would be precision the map
+  only pretends to have. `fast_score_at` returns `Option<f32>`: `None` is
+  "the border policy does not score this position", which is a different
+  answer from `Some(0.0)`, "scored, and not a corner".
+- Border handling reuses the crate's ordinary `BorderPolicy` vocabulary
+  rather than a FAST-specific rule. `border::Skip` is the natural choice and
+  declines the 3-pixel margin where the ring does not fit — a detection there
+  would be made from invented samples — while any full-frame policy
+  (`Clamp`, `Mirror`, `Constant`) extends the image and reports corners
+  against the frame edge. Declined positions are written as `0.0` in the map,
+  which is what every other non-corner reads.
+- `features::detect::FAST_RING` and `FAST_RING_RADIUS` are public: the ring
+  *is* the detector's geometry, its clockwise order is what "contiguous"
+  means, and drawing it over an image is how a score is explained.
+- The classical four-point early rejection ships as an **optimization behind
+  a benchmark** (`benches/features.rs`), generalised from the textbook
+  "three of four cardinals for FAST-12" to `arc_length / 4` of them for any
+  arc length — a window of `n` consecutive ring positions covers at least
+  that many of the four, however it is placed. It cannot change an answer
+  (a test asserts the shipped path matches the plain scan pixel for pixel),
+  and it is worth 1.6× at `n = 9`, 5.9× at 12 and 15× at 16 on a 512×512
+  `Mono8` texture. Its one visible consequence is documented: the score map
+  is floored at the test's own threshold, so a corner too faint for the test
+  reads `0.0` rather than its true margin.
 - `Orientation` and `AxialOrientation`: **angle vocabulary types** that state
   the one thing a bare float cannot — the **modulus**. `Orientation` is a
   *directed* angle mod 2π, canonicalized to (−π, π] (a gradient direction, a

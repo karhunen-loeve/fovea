@@ -81,8 +81,11 @@ pub mod analyze;
 ///
 /// Start with [`features::detect::detect_corners`] and a response strategy
 /// ([`features::detect::Harris`], [`features::detect::ShiTomasi`]) to find
-/// corners, and with [`features::Corner`] /
-/// [`features::ScaleKeypoint`] to understand what comes back. Consumers
+/// corners from the gradient, or with [`features::detect::fast`] and a
+/// [`features::detect::SegmentTest`] to find them from raw intensities on a
+/// ring; and with [`features::Corner`] /
+/// [`features::ScaleKeypoint`] to understand what comes back — both families
+/// produce the same type and share the same peak stage. Consumers
 /// bind the minimum capability they need — [`features::HasPosition`],
 /// [`features::HasResponse`], [`features::HasScale`],
 /// [`features::HasOrientation`] — instead of accepting one struct with

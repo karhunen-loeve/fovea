@@ -46,6 +46,10 @@ harness = false
 name = "geometry"
 harness = false
 
+[[bench]]
+name = "features"
+harness = false
+
 [[example]]
 name = "hello_image"
 
