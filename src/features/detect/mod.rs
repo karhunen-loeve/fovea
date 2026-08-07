@@ -22,15 +22,26 @@
 //!   is.
 //!
 //! Note what is *not* on that list. FAST is famous for being cheap, and in
-//! this crate it is not yet reliably cheaper: on the `benches/features.rs`
-//! 512×512 `Mono8` texture (2026-08-07) [`fast`] at `arc_length = 9` takes
-//! about 1.7× as long as [`detect_corners`] with [`Harris`], and only pulls
-//! ahead at longer arcs (`fast_score_map` at 16 is roughly 4× faster than the
-//! Harris response map). The tensor family spends its time in separable
-//! blurs that vectorize; the segment test is a scalar per-pixel scan whose
-//! four-cardinal early rejection only bites in proportion to the arc length.
-//! Closing that gap is a job for the performance pass, not a reason to
-//! prefer one detector's *answers* over the other's.
+//! this crate it is not yet reliably cheaper — it depends on the arc length.
+//! Map against map on the `benches/features.rs` 512×512 `Mono8` texture
+//! (2026-08-07):
+//!
+//! | Stage | Median |
+//! |---|---|
+//! | [`fast_score_map`], `arc_length = 9` | 87 ms |
+//! | [`fast_score_map`], `arc_length = 12` | 25 ms |
+//! | [`fast_score_map`], `arc_length = 16` | 13 ms |
+//! | [`corner_response_map`], [`Harris`] | 53 ms |
+//! | [`corner_response_map`], [`ShiTomasi`] | 50 ms |
+//!
+//! So the segment test is 1.7× *slower* at the arc length most people want
+//! and 4× faster at the one most people do not. The tensor family spends its
+//! time in separable blurs that vectorize; the segment test is a scalar
+//! per-pixel scan whose four-cardinal early rejection only bites in
+//! proportion to the arc length. Closing that gap is a job for the
+//! performance pass, not a reason to prefer one detector's *answers* over the
+//! other's — and peak selection is not where the time goes either, at under
+//! 3 ms for both families.
 //!
 //! Both produce [`Corner`](crate::features::Corner), both go through
 //! [`corner_peaks`], and both have a pyramid variant that reports in the

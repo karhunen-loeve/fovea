@@ -616,9 +616,9 @@ where
 /// The four cardinal ring samples are read and tested first; the other twelve
 /// and the arc scan are reached only by the pixels [`cardinals_admit`] cannot
 /// rule out. On the `benches/features.rs` texture (512×512 `Mono8`,
-/// 2026-08-07) that is worth 1.6× at `arc_length = 9`, 5.9× at 12 and 15× at
-/// 16 — the filter needs `arc_length / 4` cardinals, so it grows teeth as the
-/// arc gets longer.
+/// 2026-08-07) that is worth ≈1.6× at `arc_length = 9`, ≈5.8× at 12 and ≈14×
+/// at 16 — the filter needs `arc_length / 4` cardinals, so it grows teeth as
+/// the arc gets longer, and is weakest exactly where FAST-9 needs it most.
 fn score_in_region<I, P, Acc, B>(
     image: &I,
     x: usize,

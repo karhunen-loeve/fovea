@@ -15,10 +15,11 @@ use criterion::{Criterion, criterion_group, criterion_main};
 use fovea::Sigma;
 use fovea::border::Skip;
 use fovea::features::detect::{
-    CornerParams, FastParams, Harris, SegmentTest, ShiTomasi, detect_corners, fast, fast_score_map,
+    CornerParams, FastParams, Harris, SegmentTest, ShiTomasi, corner_response_map, detect_corners,
+    fast, fast_score_map,
 };
 use fovea::image::Image;
-use fovea::pixel::Mono8;
+use fovea::pixel::{Mono8, MonoF32};
 
 /// A deterministic pseudo-texture: enough structure that the detectors have
 /// real work to do, and no dependence on a random-number generator.
@@ -45,6 +46,28 @@ fn criterion_benchmark(c: &mut Criterion) {
             b.iter(|| fast_score_map(black_box(&image), test, &Skip))
         });
     }
+
+    // The tensor family's equivalent stage, so the map-to-map comparison is
+    // like for like: both produce one `Image<MonoF32>` and neither has
+    // selected a peak yet.
+    group.bench_function("harris response map 512x512 Mono8", |b| {
+        b.iter(|| {
+            corner_response_map::<_, _, _, MonoF32>(
+                black_box(&image),
+                &Harris::new(0.04),
+                Sigma::new(1.4),
+            )
+        })
+    });
+    group.bench_function("shi-tomasi response map 512x512 Mono8", |b| {
+        b.iter(|| {
+            corner_response_map::<_, _, _, MonoF32>(
+                black_box(&image),
+                &ShiTomasi,
+                Sigma::new(1.4),
+            )
+        })
+    });
 
     // The whole detector, so the peak stage is included in the comparison.
     let fast_params = FastParams::new(SegmentTest::new(20.0, 9), 3);
