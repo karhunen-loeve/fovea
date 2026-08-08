@@ -17,7 +17,7 @@
 //! - [`connected_components_with_measurements`] \u2014 allocating; returns one
 //!   [`BlobMeasurements`] per component: everything in `ComponentStats`
 //!   plus the raw second-order moment sums and a 4-connected
-//!   boundary-pixel perimeter, from which shape descriptors (equivalent
+//!   boundary-pixel count, from which shape descriptors (equivalent
 //!   diameter, orientation, eccentricity, circularity) are derived on
 //!   demand. Heavier than `_with_stats` (adds a per-pixel boundary check);
 //!   use it only when you need shape, not just area/bbox.

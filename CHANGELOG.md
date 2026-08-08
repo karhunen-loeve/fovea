@@ -257,8 +257,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `PartialOrd`: on a circle there is no least angle, and `a < b` would invite
   reading "counter-clockwise of", which it is not.
 
+- `analyze::contours`: **contour extraction**, giving blobs geometry where
+  the component measurements give them aggregates.
+  `contours::extract_contours(&binary)` labels the foreground with the
+  caller's connectivity and the background with its **dual** (8-connected
+  foreground pairs with 4-connected background and vice versa — the
+  pairing that keeps "hole" well defined on the grid), classifies each
+  background region as outside or hole, and Moore-traces every component's
+  outer border plus one inner border per hole. It returns the `Labeling`
+  alongside a `contours::ContourHierarchy` indexed the same way (component
+  `i` ↔ label `i + 1`), so contours join the stats and measurements tables
+  with no translation. Nesting is explicit and unbounded:
+  `ComponentContour::enclosing` names the component inside whose hole this
+  one sits, and `ComponentContour::euler_number` is `1 − holes`. Thin
+  structures trace out-and-back and single pixels yield one-point
+  contours — both terminate, which is exactly the case the textbook
+  stopping shorthand gets wrong.
+- `contours::Contour`: a **certified traced border** — a closed chain of
+  integer border pixels in trace order, consecutive points 8-adjacent by
+  construction, outer borders clockwise on screen and hole borders
+  counterclockwise (a documented property; the outer/hole distinction is
+  the explicit `ContourKind`, never decoded from winding). Shape
+  descriptors are derived on demand in `f64` and degenerate cases are
+  `Option`, not NaN: `area` (shoelace, through pixel *centers* — a 6×6-px
+  square measures 25.0, a different question than the pixel-count 36),
+  `perimeter` (exact polygon length, diagonals √2), `centroid`,
+  `circularity`, `convex_hull`, `solidity`, `chain_code`. There is no
+  public constructor — arbitrary vertex lists use the free polygon
+  functions instead.
+- The contour-side `circularity` is the **geometric** score the
+  boundary-pixel count cannot be: bounded by ~1 instead of reading ≈1.25
+  for a rasterised disc. It is not bias-free — the traced chain carries
+  the 8-connected staircase, so a disc of radius 20 measures ≈0.87 raw
+  and ≈0.94 after Douglas–Peucker at ε = 0.8 — and the residual is
+  documented with numbers rather than rounded away. No estimator with
+  fitted weights is applied silently; if the underlying outline is smooth,
+  simplifying first is the caller's named step.
+- `contours::polygon_area` / `polygon_perimeter` / `polygon_centroid` /
+  `convex_hull` / `approximate_polygon`: **free polygon functions** over
+  any `&[Coordinate]` treated as a closed polygon, shared by `Contour`'s
+  methods and usable on simplified vertex lists. The shoelace and hull
+  arithmetic is exact in integers (`i128` accumulation, no epsilon);
+  `convex_hull` is Andrew's monotone chain returning strict corners in
+  clockwise-on-screen order, deterministic and input-order-invariant.
+  `approximate_polygon` is Douglas–Peucker over a closed polygon with an
+  **explicit ε** — nothing in the crate ever simplifies a contour
+  implicitly, because the right tolerance is a claim about *your* images.
+- `contours::ChainCode` / `contours::ChainDirection`: the compact
+  encoding — a start pixel plus one byte-sized Freeman direction per
+  border step, with the y-down offsets stated on each variant.
+  `ChainCode::from_contour` is total (8-adjacency is certified by
+  `Contour`) and `to_points` round-trips exactly.
+- `Tolerance`: a third **invariant-carrying parameter type** beside
+  `Sigma` and `PixelDistance` — a geometric tolerance in pixels, finite
+  and non-negative. Zero is deliberately valid (ε = 0 removes exactly the
+  collinear vertices), which is why the strictly-positive `PixelDistance`
+  was not reused. `const fn new` for literals, `try_new` returning
+  `Error::InvalidParameter` for computed values.
+- `analyze::components::Connectivity::Dual`: each connectivity now names
+  the connectivity the background must be labeled with when the foreground
+  uses it (`Connectivity8::Dual = Connectivity4` and vice versa). Additive:
+  the trait is sealed, so no external implementor can break.
+
 ### Changed
 
+- **Breaking:** `BlobMeasurements::perimeter` is renamed to
+  **`boundary_pixels`**. The value is unchanged — the count of 4-connected
+  boundary pixels — but a pixel *count* is not a geometric length, and a
+  field named `perimeter` invited using it as one (the documented
+  `circularity ≈ 1.25` artifact is that misuse, baked in). The honest
+  perimeter is now available where a length is meant:
+  `Contour::perimeter` from `analyze::contours` (see *Added*).
+  `BlobMeasurements::circularity()` keeps its cheap single-pass semantics
+  and its documented bias, and now points at `Contour::circularity` for
+  the geometric score.
 - **Breaking:** the error-handling convention was sharpened: a `panic!` is
   reserved for contracts that are locally decidable at the call site
   (indexed access with a `get` alternative, caller-allocated `_into`

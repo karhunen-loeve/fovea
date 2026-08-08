@@ -98,6 +98,6 @@ pub mod guide;
 // ── Core vocabulary types (module-agnostic, kept at root) ────────────────────
 pub use common::{
     AxialOrientation, Coordinate, CoordinateF64, Orientation, PixelDistance, Rectangle, Sigma,
-    Size, Stride,
+    Size, Stride, Tolerance,
 };
 pub use error::Error;

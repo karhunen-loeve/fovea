@@ -32,6 +32,17 @@ pub trait Connectivity: sealed::Sealed + Copy {
     /// Offsets `(dx, dy)` of those neighbours. All have `dy <= 0`, and
     /// when `dy == 0` then `dx < 0` \u2014 i.e. raster-scan-preceding only.
     const OFFSETS: &'static [(i32, i32)];
+
+    /// The connectivity the *background* must be labeled with when the
+    /// foreground is labeled with `Self`.
+    ///
+    /// 8-connected foreground pairs with 4-connected background and vice
+    /// versa. Using the same connectivity for both sides breaks the
+    /// discrete Jordan curve property: a diagonal foreground line would
+    /// either connect across itself *and* leave the background it
+    /// separates connected, or neither. Contour extraction relies on the
+    /// duality to classify holes.
+    type Dual: Connectivity;
 }
 
 /// 4-connectivity: a pixel is connected to its N and W already-visited
@@ -53,6 +64,7 @@ impl Connectivity for Connectivity4 {
     const NEIGHBOURS: usize = 2;
     // W, N \u2014 the two raster-preceding orthogonal neighbours.
     const OFFSETS: &'static [(i32, i32)] = &[(-1, 0), (0, -1)];
+    type Dual = Connectivity8;
 }
 
 impl Connectivity for Connectivity8 {
@@ -60,6 +72,7 @@ impl Connectivity for Connectivity8 {
     // NW, N, NE, W \u2014 the four raster-preceding neighbours, top row
     // left-to-right then current-row west.
     const OFFSETS: &'static [(i32, i32)] = &[(-1, -1), (0, -1), (1, -1), (-1, 0)];
+    type Dual = Connectivity4;
 }
 
 #[cfg(test)]

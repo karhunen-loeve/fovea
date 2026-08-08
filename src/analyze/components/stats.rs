@@ -6,7 +6,7 @@
 //!
 //! The v1 scope is deliberately small: `area`, axis-aligned bounding
 //! box (as inclusive min/max coordinates), and `sum_x` / `sum_y` for
-//! the integer centroid. Higher-order moments, perimeter, holes,
+//! the integer centroid. Higher-order moments, boundary pixels, holes,
 //! Euler number, orientation, convexity, and intensity measurements
 //! are deferred to follow-up work.
 
@@ -186,9 +186,9 @@ pub(super) mod sink {
     }
 
     /// Sink that accumulates per-component [`BlobMeasurements`] (moments
-    /// and perimeter) into a `Vec` indexed by `compact_label - 1`. Sets
+    /// and boundary count) into a `Vec` indexed by `compact_label - 1`. Sets
     /// `NEEDS_BOUNDARY = true` so the engine runs the per-pixel boundary
-    /// check that feeds the perimeter count.
+    /// check that feeds the boundary count.
     pub(crate) struct WithMeasurements<'a> {
         pub(crate) out: &'a mut Vec<BlobMeasurements>,
     }

@@ -390,6 +390,69 @@ impl PixelDistance {
     }
 }
 
+/// A validated geometric tolerance in pixels: finite and non-negative.
+///
+/// The maximum deviation a caller is willing to accept, e.g. the ε of
+/// [`approximate_polygon`](crate::analyze::contours::approximate_polygon).
+/// Unlike [`Sigma`] and [`PixelDistance`], **zero is a valid value** — a
+/// tolerance of `0.0` accepts no deviation at all (for polygon
+/// approximation: only exactly collinear vertices are removed). Same
+/// construction discipline as the other parameter types:
+/// [`Tolerance::new`] (const, panics — a compile error in `const`
+/// contexts) for literals, [`Tolerance::try_new`] for computed values.
+///
+/// # Example
+///
+/// ```
+/// use fovea::Tolerance;
+///
+/// const HALF_PIXEL: Tolerance = Tolerance::new(0.5);
+/// assert_eq!(HALF_PIXEL.get(), 0.5);
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
+pub struct Tolerance(f64);
+
+impl Tolerance {
+    /// Creates a `Tolerance` from a literal or otherwise proven-valid
+    /// value.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `value` is NaN, infinite, or negative. As a `const fn`,
+    /// this is a **compile error** when evaluated in a `const` context.
+    /// For values computed from data, use [`Self::try_new`].
+    #[must_use]
+    pub const fn new(value: f64) -> Self {
+        assert!(
+            value.is_finite() && value >= 0.0,
+            "Tolerance::new: tolerance must be finite and non-negative"
+        );
+        Self(value)
+    }
+
+    /// Creates a `Tolerance` from a computed value, validating it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidParameter`] if `value` is NaN, infinite,
+    /// or negative.
+    pub fn try_new(value: f64) -> Result<Self, Error> {
+        if value.is_finite() && value >= 0.0 {
+            Ok(Self(value))
+        } else {
+            Err(Error::InvalidParameter(format!(
+                "tolerance must be finite and non-negative, got {value}"
+            )))
+        }
+    }
+
+    /// Returns the raw value.
+    #[must_use]
+    pub const fn get(self) -> f64 {
+        self.0
+    }
+}
+
 /// Canonicalizes a radian value into `(−π, π]`.
 fn wrap_two_pi(radians: f32) -> f32 {
     const PI: f32 = core::f32::consts::PI;

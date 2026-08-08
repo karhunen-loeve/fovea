@@ -137,7 +137,7 @@ where
 /// Compute the connected-component labeling of `image`, plus one
 /// [`BlobMeasurements`] per foreground component: area, bounding box,
 /// centroid sums, the raw second-order moment sums, and a 4-connected
-/// boundary-pixel perimeter count. From these the shape descriptors
+/// boundary-pixel count. From these the shape descriptors
 /// (equivalent diameter, orientation, eccentricity, circularity) are
 /// derived on demand — see [`BlobMeasurements`].
 ///
@@ -145,19 +145,19 @@ where
 /// there is no separate contour extraction. This is the heavier sibling
 /// of [`connected_components_with_stats`]: it additionally runs a
 /// per-foreground-pixel 4-neighbour boundary check to count the
-/// perimeter. Reach for [`connected_components_with_stats`] when you only
-/// need area / bounding box / centroid.
+/// boundary pixels. Reach for [`connected_components_with_stats`] when
+/// you only need area / bounding box / centroid.
 ///
 /// # Two non-obvious contracts
 ///
-/// - **The perimeter boundary test is 4-connected regardless of the
+/// - **The boundary test is 4-connected regardless of the
 ///   labeling [`Connectivity`] `C`.** `C` decides which pixels form a
 ///   blob; the boundary test decides how its outline is counted. A
-///   `Connectivity8` caller still gets a 4-connected perimeter — correct,
-///   because perimeter is a property of the blob's pixel set, not of the
-///   grouping rule.
+///   `Connectivity8` caller still gets a 4-connected boundary count —
+///   correct, because the boundary is a property of the blob's pixel set,
+///   not of the grouping rule.
 /// - **Measurements are view-relative.** A blob clipped by the view edge
-///   is measured as clipped: its cut edge counts toward the perimeter and
+///   is measured as clipped: its cut edge counts toward the boundary and
 ///   `area` / `bbox` / centroid cover only the in-view part. When tiling,
 ///   use an overlapping margin and keep only blobs whose full extent lies
 ///   in the non-overlapped core.
@@ -176,13 +176,13 @@ where
 /// use fovea::image::BinaryImage;
 /// use fovea::pixel::Label32;
 ///
-/// // A solid 3x3 square: area 9, perimeter 8 (4·3 − 4).
+/// // A solid 3x3 square: area 9, boundary pixels 8 (4·3 − 4).
 /// let img = BinaryImage::fill(3, 3, true);
 /// let (lab, m) =
 ///     connected_components_with_measurements::<Label32, Connectivity4>(&img).unwrap();
 /// assert_eq!(lab.label_count, 1);
 /// assert_eq!(m[0].area, 9);
-/// assert_eq!(m[0].perimeter, 8);
+/// assert_eq!(m[0].boundary_pixels, 8);
 /// ```
 pub fn connected_components_with_measurements<L, C>(
     image: &impl RasterImage<Pixel = bool>,
@@ -360,10 +360,10 @@ where
 /// The caller guarantees `(x, y)` is itself foreground. Off-view
 /// neighbours (`image.get` → `None`) count as boundary — this is what
 /// makes measurements *view-relative*: a blob clipped by the view edge
-/// has its cut edge counted as perimeter.
+/// has its cut edge counted as boundary.
 ///
 /// This test is fixed at 4-connectivity regardless of the labeling
-/// [`Connectivity`], because a blob's perimeter is a property of its
+/// [`Connectivity`], because a blob's boundary is a property of its
 /// pixel *set*, not of the rule that grouped the pixels.
 #[inline]
 fn is_4_boundary<I>(image: &I, x: usize, y: usize) -> bool
@@ -820,7 +820,7 @@ mod tests {
     // Measurements entry-point tests ──────────────────────────────────
 
     #[test]
-    fn measurements_perimeter_of_square_is_exact() {
+    fn measurements_boundary_pixels_of_square_is_exact() {
         // Solid 5x5 square → boundary-pixel count = 4·5 − 4 = 16.
         let img = BinaryImage::fill(5, 5, true);
         let (lab, m) =
@@ -828,7 +828,7 @@ mod tests {
         assert_eq!(lab.label_count, 1);
         assert_eq!(m.len(), 1);
         assert_eq!(m[0].area, 25);
-        assert_eq!(m[0].perimeter, 16);
+        assert_eq!(m[0].boundary_pixels, 16);
         // Moments match the cheap path for the shared fields.
         assert_eq!(m[0].centroid(), crate::CoordinateF64::new(2.0, 2.0));
     }
@@ -842,7 +842,7 @@ mod tests {
             connected_components_with_measurements::<Label32, Connectivity4>(&img).unwrap();
         assert_eq!(m.len(), 1);
         assert_eq!(m[0].area, 1);
-        assert_eq!(m[0].perimeter, 1);
+        assert_eq!(m[0].boundary_pixels, 1);
         assert_eq!(m[0].eccentricity(), 0.0);
         assert!(m[0].orientation().radians().is_finite());
         assert!(m[0].circularity().is_finite());
@@ -877,10 +877,10 @@ mod tests {
     }
 
     #[test]
-    fn measurements_connectivity4_vs_8_perimeter() {
+    fn measurements_connectivity4_vs_8_boundary_pixels() {
         // Two pixels touching only diagonally. Under Connectivity4 they
-        // are two separate 1-pixel blobs (perimeter 1 each); under
-        // Connectivity8 they form one blob whose perimeter is the
+        // are two separate 1-pixel blobs (boundary count 1 each); under
+        // Connectivity8 they form one blob whose boundary count is the
         // 4-connected boundary count of the two-pixel set = 2 (each pixel
         // has a background 4-neighbour, so both are boundary pixels). The
         // boundary test stays 4-connected regardless of the labeling C.
@@ -897,7 +897,7 @@ mod tests {
         assert_eq!(m4.len(), 2);
         for m in &m4 {
             assert_eq!(m.area, 1);
-            assert_eq!(m.perimeter, 1);
+            assert_eq!(m.boundary_pixels, 1);
         }
 
         let (lab8, m8) =
@@ -905,16 +905,16 @@ mod tests {
         assert_eq!(lab8.label_count, 1);
         assert_eq!(m8.len(), 1);
         assert_eq!(m8[0].area, 2);
-        assert_eq!(m8[0].perimeter, 2);
+        assert_eq!(m8[0].boundary_pixels, 2);
     }
 
     #[test]
-    fn measurements_roi_clips_perimeter() {
+    fn measurements_roi_clips_boundary_pixels() {
         // A solid 3-wide, full-height bar in a 5x5 image; the ROI is the
         // left 3x3 corner. Inside the ROI the visible blob is a 3x3 solid
         // square, but its right and bottom edges are cut by the view, so
         // those pixels still count as boundary (off-view neighbour). The
-        // clipped square measures area 9, perimeter 8 — as if it were a
+        // clipped square measures area 9, boundary count 8 — as if it were a
         // standalone 3x3 square — confirming the view-relative contract.
         let img = img_from_str(
             r#"
@@ -933,8 +933,8 @@ mod tests {
         assert_eq!(lab.label_count, 1);
         assert_eq!(m[0].area, 9);
         // 3x3 block with all four view edges cutting it → every pixel is a
-        // boundary pixel except the centre → perimeter 8.
-        assert_eq!(m[0].perimeter, 8);
+        // boundary pixel except the centre → boundary count 8.
+        assert_eq!(m[0].boundary_pixels, 8);
         assert_eq!(m[0].bbox(), Rectangle::new(Coordinate::new(0, 0), Size::new(3, 3)));
     }
 }
