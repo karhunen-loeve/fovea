@@ -17,6 +17,7 @@ pub struct Size {
 }
 impl Size {
     /// Creates a `Size` with the given `width` and `height`.
+    #[inline]
     pub fn new(width: usize, height: usize) -> Self {
         Self { width, height }
     }
@@ -25,6 +26,7 @@ impl Size {
     /// # Panics
     /// Panics if the multiplication overflows `usize`. For untrusted or
     /// large dimensions prefer [`Self::checked_area`].
+    #[inline]
     pub fn area(&self) -> usize {
         self.width
             .checked_mul(self.height)
@@ -42,6 +44,7 @@ impl Size {
 }
 
 impl From<(usize, usize)> for Size {
+    #[inline]
     fn from(value: (usize, usize)) -> Self {
         Self::new(value.0, value.1)
     }
@@ -65,12 +68,14 @@ pub struct Coordinate {
 }
 impl Coordinate {
     /// Creates a `Coordinate` at the given `(x, y)` position.
+    #[inline]
     pub fn new(x: usize, y: usize) -> Self {
         Self { x, y }
     }
 }
 
 impl From<(usize, usize)> for Coordinate {
+    #[inline]
     fn from(value: (usize, usize)) -> Self {
         Self::new(value.0, value.1)
     }
@@ -98,18 +103,21 @@ pub struct CoordinateF64 {
 }
 impl CoordinateF64 {
     /// Creates a `CoordinateF64` at the given `(x, y)` position.
+    #[inline]
     pub fn new(x: f64, y: f64) -> Self {
         Self { x, y }
     }
 }
 
 impl From<(f64, f64)> for CoordinateF64 {
+    #[inline]
     fn from(value: (f64, f64)) -> Self {
         Self::new(value.0, value.1)
     }
 }
 
 impl From<Coordinate> for CoordinateF64 {
+    #[inline]
     fn from(value: Coordinate) -> Self {
         Self::new(value.x as f64, value.y as f64)
     }
@@ -137,6 +145,7 @@ pub struct Rectangle {
 
 impl Rectangle {
     /// Creates a `Rectangle` with the given top-left `offset` and `size`.
+    #[inline]
     pub fn new(offset: impl Into<Coordinate>, size: impl Into<Size>) -> Self {
         Self {
             offset: offset.into(),
@@ -144,10 +153,12 @@ impl Rectangle {
         }
     }
     /// Returns the area as `size.width * size.height`.
+    #[inline]
     pub fn area(&self) -> usize {
         self.size.area()
     }
     /// Returns the x-coordinate of the left edge (`offset.x`).
+    #[inline]
     pub fn left(&self) -> usize {
         self.offset.x
     }
@@ -156,6 +167,7 @@ impl Rectangle {
     /// # Panics
     /// Panics on `usize` overflow. For untrusted geometry, use
     /// [`Self::checked_right`].
+    #[inline]
     pub fn right(&self) -> usize {
         self.offset
             .x
@@ -163,6 +175,7 @@ impl Rectangle {
             .expect("Rectangle::right: offset.x + size.width overflows usize")
     }
     /// Returns the y-coordinate of the top edge (`offset.y`).
+    #[inline]
     pub fn top(&self) -> usize {
         self.offset.y
     }
@@ -171,6 +184,7 @@ impl Rectangle {
     /// # Panics
     /// Panics on `usize` overflow. For untrusted geometry, use
     /// [`Self::checked_bottom`].
+    #[inline]
     pub fn bottom(&self) -> usize {
         self.offset
             .y
@@ -221,38 +235,45 @@ pub struct Stride(Size);
 
 impl Stride {
     /// Creates a new `Stride` with the given horizontal and vertical step.
+    #[inline]
     pub fn new(horizontal: usize, vertical: usize) -> Self {
         Self(Size::new(horizontal, vertical))
     }
 
     /// Unit stride — advances by one pixel in each direction.
+    #[inline]
     pub fn one() -> Self {
         Self(Size::new(1, 1))
     }
 
     /// The horizontal step (number of pixels to advance in x).
+    #[inline]
     pub fn horizontal(&self) -> usize {
         self.0.width
     }
 
     /// The vertical step (number of pixels to advance in y).
+    #[inline]
     pub fn vertical(&self) -> usize {
         self.0.height
     }
 
     /// Returns the inner `Size`.
+    #[inline]
     pub fn as_size(&self) -> Size {
         self.0
     }
 }
 
 impl From<Size> for Stride {
+    #[inline]
     fn from(size: Size) -> Self {
         Self(size)
     }
 }
 
 impl From<(usize, usize)> for Stride {
+    #[inline]
     fn from(value: (usize, usize)) -> Self {
         Self(Size::new(value.0, value.1))
     }
