@@ -3,6 +3,10 @@ use core::marker::PhantomData;
 #[cfg(test)]
 use crate::image::ImageView;
 use crate::image::{Image, RasterImage, RasterImageMut};
+use crate::pixel::bayer::{
+    BayerBggr, BayerBggr8, BayerBggr16, BayerGbrg, BayerGbrg8, BayerGbrg16, BayerGrbg, BayerGrbg8,
+    BayerGrbg16, BayerRggb, BayerRggb8, BayerRggb16,
+};
 use crate::pixel::{
     Array, Bgr8, Bgr16, Bgr32, Bgr64, BgrF32, BgrF64, Bgra8, Bgra16, Bgra32, Bgra64, BgraF32,
     BgraF64, HomogeneousPixel, Indexed8, Mono, Mono8, Mono16, Mono32, Mono64, MonoA8, MonoA16,
@@ -2603,6 +2607,93 @@ impl<P: Copy> ConvertPixel<Indexed8, P> for Depalettize<P> {
         self.palette[src.0 as usize]
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// BayerToMono — the named escape hatch out of the CFA type family
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// Drops the colour-filter-array meaning of a raw Bayer sample, keeping the
+/// number.
+///
+/// A [`Bayer pixel`](crate::pixel::bayer) knows *which* colour it sampled,
+/// because that follows from the CFA pattern and its position. The matching
+/// `Mono` type knows only the intensity. Converting is therefore a real loss
+/// — and, like every lossy transformation in this crate, the caller has to
+/// name it. There is no `From<BayerRggb12> for Mono12`.
+///
+/// Reach for it when you genuinely want coordinate-blind raw samples:
+/// writing a raw file, feeding a generic monochrome statistic, or
+/// interoperating with an algorithm that predates the Bayer types. Do **not**
+/// reach for it to get around the missing
+/// [`LinearSpace`](crate::pixel::LinearSpace) or
+/// [`OriginInvariantPixel`](crate::pixel::OriginInvariantPixel) impls —
+/// resizing or odd-origin cropping the result is exactly as wrong as it was
+/// before, only now the compiler has been talked out of saying so.
+///
+/// Depth is preserved (`BayerRggb12 → Mono12`); changing depth afterwards is
+/// a second, separately named step, composable with
+/// [`ConvertPixelExt::then`].
+///
+/// # Examples
+///
+/// ```
+/// # use fovea::pixel::{Mono12, bayer::BayerRggb12};
+/// # use fovea::transform::{BayerToMono, ConvertPixel};
+/// let sample = BayerRggb12::new(2048);
+/// let grey: Mono12 = BayerToMono.convert(&sample);
+/// assert_eq!(grey, Mono12::new(2048));
+/// ```
+///
+/// Whole images go through [`convert_image`]:
+///
+/// ```
+/// # use fovea::image::{Image, ImageView};
+/// # use fovea::pixel::{Mono8, bayer::BayerGbrg8};
+/// # use fovea::transform::{BayerToMono, convert_image};
+/// let raw = Image::fill(4, 4, BayerGbrg8::new(77));
+/// let grey: Image<Mono8> = convert_image(&raw, BayerToMono);
+/// assert_eq!(grey.pixel_at(0, 0), Mono8::new(77));
+/// ```
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct BayerToMono;
+
+macro_rules! impl_bayer_to_mono {
+    ($($Bayer:ty => $Mono:ty),+ $(,)?) => {
+        $(
+            impl ConvertPixel<$Bayer, $Mono> for BayerToMono {
+                #[inline]
+                fn convert(&self, src: &$Bayer) -> $Mono {
+                    <$Mono>::new(src.value())
+                }
+            }
+        )+
+    };
+}
+
+impl_bayer_to_mono! {
+    BayerRggb8 => Mono8, BayerRggb16 => Mono16,
+    BayerBggr8 => Mono8, BayerBggr16 => Mono16,
+    BayerGrbg8 => Mono8, BayerGrbg16 => Mono16,
+    BayerGbrg8 => Mono8, BayerGbrg16 => Mono16,
+}
+
+// The sub-word depths are const-generic on both sides, so one impl per
+// pattern covers 10, 12, and 14 bits. `Mono::new` re-clamps, which is a
+// no-op here: the source already satisfies the same `BITS` invariant.
+macro_rules! impl_bayer_to_mono_generic {
+    ($($Bayer:ident),+ $(,)?) => {
+        $(
+            impl<const BITS: usize> ConvertPixel<$Bayer<BITS>, Mono<BITS>> for BayerToMono {
+                #[inline]
+                fn convert(&self, src: &$Bayer<BITS>) -> Mono<BITS> {
+                    Mono::new(src.value())
+                }
+            }
+        )+
+    };
+}
+
+impl_bayer_to_mono_generic!(BayerRggb, BayerBggr, BayerGrbg, BayerGbrg);
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // PixelMap — closure-based custom conversion
@@ -10066,5 +10157,102 @@ mod tests {
             <MonoA32 as WhiteChannel>::white_channel(),
             <<MonoA32 as HomogeneousPixel>::Channel as BoundedChannel>::MAX
         );
+    }
+}
+
+#[cfg(test)]
+mod bayer_to_mono_tests {
+    use super::*;
+    use crate::image::{Image, ImageView};
+    use crate::pixel::bayer::{
+        BayerBggr8, BayerBggr10, BayerBggr12, BayerBggr14, BayerBggr16, BayerGbrg8, BayerGbrg10,
+        BayerGbrg12, BayerGbrg14, BayerGbrg16, BayerGrbg8, BayerGrbg10, BayerGrbg12, BayerGrbg14,
+        BayerGrbg16, BayerRggb8, BayerRggb10, BayerRggb12, BayerRggb14, BayerRggb16,
+    };
+    use crate::pixel::{Mono8, Mono10, Mono12, Mono14, Mono16};
+
+    /// Asserts that `BayerToMono` maps a sample to the same-depth `Mono`
+    /// value, for one `(Bayer, Mono)` pair.
+    macro_rules! assert_pair {
+        ($Bayer:ty, $Mono:ty, $v:expr) => {{
+            let out: $Mono = BayerToMono.convert(&<$Bayer>::new($v));
+            assert_eq!(
+                out,
+                <$Mono>::new($v),
+                concat!(stringify!($Bayer), " -> ", stringify!($Mono))
+            );
+        }};
+    }
+
+    #[test]
+    fn every_bayer_type_converts_to_its_same_depth_mono() {
+        assert_pair!(BayerRggb8, Mono8, 42);
+        assert_pair!(BayerBggr8, Mono8, 42);
+        assert_pair!(BayerGrbg8, Mono8, 42);
+        assert_pair!(BayerGbrg8, Mono8, 42);
+
+        assert_pair!(BayerRggb10, Mono10, 1000);
+        assert_pair!(BayerBggr10, Mono10, 1000);
+        assert_pair!(BayerGrbg10, Mono10, 1000);
+        assert_pair!(BayerGbrg10, Mono10, 1000);
+
+        assert_pair!(BayerRggb12, Mono12, 4000);
+        assert_pair!(BayerBggr12, Mono12, 4000);
+        assert_pair!(BayerGrbg12, Mono12, 4000);
+        assert_pair!(BayerGbrg12, Mono12, 4000);
+
+        assert_pair!(BayerRggb14, Mono14, 16000);
+        assert_pair!(BayerBggr14, Mono14, 16000);
+        assert_pair!(BayerGrbg14, Mono14, 16000);
+        assert_pair!(BayerGbrg14, Mono14, 16000);
+
+        assert_pair!(BayerRggb16, Mono16, 65000);
+        assert_pair!(BayerBggr16, Mono16, 65000);
+        assert_pair!(BayerGrbg16, Mono16, 65000);
+        assert_pair!(BayerGbrg16, Mono16, 65000);
+    }
+
+    #[test]
+    fn the_extremes_of_each_depth_survive_unchanged() {
+        assert_pair!(BayerRggb8, Mono8, 0);
+        assert_pair!(BayerRggb8, Mono8, 255);
+        assert_pair!(BayerRggb10, Mono10, 1023);
+        assert_pair!(BayerRggb12, Mono12, 4095);
+        assert_pair!(BayerRggb14, Mono14, 16383);
+        assert_pair!(BayerRggb16, Mono16, 65535);
+    }
+
+    #[test]
+    fn whole_images_convert_through_convert_image() {
+        let raw = Image::generate(4, 4, |x, y| BayerGrbg12::new((x + y * 4) as u16));
+        let grey: Image<Mono12> = convert_image(&raw, BayerToMono);
+        assert_eq!(grey.size(), raw.size());
+        for y in 0..4 {
+            for x in 0..4 {
+                assert_eq!(grey.pixel_at(x, y), Mono12::new((x + y * 4) as u16));
+            }
+        }
+    }
+
+    #[test]
+    fn the_pattern_is_the_only_thing_dropped() {
+        // Four different patterns, one value: the strategy is deliberately
+        // position- and pattern-blind, which is exactly what makes it a
+        // *named* escape hatch rather than a demosaic.
+        let v = 1234u16;
+        let a: Mono12 = BayerToMono.convert(&BayerRggb12::new(v));
+        let b: Mono12 = BayerToMono.convert(&BayerBggr12::new(v));
+        let c: Mono12 = BayerToMono.convert(&BayerGrbg12::new(v));
+        let d: Mono12 = BayerToMono.convert(&BayerGbrg12::new(v));
+        assert_eq!([a, b, c, d], [Mono12::new(v); 4]);
+    }
+
+    #[test]
+    fn it_composes_with_a_second_named_step() {
+        // Drop the CFA meaning, then narrow the depth — two named losses,
+        // one expression, one pass.
+        let raw = Image::fill(2, 2, BayerRggb12::new(4095));
+        let out: Image<Mono8> = convert_image(&raw, BayerToMono.then::<Mono12, _>(FullRange));
+        assert_eq!(out.pixel_at(0, 0), Mono8::new(255));
     }
 }

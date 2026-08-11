@@ -70,9 +70,24 @@ assert_eq!(pixels[2], Mono8::new(3));
 
 If `cast_slice` returns `None`, do not force it with `unsafe`. The buffer length, alignment, or pixel type is wrong for zero-copy reinterpretation.
 
+This is also how a raw Bayer frame enters the type system. The CFA types are `#[repr(transparent)]` over their sample, so a camera buffer reported as `BayerRG8` needs no copy — only the right type name:
+
+```rust
+use fovea::pixel::PlainPixel;
+use fovea::pixel::bayer::BayerRggb8;
+
+let raw = [1u8, 2, 3, 4];
+let pixels: &[BayerRggb8] = BayerRggb8::cast_slice(&raw).unwrap();
+
+assert_eq!(pixels[2].value(), 3);
+```
+
+Match the SDK's format string to the type once, at the boundary, and everything downstream knows the pattern and the depth. Note that SFNC abbreviates the tile to its first row: `BayerRG8` is `BayerRggb8`, `BayerGB12` is `BayerGbrg12`.
+
 ## Common mistakes
 
 - **Treating BGR as RGB.** Use `Bgr8` / `Bgr16` at the boundary, then convert with `ColorSwap` only when you mean to.
 - **Ignoring stride.** A region in a padded frame is not always contiguous. Use row access or a strided view.
 - **Using `Srgb8` for linear camera data.** sRGB means a transfer function. Most raw camera data is linear mono or linear RGB/BGR.
 - **Inventing runtime flags for layout.** Prefer distinct pixel types. The type should say what the bytes mean.
+- **Typing a CFA frame as `Mono<N>`.** It loses the mosaic pattern, and with it every guard against blurring, resizing, or odd-origin-cropping across colour channels. Use the `bayer` types.

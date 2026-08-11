@@ -59,6 +59,7 @@ pub use fovea_derive::ZeroablePixel;
 ///
 /// Start with [`pixel::Srgb8`] (gamma-encoded display/file data),
 /// [`pixel::RgbF32`] (linear-light float), or [`pixel::Mono8`] (grayscale).
+/// For raw single-sensor colour data, see [`pixel::bayer`].
 /// For choosing between types, see [`guide::pixel_types`].
 /// For conversion strategies and common paths, see [`guide::pixel_conversions`].
 pub mod pixel;

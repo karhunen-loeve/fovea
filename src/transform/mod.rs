@@ -123,8 +123,9 @@ pub use combine::{
     image_max, image_min, subtract,
 };
 pub use convert::{
-    AddAlpha, BinaryMask, BinaryThreshold, BinaryThresholdInv, BrightnessContrast, Broadcast,
-    ChannelLut, Clamp, ColorSwap, ConvertPixel, ConvertPixelExt, Depalettize, FullRange, Invert,
+    AddAlpha, BayerToMono, BinaryMask, BinaryThreshold, BinaryThresholdInv, BrightnessContrast,
+    Broadcast, ChannelLut, Clamp, ColorSwap, ConvertPixel, ConvertPixelExt, Depalettize, FullRange,
+    Invert,
     Luminance, Lut, Narrow, PixelMap, SrgbGamma, Then, ToZeroThreshold, ToZeroThresholdInv,
     TruncateThreshold, convert_image, convert_image_into,
 };

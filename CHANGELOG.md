@@ -318,6 +318,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the connectivity the background must be labeled with when the foreground
   uses it (`Connectivity8::Dual = Connectivity4` and vice versa). Additive:
   the trait is sealed, so no external implementor can break.
+- **The Bayer pixel family** — `pixel::bayer`, twenty
+  `#[repr(transparent)]` colour-filter-array types: four patterns (RGGB,
+  BGGR, GRBG, GBRG) × five depths (8, 10, 12, 14, 16). The sub-word depths
+  are aliases of a const-generic `BayerRggb<BITS>` over `Mono<BITS>`, so
+  they clamp the same way; the fixed widths wrap `Saturating<u8>` /
+  `Saturating<u16>`. Raw sensor data stops being indistinguishable from a
+  monochrome frame: `Image<BayerRggb12>` and `Image<BayerBggr12>` are
+  different types, so two cameras' frames cannot be mixed.
+  **What these types withhold is the point.** They implement `LinearPixel`
+  — a weighted sum of raw samples is real work (defect-pixel
+  interpolation, local noise estimation, hot-pixel detection), and its
+  accumulator is `MonoF32` — but **not `LinearSpace`**, so `blend()` and
+  `Bilinear` resize are compile errors; and **not `OriginInvariantPixel`**,
+  so `roi`, `tiles`, and `sliding_windows` do not exist for them. Both
+  operations mix or re-label neighbouring samples, which in a mosaic means
+  mixing or re-labelling colours. `Ord`, `PlainPixel`, `HomogeneousPixel`,
+  `SingleChannel`, `WhiteChannel`, and `ZeroablePixel` are all present, so
+  thresholding, histograms, min/max, convolution, and zero-copy
+  `cast_slice` from a camera buffer all work.
+- `pixel::bayer::BayerPixel`: the generic-dispatch trait, carrying the tile
+  arrangement as the compile-time constant `PATTERN` and the demosaic
+  result type as `RgbOutput` (depth-preserving: `BayerRggb12` →
+  `Rgb12`). Not sealed — a downstream float CFA type is a legitimate
+  implementor.
+- `pixel::bayer::BayerPattern` and `pixel::bayer::CfaColor`: the pattern
+  vocabulary. `BayerPattern::tile()` gives the 2×2 arrangement and
+  `color_at(x, y)` resolves an image coordinate to the colour that site
+  sampled; both are `const fn`, so a `B::PATTERN`-driven lookup folds to a
+  pair of parity tests. The SFNC mapping is documented on the enum —
+  `BayerRG12` is RGGB, since SFNC abbreviates the tile to its first row.
+- `image::BayerSubView` / `image::BayerSubViewMut`: phase-preserving region
+  access, the named replacement for the `SubView` methods Bayer images do
+  not have. `aligned_bayer_roi` / `aligned_bayer_roi_mut` return `None`
+  for an odd `left` or `top` — the crop would silently re-label every
+  sample — and `None` out of bounds, the same Tier 1 answer `roi` gives.
+  Odd *width* and *height* are fine: truncating mid-tile drops samples but
+  does not move the ones that remain. Implemented for every container that
+  offers ordinary ROI — `Image<B>`, `ImageArray<B, W, H>`,
+  `ImageRef<'_, B>`, and `ImageRefMut<'_, B>` — so the Bayer path has no
+  coverage gap relative to `SubView`.
+- `transform::BayerToMono`: the named escape hatch out of the CFA family,
+  `BayerRggb12 → Mono12` and so on at every depth. Losing the colour a
+  sample carries is a real loss, so — like every lossy conversion in this
+  crate — it has to be named; there is no `From<BayerRggb12> for Mono12`.
 
 ### Changed
 

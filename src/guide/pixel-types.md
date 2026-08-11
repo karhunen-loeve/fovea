@@ -14,6 +14,7 @@ Pixel types are the vocabulary of a fovea pipeline. Choose the type that says wh
 | BGR camera or SDK buffer | `Bgr8`, `Bgr16`, `BgrF32` | Channel order is explicit. |
 | Segmentation mask | `bool` / `BinaryImage` | Native binary-image representation. |
 | Connected-component labels | `Label32` | Label pixels are not grayscale pixels. |
+| Raw single-sensor colour (CFA mosaic) | `bayer::BayerRggb12` and the other 19 | The mosaic pattern is part of the type. |
 
 ## `Srgb8` vs `Rgb8`
 
@@ -47,6 +48,21 @@ assert_eq!(px.value(), 4095);
 ```
 
 Use `Mono16` instead when your camera SDK already expands samples to a full 16-bit lane and the exact sensor bit depth is documented elsewhere in your pipeline.
+
+## Raw Bayer camera samples
+
+A single-sensor colour camera reports a format like `BayerRG12`. That is *not* `Mono<12>`: each sample carries one colour channel, and which one depends on its position in the repeating 2×2 tile. Typing it as mono is what lets a pipeline blur, resize, or odd-origin-crop the mosaic and quietly ruin the colour.
+
+```rust
+use fovea::pixel::bayer::{BayerPattern, BayerPixel, BayerRggb12, CfaColor};
+
+let sample = BayerRggb12::new(2048);
+assert_eq!(sample.value(), 2048);
+assert_eq!(BayerRggb12::PATTERN, BayerPattern::Rggb);
+assert_eq!(BayerRggb12::PATTERN.color_at(1, 1), CfaColor::Blue);
+```
+
+The four patterns × five depths are twenty distinct types, so RGGB and BGGR frames cannot be mixed. `LinearSpace` and `OriginInvariantPixel` are deliberately absent, which turns bilinear resize, `blend`, and ordinary `roi` into compile errors; `BayerSubView::aligned_bayer_roi` is the phase-preserving crop, and `BayerToMono` is the named way out of the family. See `fovea::pixel::bayer`.
 
 ## Floating-point pixels
 

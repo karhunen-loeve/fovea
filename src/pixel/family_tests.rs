@@ -3,6 +3,7 @@
 //! Each `test_pixel_family!` invocation generates ~19 tests that verify
 //! PlainPixel and HomogeneousPixel invariants.
 
+use super::bayer::*;
 use super::*;
 use std::num::Saturating;
 
@@ -480,6 +481,92 @@ test_pixel_family!(indexed8, Indexed8, name: "Indexed8",
     sample: Indexed8(42), different: Indexed8(100),
     channels: [42u8], other_ch: 99u8, align: 1);
 
+// ── Bayer CFA ───────────────────────────────────────────────────────────────
+//
+// The sub-word variants report the struct name (`BayerRggb`) rather than the
+// alias (`BayerRggb12`) in `Debug`, exactly as `Mono12` reports `Mono` — the
+// alias is not a distinct type.
+
+test_pixel_family!(bayer_rggb8, BayerRggb8, name: "BayerRggb8",
+    sample: BayerRggb8::new(42), different: BayerRggb8::new(100),
+    channels: [Saturating(42u8)], other_ch: Saturating(99u8), align: 1);
+
+test_pixel_family!(bayer_rggb10, BayerRggb10, name: "BayerRggb",
+    sample: BayerRggb10::new(500), different: BayerRggb10::new(100),
+    channels: [Saturating(500u16)], other_ch: Saturating(99u16), align: 2);
+
+test_pixel_family!(bayer_rggb12, BayerRggb12, name: "BayerRggb",
+    sample: BayerRggb12::new(2000), different: BayerRggb12::new(100),
+    channels: [Saturating(2000u16)], other_ch: Saturating(99u16), align: 2);
+
+test_pixel_family!(bayer_rggb14, BayerRggb14, name: "BayerRggb",
+    sample: BayerRggb14::new(8000), different: BayerRggb14::new(100),
+    channels: [Saturating(8000u16)], other_ch: Saturating(99u16), align: 2);
+
+test_pixel_family!(bayer_rggb16, BayerRggb16, name: "BayerRggb16",
+    sample: BayerRggb16::new(12345), different: BayerRggb16::new(100),
+    channels: [Saturating(12345u16)], other_ch: Saturating(99u16), align: 2);
+
+test_pixel_family!(bayer_bggr8, BayerBggr8, name: "BayerBggr8",
+    sample: BayerBggr8::new(42), different: BayerBggr8::new(100),
+    channels: [Saturating(42u8)], other_ch: Saturating(99u8), align: 1);
+
+test_pixel_family!(bayer_bggr10, BayerBggr10, name: "BayerBggr",
+    sample: BayerBggr10::new(500), different: BayerBggr10::new(100),
+    channels: [Saturating(500u16)], other_ch: Saturating(99u16), align: 2);
+
+test_pixel_family!(bayer_bggr12, BayerBggr12, name: "BayerBggr",
+    sample: BayerBggr12::new(2000), different: BayerBggr12::new(100),
+    channels: [Saturating(2000u16)], other_ch: Saturating(99u16), align: 2);
+
+test_pixel_family!(bayer_bggr14, BayerBggr14, name: "BayerBggr",
+    sample: BayerBggr14::new(8000), different: BayerBggr14::new(100),
+    channels: [Saturating(8000u16)], other_ch: Saturating(99u16), align: 2);
+
+test_pixel_family!(bayer_bggr16, BayerBggr16, name: "BayerBggr16",
+    sample: BayerBggr16::new(12345), different: BayerBggr16::new(100),
+    channels: [Saturating(12345u16)], other_ch: Saturating(99u16), align: 2);
+
+test_pixel_family!(bayer_grbg8, BayerGrbg8, name: "BayerGrbg8",
+    sample: BayerGrbg8::new(42), different: BayerGrbg8::new(100),
+    channels: [Saturating(42u8)], other_ch: Saturating(99u8), align: 1);
+
+test_pixel_family!(bayer_grbg10, BayerGrbg10, name: "BayerGrbg",
+    sample: BayerGrbg10::new(500), different: BayerGrbg10::new(100),
+    channels: [Saturating(500u16)], other_ch: Saturating(99u16), align: 2);
+
+test_pixel_family!(bayer_grbg12, BayerGrbg12, name: "BayerGrbg",
+    sample: BayerGrbg12::new(2000), different: BayerGrbg12::new(100),
+    channels: [Saturating(2000u16)], other_ch: Saturating(99u16), align: 2);
+
+test_pixel_family!(bayer_grbg14, BayerGrbg14, name: "BayerGrbg",
+    sample: BayerGrbg14::new(8000), different: BayerGrbg14::new(100),
+    channels: [Saturating(8000u16)], other_ch: Saturating(99u16), align: 2);
+
+test_pixel_family!(bayer_grbg16, BayerGrbg16, name: "BayerGrbg16",
+    sample: BayerGrbg16::new(12345), different: BayerGrbg16::new(100),
+    channels: [Saturating(12345u16)], other_ch: Saturating(99u16), align: 2);
+
+test_pixel_family!(bayer_gbrg8, BayerGbrg8, name: "BayerGbrg8",
+    sample: BayerGbrg8::new(42), different: BayerGbrg8::new(100),
+    channels: [Saturating(42u8)], other_ch: Saturating(99u8), align: 1);
+
+test_pixel_family!(bayer_gbrg10, BayerGbrg10, name: "BayerGbrg",
+    sample: BayerGbrg10::new(500), different: BayerGbrg10::new(100),
+    channels: [Saturating(500u16)], other_ch: Saturating(99u16), align: 2);
+
+test_pixel_family!(bayer_gbrg12, BayerGbrg12, name: "BayerGbrg",
+    sample: BayerGbrg12::new(2000), different: BayerGbrg12::new(100),
+    channels: [Saturating(2000u16)], other_ch: Saturating(99u16), align: 2);
+
+test_pixel_family!(bayer_gbrg14, BayerGbrg14, name: "BayerGbrg",
+    sample: BayerGbrg14::new(8000), different: BayerGbrg14::new(100),
+    channels: [Saturating(8000u16)], other_ch: Saturating(99u16), align: 2);
+
+test_pixel_family!(bayer_gbrg16, BayerGbrg16, name: "BayerGbrg16",
+    sample: BayerGbrg16::new(12345), different: BayerGbrg16::new(100),
+    channels: [Saturating(12345u16)], other_ch: Saturating(99u16), align: 2);
+
 // ── OriginInvariantPixel coverage ─────────────────────────────────────────────
 //
 // Compile-time proof that every shipped pixel family implements the
@@ -489,8 +576,10 @@ test_pixel_family!(indexed8, Indexed8, name: "Indexed8",
 //
 // `bool` is included because `BinaryImage = Image<bool>` relies on the marker
 // for ROI. Raw channel primitives (`u8`, `u16`, `f32`, …) are deliberately
-// absent — they are channels, not pixels — and a
-// coordinate-dependent Bayer CFA pixel would be absent too.
+// absent — they are channels, not pixels — and so are the 20 Bayer CFA types,
+// whose colour meaning is a function of position: see
+// `bayer_families_are_never_origin_invariant` below, which is the other half
+// of this test and the reason the list is not simply "every pixel type".
 #[test]
 fn origin_invariant_marker_covers_all_families() {
     fn assert_marker<P: OriginInvariantPixel>() {}
@@ -563,4 +652,138 @@ fn origin_invariant_marker_covers_all_families() {
         Label32,
         bool,
     );
+}
+
+// ── Bayer CFA: the markers that must stay absent ─────────────────────────
+//
+// The other half of `origin_invariant_marker_covers_all_families`. That test
+// proves a positive; these prove *negatives*, and Rust has no negative trait
+// bounds — `P: !LinearSpace` does not exist. The workaround is a probe: an
+// inherent associated const shadows a trait default, but only for types that
+// satisfy the inherent impl's bound, so `IS` reads `true` exactly for the
+// types carrying the marker and `false` for the rest. Reading it inside a
+// `const` block makes a forbidden impl a **build failure**, matching the
+// severity of the positive half rather than a merely failing test.
+//
+// Worth the trick because both guarantees are easy to destroy by accident and
+// impossible to miss the loss of otherwise:
+//
+//   * one stray `impl_origin_invariant_pixel!` in `bayer.rs` and
+//     `Image<BayerRggb12>` silently regains `roi()`, `tiles()` and
+//     `sliding_windows()`, each of which can shift the CFA phase;
+//   * one `impl<const BITS: usize> LinearSpace for BayerRggb<BITS> {}` added
+//     while "completing" the twelve hand-written impl blocks, and bilinear
+//     resize starts interpolating across colour channels.
+//
+// Neither would fail any other test in the crate.
+mod bayer_negative_space {
+    use super::*;
+    use core::marker::PhantomData;
+
+    /// Defines a probe that reports whether `$Marker` is implemented, without
+    /// requiring it. `$Fallback`'s default supplies `false`; the inherent
+    /// `impl` shadows it with `true` only where the bound holds.
+    macro_rules! define_absence_probe {
+        ($Probe:ident, $Fallback:ident, $Marker:ident) => {
+            trait $Fallback {
+                const IS: bool = false;
+            }
+            struct $Probe<T>(PhantomData<T>);
+            impl<T> $Fallback for $Probe<T> {}
+            impl<T: $Marker> $Probe<T> {
+                const IS: bool = true;
+            }
+        };
+    }
+
+    define_absence_probe!(OriginProbe, OriginFallback, OriginInvariantPixel);
+    define_absence_probe!(SpaceProbe, SpaceFallback, LinearSpace);
+
+    /// The full shipped Bayer catalogue, applied to a macro. Both absence
+    /// tests below go through this, so the list cannot drift between them or
+    /// quietly omit a type.
+    macro_rules! for_all_bayer_types {
+        ($mac:ident) => {
+            $mac!(
+                BayerRggb8,
+                BayerRggb10,
+                BayerRggb12,
+                BayerRggb14,
+                BayerRggb16,
+                BayerBggr8,
+                BayerBggr10,
+                BayerBggr12,
+                BayerBggr14,
+                BayerBggr16,
+                BayerGrbg8,
+                BayerGrbg10,
+                BayerGrbg12,
+                BayerGrbg14,
+                BayerGrbg16,
+                BayerGbrg8,
+                BayerGbrg10,
+                BayerGbrg12,
+                BayerGbrg14,
+                BayerGbrg16,
+            );
+        };
+    }
+
+    macro_rules! assert_not_origin_invariant {
+        ($($t:ty),+ $(,)?) => {{
+            $(
+                const {
+                    assert!(
+                        !OriginProbe::<$t>::IS,
+                        concat!(
+                            stringify!($t),
+                            " must not implement OriginInvariantPixel: an ",
+                            "odd-origin crop changes which colour every sample carries"
+                        )
+                    )
+                };
+            )+
+        }};
+    }
+
+    macro_rules! assert_not_linear_space {
+        ($($t:ty),+ $(,)?) => {{
+            $(
+                const {
+                    assert!(
+                        !SpaceProbe::<$t>::IS,
+                        concat!(
+                            stringify!($t),
+                            " must not implement LinearSpace: interpolating ",
+                            "between neighbouring samples mixes colour channels"
+                        )
+                    )
+                };
+            )+
+        }};
+    }
+
+    #[test]
+    fn the_probes_report_true_for_types_that_do_carry_the_markers() {
+        // The positive control, and the most load-bearing three lines here.
+        // Both probes' failure mode is degrading to "always false" — a
+        // mistyped bound, or shadowing behaving differently under a future
+        // edition — which would make every assertion below pass vacuously
+        // while still looking green. An absence test without a positive
+        // control cannot tell "correctly absent" from "test broken".
+        const { assert!(OriginProbe::<Mono12>::IS) };
+        const { assert!(OriginProbe::<Rgb8>::IS) };
+        const { assert!(SpaceProbe::<Mono12>::IS) };
+        const { assert!(SpaceProbe::<Rgb8>::IS) };
+    }
+
+    #[test]
+    fn bayer_families_are_never_origin_invariant() {
+        for_all_bayer_types!(assert_not_origin_invariant);
+    }
+
+    #[test]
+    fn bayer_families_are_never_in_a_linear_space() {
+        for_all_bayer_types!(assert_not_linear_space);
+    }
 }

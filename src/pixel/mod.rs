@@ -15,12 +15,18 @@
 //! gamma-encoded display/file data, while [`Rgb8`](crate::pixel::Rgb8) is linear-light RGB. They may
 //! occupy similar bytes, but they are not the same pixel type.
 //!
+//! Raw single-sensor colour data lives in its own submodule, [`bayer`](crate::pixel::bayer) —
+//! twenty colour-filter-array types that keep the mosaic pattern in the
+//! pixel type, and withhold the traits that would let you interpolate or
+//! odd-origin-crop it.
+//!
 //! Do not use this module to choose storage access. For ownership, borrowing,
 //! rows, slices, ROIs, and tiles, use [`crate::image`].
 //!
 //! For conversion strategies and common paths between pixel types,
 //! see [`crate::guide::pixel_conversions`].
 
+pub mod bayer;
 mod indexed;
 mod label;
 mod mono;

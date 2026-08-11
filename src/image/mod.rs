@@ -31,6 +31,14 @@
 //! splits an image into borrowed immutable tiles. [`IntoTilesMut`](crate::image::IntoTilesMut) yields
 //! disjoint mutable tiles for safe chunked in-place processing.
 //!
+//! Those three are gated on
+//! [`OriginInvariantPixel`](crate::pixel::OriginInvariantPixel), so images of
+//! [Bayer CFA samples](crate::pixel::bayer) do not have them — cropping such
+//! an image at an odd origin changes what every sample means. They use
+//! [`BayerSubView::aligned_bayer_roi`](crate::image::BayerSubView::aligned_bayer_roi)
+//! and [`BayerSubViewMut`](crate::image::BayerSubViewMut) instead, which
+//! check the 2×2 phase and return `None` rather than a mislabelled view.
+//!
 //! Do not use this module for pixel semantics. If the question is "is this
 //! gamma-encoded?" or "can this be interpolated?", look in [`crate::pixel`].
 
@@ -61,8 +69,8 @@ pub use sequential::{
     PlainImageMut,
 };
 pub use tiles::{
-    EnumeratePositions, IntoTilesMut, SlidingWindow, SlidingWindowIter, SubView, SubViewMut,
-    TileIter, TileIterMut,
+    BayerSubView, BayerSubViewMut, EnumeratePositions, IntoTilesMut, SlidingWindow,
+    SlidingWindowIter, SubView, SubViewMut, TileIter, TileIterMut,
 };
 pub use zip::{ZipPixelsIter, zip_pixels};
 

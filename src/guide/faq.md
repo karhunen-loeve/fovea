@@ -156,9 +156,11 @@ use std::num::Saturating;
 
 #[derive(Clone, Copy, PlainPixel, HomogeneousPixel, ZeroablePixel)]
 #[repr(C)]
-pub struct MyBayer8 {
+pub struct MyMosaic8 {
     pub value: Saturating<u8>,
 }
 ```
 
-Only implement `LinearPixel` / `LinearSpace` if interpolation and blending are meaningful for the type. Likewise, only implement `OriginInvariantPixel` if cropping preserves the pixel's meaning. A Bayer CFA pixel such as `MyBayer8` deliberately omits it: an ROI at an odd origin shifts the 2×2 mosaic phase, so the compiler rejects ordinary `roi`/`tiles`/`sliding_windows` and steers callers to a phase-aware API instead.
+Only implement `LinearPixel` / `LinearSpace` if interpolation and blending are meaningful for the type. Likewise, only implement `OriginInvariantPixel` if cropping preserves the pixel's meaning. A coordinate-dependent mosaic pixel such as `MyMosaic8` deliberately omits both: an ROI at an odd origin shifts the 2×2 phase, so the compiler rejects ordinary `roi`/`tiles`/`sliding_windows` and steers callers to a phase-aware API instead.
+
+That is exactly how the shipped Bayer family is built — see `fovea::pixel::bayer` before writing your own. Reach for a custom type when your sensor is *not* one of the four standard patterns; use `#[linear(accumulator = MonoF32, no_space)]` on the `LinearPixel` derive to keep weighted sums while withholding interpolation.
