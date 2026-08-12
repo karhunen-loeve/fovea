@@ -93,6 +93,17 @@ pub mod analyze;
 /// conditionally-valid fields.
 pub mod features;
 
+/// Drawing primitives that burn annotations into image pixels.
+///
+/// Start with the free functions — [`draw::draw_line`], [`draw::draw_rect`],
+/// [`draw::draw_circle`], [`draw::draw_polyline`],
+/// [`draw::draw_crosshair`] — to annotate a cloned image for archiving or
+/// review. The shape structs ([`draw::Line`], [`draw::Rect`],
+/// [`draw::Circle`], [`draw::Polyline`], [`draw::Crosshair`]) and the
+/// [`draw::Drawable`] trait carry the same operations as storable values,
+/// and `Drawable` is the extension point for custom markers.
+pub mod draw;
+
 #[cfg(doc)]
 pub mod guide;
 

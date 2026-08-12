@@ -442,6 +442,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   one directly instead of going through a named blur. Callers may implement
   the trait for their own kernel types; the contract is non-empty axes,
   in-bounds anchors, and a non-allocating `flipped()`.
+- `fovea::draw`: drawing primitives that burn annotations into image
+  pixels — the workflow behind self-contained inspection records and
+  rejection-image archives, and the piece that lets detected keypoints and
+  traced contours be *seen*. Five shapes as storable structs with one-shot
+  free-function wrappers: `Line` / `draw_line` (Bresenham), `Rect` /
+  `draw_rect` and `Circle` / `draw_circle` (midpoint), each outlined or
+  filled, `Polyline` / `draw_polyline` (open chain or closed polygon —
+  pass a traced contour's vertices), and `Crosshair` / `draw_crosshair`
+  (the keypoint marker). All of them implement the new `draw::Drawable<P>`
+  trait, the module's extension point: a user-defined marker implements
+  `Drawable` and is drawable everywhere the built-ins are. Drawing
+  positions are **signed** `(i32, i32)` — a shape centred near the image
+  edge legitimately extends past it — and every primitive silently clips
+  to the image bounds: no error, no panic. The only bound is `P: Copy`,
+  so any pixel type can be drawn onto, and rendering is deliberately
+  crisp (hard single-pixel strokes, no anti-aliasing or blending), which
+  survives JPEG compression without smearing. Invalid geometry is
+  unrepresentable rather than documented away: `Circle::radius` and
+  `Crosshair::arm_length` are `u32`, and degenerate polylines (fewer than
+  two points) are no-ops so partially built shapes can be handled safely.
+  Text rendering and non-destructive display overlays are deferred.
 
 ### Changed
 
