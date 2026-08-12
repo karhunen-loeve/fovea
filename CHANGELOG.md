@@ -362,7 +362,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `BayerRggb12 → Mono12` and so on at every depth. Losing the colour a
   sample carries is a real loss, so — like every lossy conversion in this
   crate — it has to be named; there is no `From<BayerRggb12> for Mono12`.
-
+- **Demosaicing** — `transform::demosaic` / `transform::demosaic_into`
+  turn a CFA mosaic into RGB at the depth the sensor sampled
+  (`Image<BayerRggb12> → Image<Rgb12>`, from `BayerPixel::RgbOutput`; the
+  output type is not a call-site choice). Two strategies:
+  `transform::BayerBilinear`, the reference algorithm — the average of the
+  nearest sites of each missing colour — and `transform::MalvarHeCutler`,
+  the quality path, four fixed 5×5 kernels that correct the bilinear
+  estimate with a second difference read from the colour that *was*
+  sampled at the site. Both are **exact at the sampled sites** (a measured
+  sample is never mixed away) and exact wherever the channels vary
+  linearly; Malvar–He–Cutler additionally clips rather than wraps where its
+  negative weights overshoot.
+  **These take no border policy, and that is deliberate.** A CFA sample's
+  colour is a function of its coordinate parity, and reflection *without*
+  edge duplication is the only policy in the crate that maps a coordinate
+  to another of the same parity — `Clamp` duplicates the edge sample and so
+  reads red where the kernel expects green, `Wrap` is safe only for even
+  dimensions, `Constant` injects a value with no CFA colour at all. The
+  reflection is therefore pinned into the contract, as `pyr_down` pins its
+  kernel and border. Demosaicing an `aligned_bayer_roi` sub-view is
+  well-defined for the same reason its origin must be even.
+- `transform::DemosaicMethod<B>`: the CFA interpolation strategy trait. An
+  implementation receives the site coordinate and an accessor for the
+  border-resolved samples around it (`RADIUS` declares how far it reads)
+  and returns the `RgbF32` triple; the engine owns the traversal, the
+  interior/boundary split, and the pinned reflection. It is a *site*
+  coordinate rather than a fixed weight grid because `FoldOp` applies one
+  grid to the whole image and is deliberately blind to position, while a
+  demosaic kernel is selected by `(x % 2, y % 2)`.
+- **White balance** — `transform::white_balance` /
+  `transform::white_balance_into` scale each raw sample by the gain of the
+  colour its site sampled, returning the same Bayer type, so the result
+  keeps its CFA phase and feeds straight into `demosaic`. Gains are
+  `transform::BayerGains`, an invariant-carrying parameter type (finite and
+  non-negative; `const fn new` for literals, `try_new` →
+  `Error::InvalidParameter` for ratios estimated from data), keyed by
+  `CfaColor` with one gain shared by both green sites. Balancing the mosaic
+  before interpolation is the industrial order and the one that matters for
+  a channel-mixing algorithm like Malvar–He–Cutler; the cost is that gains
+  above `1.0` clip at the sample depth. This is **not** a `ConvertPixel`
+  strategy and cannot be one — a per-pixel conversion is blind to position,
+  and a CFA sample's colour is its position.
 ### Changed
 
 - **Breaking:** `BlobMeasurements::perimeter` is renamed to
@@ -412,7 +453,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   take the new `Sigma` parameter type instead of a raw `f32` σ (see
   *Added*). Wrap literals in `Sigma::new(…)`; validate computed values
   with `Sigma::try_new(…)?` where they are produced.
-
 ### Fixed
 
 - `canny`'s documentation listed the wrong accumulator for `Mono16`: it

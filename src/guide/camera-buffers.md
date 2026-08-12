@@ -84,6 +84,21 @@ assert_eq!(pixels[2].value(), 3);
 
 Match the SDK's format string to the type once, at the boundary, and everything downstream knows the pattern and the depth. Note that SFNC abbreviates the tile to its first row: `BayerRG8` is `BayerRggb8`, `BayerGB12` is `BayerGbrg12`.
 
+From there the pipeline is two named steps — the camera's balance ratios on the mosaic, then interpolation to RGB at the same depth:
+
+```rust
+use fovea::image::Image;
+use fovea::pixel::{Rgb12, bayer::BayerRggb12};
+use fovea::transform::{BayerGains, MalvarHeCutler, demosaic, white_balance};
+
+let raw = Image::fill(64, 48, BayerRggb12::new(2048));
+
+let balanced = white_balance(&raw, BayerGains::new(1.9, 1.0, 1.6));
+let rgb: Image<Rgb12> = demosaic(&balanced, MalvarHeCutler);
+```
+
+The output type follows from the sample type (`BayerRggb12` → `Rgb12`), so a twelve-bit frame cannot silently become eight-bit here. Neither function takes a border policy: only reflection without edge duplication preserves a CFA sample's colour at the frame edge, so that treatment is pinned into the contract.
+
 ## Common mistakes
 
 - **Treating BGR as RGB.** Use `Bgr8` / `Bgr16` at the boundary, then convert with `ColorSwap` only when you mean to.

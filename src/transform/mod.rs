@@ -80,6 +80,21 @@
 //! into a [`Pyramid`](crate::image::Pyramid) via the
 //! [`PyramidMethod`](crate::transform::PyramidMethod) trait.
 //!
+//! ## Demosaicing
+//!
+//! [`demosaic`](crate::transform::demosaic) turns a raw
+//! [Bayer mosaic](crate::pixel::bayer) into RGB at the depth the sensor
+//! sampled, with [`BayerBilinear`](crate::transform::BayerBilinear) as the
+//! reference algorithm and
+//! [`MalvarHeCutler`](crate::transform::MalvarHeCutler) as the quality path.
+//! [`white_balance`](crate::transform::white_balance) applies per-colour
+//! [`BayerGains`](crate::transform::BayerGains) to the mosaic first — the
+//! industrial order, and the one that matters for a gradient-corrected
+//! algorithm. Unlike the other neighbourhood operations these take **no
+//! border policy**: reflection without edge duplication is the only
+//! treatment that preserves a CFA sample's colour, so it is pinned into the
+//! contract.
+//!
 //! ## Neighbourhood transforms
 //!
 //! Each output pixel is computed from a window of input pixels centred at
@@ -106,6 +121,7 @@ mod combine;
 mod convert;
 mod convolve;
 mod convolve_separable;
+mod demosaic;
 mod filters;
 mod fold;
 mod geometry;
@@ -131,10 +147,14 @@ pub use convert::{
 };
 pub use convolve::{convolve, convolve_into, correlate, correlate_into};
 pub use convolve_separable::{convolve_separable, convolve_separable_into};
+pub use demosaic::{
+    BayerBilinear, BayerGains, DemosaicMethod, MalvarHeCutler, demosaic, demosaic_into,
+    white_balance, white_balance_into,
+};
 pub(crate) use filters::non_maximum_suppression_from_gradients;
 pub use filters::{
     DEFAULT_TRUNCATE, box_blur_3x3, box_blur_5x5, emboss, gaussian_blur, gaussian_blur_3x3,
-    gaussian_blur_5x5, gaussian_blur_into, gaussian_blur_with, gaussian_blur_with_into,
+    gaussian_blur_5x5, gaussian_blur_into,
     gradient_direction, gradient_magnitude, laplacian, laplacian_8, non_maximum_suppression,
     prewitt_x, prewitt_y, scharr_x, scharr_y, sharpen, sobel_x, sobel_y,
 };

@@ -50,6 +50,10 @@ harness = false
 name = "features"
 harness = false
 
+[[bench]]
+name = "demosaic"
+harness = false
+
 [[example]]
 name = "hello_image"
 
