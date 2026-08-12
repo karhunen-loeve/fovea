@@ -290,7 +290,7 @@ pub fn fold_neighborhood_into<I, WI, B, O, F, P, W, Out>(
     anchor: (usize, usize),
     border: &B,
     output: &mut O,
-    mut f: F,
+    f: F,
 ) where
     I: RasterImage<Pixel = P>,
     P: Copy,
@@ -300,6 +300,74 @@ pub fn fold_neighborhood_into<I, WI, B, O, F, P, W, Out>(
     O: RasterImageMut<Pixel = Out>,
     F: FoldOp<P, W, Output = Out>,
 {
+    // Owns the working buffers for the duration of the call and delegates
+    // to the borrowing form. Callers that fold in a loop hand their own
+    // buffers to `fold_neighborhood_into_with_scratch` and pay these
+    // allocations once instead of once per call.
+    let mut scratch = FoldScratch::new();
+    fold_neighborhood_into_with_scratch(image, weights, anchor, border, output, f, &mut scratch);
+}
+
+/// The fold engine's reusable working buffers.
+///
+/// Folding a neighborhood needs a per-row accumulator (one element per
+/// interior column) and a pre-collected list of kernel positions (one entry
+/// per kernel tap). Both are `Vec`s so the inner kernel loop stays
+/// un-unrolled and vectorizable; owning them in a caller-held value instead
+/// of allocating them per call is what makes a fold in a hot loop
+/// allocation-free after warm-up.
+///
+/// This is the internal half of the public
+/// [`SeparableScratch`](crate::transform::SeparableScratch).
+#[derive(Debug, Clone)]
+pub(crate) struct FoldScratch<A, W> {
+    /// One accumulator per interior column of the row being folded.
+    acc_row: Vec<A>,
+    /// `(dx, dy, weight)` per kernel tap, relative to the anchor.
+    positions: Vec<(isize, isize, W)>,
+}
+
+impl<A, W> FoldScratch<A, W> {
+    /// An empty scratch; both buffers are sized on first use.
+    pub(crate) const fn new() -> Self {
+        Self {
+            acc_row: Vec::new(),
+            positions: Vec::new(),
+        }
+    }
+}
+
+/// [`fold_neighborhood_into`] with the working buffers supplied by the
+/// caller.
+///
+/// Both buffers are **cleared and refilled** on entry, so their incoming
+/// contents are irrelevant — only their capacity carries over. Neither is
+/// ever shrunk. Output is identical to [`fold_neighborhood_into`] for the
+/// same arguments.
+///
+/// # Panics
+///
+/// As [`fold_neighborhood_into`]: panics if `output` is smaller than the
+/// region returned by `border.output_region()`.
+pub(crate) fn fold_neighborhood_into_with_scratch<I, WI, B, O, F, P, W, Out>(
+    image: &I,
+    weights: &WI,
+    anchor: (usize, usize),
+    border: &B,
+    output: &mut O,
+    mut f: F,
+    scratch: &mut FoldScratch<F::Accumulator, W>,
+) where
+    I: RasterImage<Pixel = P>,
+    P: Copy,
+    WI: ImageView<Pixel = W>,
+    W: Copy,
+    B: BorderPolicy<I>,
+    O: RasterImageMut<Pixel = Out>,
+    F: FoldOp<P, W, Output = Out>,
+{
+    let FoldScratch { acc_row, positions } = scratch;
+
     let kernel_size = weights.size();
     let output_region = border.output_region(image.size(), kernel_size, anchor);
     let interior = compute_interior_region(image.size(), kernel_size, anchor);
@@ -315,19 +383,18 @@ pub fn fold_neighborhood_into<I, WI, B, O, F, P, W, Out>(
 
     // Pre-collect kernel positions (dx, dy, weight) so we don't recompute
     // them for every pixel.  For typical kernel sizes (3×3 .. 7×7) this is
-    // a tiny allocation that stays in L1.
-    let kernel_positions: Vec<(isize, isize, W)> = {
-        let mut positions = Vec::with_capacity(kernel_size.width * kernel_size.height);
-        for ky in 0..kernel_size.height {
-            for kx in 0..kernel_size.width {
-                let dx = kx as isize - anchor.0 as isize;
-                let dy = ky as isize - anchor.1 as isize;
-                let w = weights.pixel_at(kx, ky);
-                positions.push((dx, dy, w));
-            }
+    // a tiny buffer that stays in L1.
+    positions.clear();
+    positions.reserve(kernel_size.width * kernel_size.height);
+    for ky in 0..kernel_size.height {
+        for kx in 0..kernel_size.width {
+            let dx = kx as isize - anchor.0 as isize;
+            let dy = ky as isize - anchor.1 as isize;
+            let w = weights.pixel_at(kx, ky);
+            positions.push((dx, dy, w));
         }
-        positions
-    };
+    }
+    let kernel_positions: &[(isize, isize, W)] = positions;
 
     // Offset from the output region origin to the image coordinate system.
     let ox = output_region.left();
@@ -349,11 +416,18 @@ pub fn fold_neighborhood_into<I, WI, B, O, F, P, W, Out>(
                 // Kernel positions are outer, pixel scan is inner.
                 // The inner loop is a contiguous elementwise operation
                 // that LLVM auto-vectorizes (vpminub, vfmadd231ps, …).
-                let mut acc_row: Vec<F::Accumulator> = (0..int_width).map(|_| f.init()).collect();
+                //
+                // Refill the borrowed accumulator row: capacity carries
+                // over between calls, contents never do.
+                acc_row.clear();
+                acc_row.reserve(int_width);
+                for _ in 0..int_width {
+                    acc_row.push(f.init());
+                }
 
                 for cy in int_top..int_bottom {
                     // Kernel-outer sweep
-                    for &(dx, dy, w) in &kernel_positions {
+                    for &(dx, dy, w) in kernel_positions {
                         let src_row = image.row((cy as isize + dy) as usize);
                         let start = (int_left as isize + dx) as usize;
                         let src_slice = &src_row[start..start + int_width];
@@ -1790,6 +1864,127 @@ mod tests {
                     x,
                     y,
                 );
+            }
+        }
+    }
+
+    // ── Borrowed working buffers ────────────────────────────────────
+
+    #[test]
+    fn fold_into_wrapper_matches_scratch_form() {
+        // The allocating wrapper and the buffer-borrowing form must agree
+        // pixel for pixel — including on the boundary (cold) path, which
+        // is why an extending policy and a shrinking one are both checked.
+        let src = make_5x5();
+        // Asymmetric weights with an off-centre anchor: the interior
+        // rectangle is not symmetric, so an `acc_row` sized or offset
+        // wrongly would show up here.
+        let kernel = Neighborhood::<f32, 3, 3>::with_anchor(
+            [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+            (0, 2),
+        );
+
+        let mut scratch = FoldScratch::new();
+
+        for (label, region_shrinks) in [("clamp", false), ("skip", true)] {
+            let expected: Image<MonoF32> = if region_shrinks {
+                fold_neighborhood(&src, kernel.weights(), kernel.anchor(), &Skip, sum_fold())
+            } else {
+                fold_neighborhood(&src, kernel.weights(), kernel.anchor(), &Clamp, sum_fold())
+            };
+
+            let mut actual = Image::<MonoF32>::zero(expected.width(), expected.height());
+            if region_shrinks {
+                fold_neighborhood_into_with_scratch(
+                    &src,
+                    kernel.weights(),
+                    kernel.anchor(),
+                    &Skip,
+                    &mut actual,
+                    sum_fold(),
+                    &mut scratch,
+                );
+            } else {
+                fold_neighborhood_into_with_scratch(
+                    &src,
+                    kernel.weights(),
+                    kernel.anchor(),
+                    &Clamp,
+                    &mut actual,
+                    sum_fold(),
+                    &mut scratch,
+                );
+            }
+
+            for y in 0..expected.height() {
+                for x in 0..expected.width() {
+                    assert!(
+                        (expected.pixel_at(x, y).0 - actual.pixel_at(x, y).0).abs() < 1e-6,
+                        "{label}: mismatch at ({x}, {y}): wrapper={}, scratch={}",
+                        expected.pixel_at(x, y).0,
+                        actual.pixel_at(x, y).0,
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn fold_scratch_buffers_carry_no_state_between_calls() {
+        // Same buffers, a wider image then a narrower one, then the wide
+        // one again: leftover accumulator or kernel-position entries from
+        // a previous call must not affect any result.
+        let wide = Image::generate(9, 4, |x, y| (x + y * 9) as u8);
+        let narrow = make_4x4();
+        let k5 = Neighborhood::<f32, 5, 1>::box_1d_5_h();
+        let k3 = Neighborhood::<f32, 3, 3>::box_blur_3x3();
+
+        let wide_expected: Image<MonoF32> =
+            fold_neighborhood(&wide, k5.weights(), k5.anchor(), &Clamp, sum_fold());
+        let narrow_expected: Image<MonoF32> =
+            fold_neighborhood(&narrow, k3.weights(), k3.anchor(), &Clamp, sum_fold());
+
+        let mut scratch = FoldScratch::new();
+
+        let mut wide_out = Image::<MonoF32>::zero(wide.width(), wide.height());
+        let mut narrow_out = Image::<MonoF32>::zero(narrow.width(), narrow.height());
+
+        for round in 0..2 {
+            fold_neighborhood_into_with_scratch(
+                &wide,
+                k5.weights(),
+                k5.anchor(),
+                &Clamp,
+                &mut wide_out,
+                sum_fold(),
+                &mut scratch,
+            );
+            fold_neighborhood_into_with_scratch(
+                &narrow,
+                k3.weights(),
+                k3.anchor(),
+                &Clamp,
+                &mut narrow_out,
+                sum_fold(),
+                &mut scratch,
+            );
+
+            for y in 0..wide_expected.height() {
+                for x in 0..wide_expected.width() {
+                    assert!(
+                        (wide_expected.pixel_at(x, y).0 - wide_out.pixel_at(x, y).0).abs() < 1e-6,
+                        "round {round}: wide mismatch at ({x}, {y})",
+                    );
+                }
+            }
+            for y in 0..narrow_expected.height() {
+                for x in 0..narrow_expected.width() {
+                    assert!(
+                        (narrow_expected.pixel_at(x, y).0 - narrow_out.pixel_at(x, y).0).abs()
+                            < 1e-6,
+                        "round {round}: narrow mismatch at ({x}, {y})",
+                    );
+                }
             }
         }
     }

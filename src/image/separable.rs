@@ -5,13 +5,18 @@
 //! into a single value, eliminating the error-prone pattern of creating
 //! and managing two separate [`Neighborhood`](crate::image::Neighborhood) values.
 //!
-//! # Why a struct, not a trait?
+//! # Two representations, one trait
 //!
-//! There is exactly one representation: two 1D weight arrays + two
-//! anchors. No meaningful alternative implementations exist. The
-//! `convolve_separable` engine needs to build `ImageView`-compatible
-//! shapes from the 1D data, and a concrete struct with const generics
-//! makes this trivial — sizes are known at compile time.
+//! [`SeparableKernel`] stores its lengths as **const generics**, so a fixed
+//! 3-tap or 5-tap kernel is checked and unrolled at compile time.
+//! [`GaussianKernel1D`] — produced by [`gaussian_kernel_1d`] from a σ and a
+//! `truncate` — has a **runtime** tap count in a fixed stack buffer, because
+//! the radius follows from σ.
+//!
+//! [`SeparableWeights`] is what the separable engine actually consumes, and
+//! both types implement it. That is why there is no separate blur function
+//! per kernel flavour: the kernel *is* the variant, and
+//! `convolve_separable(&src, &kernel, &border)` takes either one.
 //!
 //! # Example
 //!
@@ -27,6 +32,68 @@
 //! ```
 
 use crate::Sigma;
+
+/// A pair of 1-D weight arrays plus anchors — everything the separable
+/// convolution engine needs from a kernel.
+///
+/// Implemented by [`SeparableKernel`] (compile-time tap counts) and
+/// [`GaussianKernel1D`] (σ-derived tap count, symmetric). Every separable
+/// entry point — [`convolve_separable`](crate::transform::convolve_separable),
+/// [`convolve_separable_into`](crate::transform::convolve_separable_into) and
+/// [`SeparableScratch`](crate::transform::SeparableScratch)'s methods — is
+/// generic over this trait, so a caller selects the variant by choosing a
+/// **value**, not by choosing a differently-named function.
+///
+/// # Contract
+///
+/// - Weight slices are non-empty. The engine indexes relative to
+///   `len() - 1`, so an empty axis would underflow.
+/// - Anchors are in bounds: `h_anchor() < h_weights().len()`, likewise for
+///   the vertical axis.
+/// - [`flipped`](Self::flipped) reverses both axes and mirrors both anchors
+///   (`len - 1 - anchor`). It must not allocate — every implementor in this
+///   crate returns a stack value, and a symmetric kernel may return a copy of
+///   itself unchanged.
+///
+/// # Implementing it
+///
+/// ```
+/// use fovea::image::SeparableWeights;
+///
+/// /// A 3-tap sharpening kernel applied along both axes.
+/// #[derive(Clone, Copy)]
+/// struct Sharpen3;
+///
+/// impl SeparableWeights for Sharpen3 {
+///     fn h_weights(&self) -> &[f32] { &[-1.0, 3.0, -1.0] }
+///     fn h_anchor(&self) -> usize { 1 }
+///     fn v_weights(&self) -> &[f32] { &[-1.0, 3.0, -1.0] }
+///     fn v_anchor(&self) -> usize { 1 }
+///     fn flipped(&self) -> Self { *self } // palindrome ⇒ flip is a no-op
+/// }
+/// ```
+pub trait SeparableWeights: Sized {
+    /// The horizontal 1-D weights, applied left to right. Never empty.
+    fn h_weights(&self) -> &[f32];
+
+    /// The horizontal anchor: the tap index that lands on the output pixel.
+    fn h_anchor(&self) -> usize;
+
+    /// The vertical 1-D weights, applied top to bottom. Never empty.
+    fn v_weights(&self) -> &[f32];
+
+    /// The vertical anchor: the tap index that lands on the output pixel.
+    fn v_anchor(&self) -> usize;
+
+    /// The 180°-rotated kernel: both axes reversed, both anchors mirrored to
+    /// `len - 1 - anchor`.
+    ///
+    /// Convolution is correlation with the flipped kernel, which is the only
+    /// reason this is on the trait. Implementations must stay on the stack;
+    /// for a symmetric kernel the honest implementation is `*self`.
+    #[must_use]
+    fn flipped(&self) -> Self;
+}
 
 /// A separable convolution kernel: two 1D weight arrays (horizontal and
 /// vertical) plus their anchor positions.
@@ -214,6 +281,35 @@ impl<const HK: usize, const VK: usize> SeparableKernel<HK, VK> {
     }
 }
 
+impl<const HK: usize, const VK: usize> SeparableWeights for SeparableKernel<HK, VK> {
+    #[inline]
+    fn h_weights(&self) -> &[f32] {
+        &self.h_weights
+    }
+
+    #[inline]
+    fn h_anchor(&self) -> usize {
+        self.h_anchor
+    }
+
+    #[inline]
+    fn v_weights(&self) -> &[f32] {
+        &self.v_weights
+    }
+
+    #[inline]
+    fn v_anchor(&self) -> usize {
+        self.v_anchor
+    }
+
+    /// Delegates to the inherent [`flipped`](Self::flipped) — reversed stack
+    /// arrays, mirrored anchors, no allocation.
+    #[inline]
+    fn flipped(&self) -> Self {
+        SeparableKernel::flipped(self)
+    }
+}
+
 // ─── Symmetric constructors (HK == VK) ─────────────────────────────────
 
 impl<const K: usize> SeparableKernel<K, K> {
@@ -391,6 +487,41 @@ impl GaussianKernel1D {
     /// The kernel radius: `(len - 1) / 2`.
     pub fn radius(&self) -> usize {
         self.anchor
+    }
+}
+
+impl SeparableWeights for GaussianKernel1D {
+    #[inline]
+    fn h_weights(&self) -> &[f32] {
+        self.weights()
+    }
+
+    #[inline]
+    fn h_anchor(&self) -> usize {
+        self.anchor
+    }
+
+    /// The same taps as the horizontal axis — a Gaussian is isotropic, so one
+    /// weight array serves both passes.
+    #[inline]
+    fn v_weights(&self) -> &[f32] {
+        self.weights()
+    }
+
+    #[inline]
+    fn v_anchor(&self) -> usize {
+        self.anchor
+    }
+
+    /// Returns a copy of `self`, because a Gaussian kernel is its own flip:
+    /// the taps are a palindrome (`w[i] == w[len - 1 - i]` by construction)
+    /// and the anchor is the centre tap, so mirroring it
+    /// (`len - 1 - radius == radius`) is also a no-op. Pinned by
+    /// `gaussian_kernel_is_its_own_flip`. The clone copies a fixed stack
+    /// buffer — no allocation, as the trait requires.
+    #[inline]
+    fn flipped(&self) -> Self {
+        self.clone()
     }
 }
 
@@ -966,5 +1097,109 @@ mod tests {
         assert_eq!(k.len(), 2 * MAX_RADIUS + 1);
         let sum: f32 = k.weights().iter().sum();
         assert!((sum - 1.0).abs() < 1e-5);
+    }
+
+    // ── SeparableWeights ─────────────────────────────────────────────────
+
+    #[test]
+    fn gaussian_kernel_is_its_own_flip() {
+        // `GaussianKernel1D::flipped` returns a copy of itself. That is only
+        // honest if the taps are a palindrome and the anchor is the centre —
+        // both asserted here, across the σ range and both truncate values in
+        // use, so the shortcut cannot rot silently.
+        for sigma in [0.05f32, 0.8, 1.5, 4.0] {
+            for truncate in [3.0f32, 4.0] {
+                let k = gaussian_kernel_1d(Sigma::new(sigma), truncate);
+                let w = k.weights();
+                let n = w.len();
+
+                for i in 0..n {
+                    assert!(
+                        (w[i] - w[n - 1 - i]).abs() < f32::EPSILON,
+                        "σ={sigma} t={truncate}: tap {i} != tap {}",
+                        n - 1 - i,
+                    );
+                }
+                assert_eq!(
+                    k.anchor(),
+                    n - 1 - k.anchor(),
+                    "σ={sigma}: anchor off-centre"
+                );
+
+                let f = SeparableWeights::flipped(&k);
+                assert_eq!(f.h_weights(), k.h_weights());
+                assert_eq!(f.v_weights(), k.v_weights());
+                assert_eq!(f.h_anchor(), k.h_anchor());
+                assert_eq!(f.v_anchor(), k.v_anchor());
+            }
+        }
+    }
+
+    #[test]
+    fn gaussian_kernel_reports_the_same_taps_on_both_axes() {
+        // A Gaussian is isotropic: one weight array serves both passes.
+        let k = gaussian_kernel_1d(Sigma::new(1.5), 4.0);
+        assert_eq!(k.h_weights(), k.v_weights());
+        assert_eq!(k.h_anchor(), k.v_anchor());
+        assert_eq!(k.h_weights(), k.weights());
+        assert_eq!(k.h_anchor(), k.anchor());
+    }
+
+    #[test]
+    fn separable_kernel_trait_form_matches_its_inherent_methods() {
+        // The trait must not paraphrase the struct: same weights, same
+        // anchors, same flip — including for an asymmetric kernel, where a
+        // wrong flip would be invisible on a palindrome.
+        let k = SeparableKernel::with_anchors([1.0, 2.0, 3.0], 0, [4.0, 5.0], 1);
+
+        assert_eq!(SeparableWeights::h_weights(&k), &k.h_weights()[..]);
+        assert_eq!(SeparableWeights::v_weights(&k), &k.v_weights()[..]);
+        assert_eq!(SeparableWeights::h_anchor(&k), k.h_anchor());
+        assert_eq!(SeparableWeights::v_anchor(&k), k.v_anchor());
+
+        let inherent = k.flipped();
+        let via_trait = SeparableWeights::flipped(&k);
+        assert_eq!(
+            SeparableWeights::h_weights(&via_trait),
+            &inherent.h_weights()[..]
+        );
+        assert_eq!(
+            SeparableWeights::v_weights(&via_trait),
+            &inherent.v_weights()[..]
+        );
+        assert_eq!(via_trait.h_anchor(), inherent.h_anchor());
+        assert_eq!(via_trait.v_anchor(), inherent.v_anchor());
+    }
+
+    #[test]
+    fn both_kernel_types_satisfy_the_trait_contract() {
+        // One generic reader over both representations — the property the
+        // separable entry points rely on.
+        fn axes<K: SeparableWeights>(k: &K) -> (usize, usize, usize, usize) {
+            assert!(!k.h_weights().is_empty(), "h axis must be non-empty");
+            assert!(!k.v_weights().is_empty(), "v axis must be non-empty");
+            assert!(k.h_anchor() < k.h_weights().len(), "h anchor out of bounds");
+            assert!(k.v_anchor() < k.v_weights().len(), "v anchor out of bounds");
+            (
+                k.h_weights().len(),
+                k.h_anchor(),
+                k.v_weights().len(),
+                k.v_anchor(),
+            )
+        }
+
+        assert_eq!(axes(&SeparableKernel::gaussian_5()), (5, 2, 5, 2));
+        assert_eq!(axes(&SeparableKernel::box_blur_3()), (3, 1, 3, 1));
+
+        // radius = round(4.0 * 1.0) = 4 ⇒ 9 taps, anchor 4.
+        assert_eq!(
+            axes(&gaussian_kernel_1d(Sigma::new(1.0), 4.0)),
+            (9, 4, 9, 4)
+        );
+        // Tiny σ collapses to the 1-tap identity, the trait's edge case.
+        assert_eq!(
+            axes(&gaussian_kernel_1d(Sigma::new(0.05), 4.0)),
+            (1, 0, 1, 0)
+        );
     }
 }

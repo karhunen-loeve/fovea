@@ -59,7 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   computed from data use `try_new`, which returns the new
   `Error::InvalidParameter` so a NaN from an estimator or a formula chain
   is a value, not a crash. Functions taking these types are total in
-  them: `gaussian_blur` / `gaussian_blur_with` (+ `_into` variants),
+  them: `gaussian_blur` (+ its `_into` variant),
   `gaussian_kernel_1d` / `gaussian_kernel_size`, and `canny` now take
   `Sigma` instead of a raw `f32` and no longer document a `sigma <= 0`
   panic. (`truncate` stays a plain `f32` — a structural kernel-shape
@@ -404,6 +404,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   above `1.0` clip at the sample depth. This is **not** a `ConvertPixel`
   strategy and cannot be one — a per-pixel conversion is blind to position,
   and a CFA sample's colour is its position.
+- `transform::SeparableScratch<Acc>`: a caller-owned, reusable working set
+  for separable convolution. A two-pass separable convolution needs an
+  inter-pass intermediate image, a per-row accumulator and a kernel-position
+  list; the one-shot functions allocate them per call, while a scratch owns
+  them across calls. The reusing entry points are **methods on the scratch**,
+  named exactly like their allocating free-function counterparts:
+  `scratch.convolve_separable_into(&src, &kernel, &border, &mut out)` and
+  `scratch.gaussian_blur_into(&src, sigma, &border, &mut out)`. The receiver
+  expresses the reuse, so no name has to.
+  With a caller-owned output as well, a blur in a hot loop — video frames,
+  pyramid levels, scale-space octaves — performs **zero heap allocations
+  after the first call**, which is asserted directly by a counting allocator
+  in the test suite rather than claimed. Buffers grow to fit and are never
+  shrunk, so a smaller frame after a larger one reuses the larger storage;
+  only capacity carries over between calls, never contents, so one scratch
+  can serve different images, kernels, σ values and border policies. Reuse
+  stays explicit — there is no hidden pool and no global state, and the
+  one-shot free functions are unchanged and remain the default. Two notes
+  for callers. `Acc` is the accumulator pixel type (`MonoF32` for `Mono8`),
+  so one scratch serves one accumulator type; input and output types may
+  differ from it. And because the second pass now reads a borrowed view of
+  the scratch, these methods bind
+  `for<'r> BorderPolicy<ImageRef<'r, Acc>>` where the free functions bind
+  `BorderPolicy<Image<Acc>>` — every built-in policy satisfies both, but a
+  custom policy implemented only for `Image<T>` will need the wider impl.
+- `image::SeparableWeights`: the trait the separable convolution engine
+  consumes — two 1-D weight slices plus their anchors, and a stack-based
+  `flipped()` for true convolution. `SeparableKernel<HK, VK>` (compile-time
+  tap counts) and `GaussianKernel1D` (σ-derived tap count, symmetric, so its
+  `flipped()` returns itself) both implement it, and every separable entry
+  point is generic over it. This is what makes a σ-derived kernel a
+  first-class argument:
+  `convolve_separable(&src, &gaussian_kernel_1d(sigma, 3.0), &Clamp)`
+  replaces the removed `gaussian_blur_with` (see *Changed*), and anything
+  that needs a σ-shaped separable kernel — scale space, DoG — can now apply
+  one directly instead of going through a named blur. Callers may implement
+  the trait for their own kernel types; the contract is non-empty axes,
+  in-bounds anchors, and a non-allocating `flipped()`.
+
 ### Changed
 
 - **Breaking:** `BlobMeasurements::perimeter` is renamed to
@@ -448,11 +487,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   result would have been silently wrong near the seam. Call `.radians()` for
   the bare angle, or prefer `.signed_difference(other)` when comparing two
   blobs' axes, which wraps at π instead of reading 80° and −80° as 160° apart.
-- **Breaking:** `gaussian_blur` / `gaussian_blur_with` (+ `_into`
-  variants), `gaussian_kernel_1d` / `gaussian_kernel_size`, and `canny`
+- **Breaking:** `gaussian_blur` (+ its `_into` variant),
+  `gaussian_kernel_1d` / `gaussian_kernel_size`, and `canny`
   take the new `Sigma` parameter type instead of a raw `f32` σ (see
   *Added*). Wrap literals in `Sigma::new(…)`; validate computed values
   with `Sigma::try_new(…)?` where they are produced.
+- **Breaking:** `gaussian_blur_with` and `gaussian_blur_with_into` are
+  **removed**. A `truncate` other than the default is not a variant of
+  "blur" — it is a different kernel, and kernels are values here. Build one
+  with `gaussian_kernel_1d(sigma, truncate)` and hand it to
+  `convolve_separable`, which now accepts any `SeparableWeights` value:
+
+  ```rust
+  // before
+  let out: Image<MonoF32> = gaussian_blur_with(&src, sigma, 3.0, &Clamp);
+  gaussian_blur_with_into(&src, sigma, 3.0, &Clamp, &mut dst);
+
+  // after
+  let kernel = gaussian_kernel_1d(sigma, 3.0);
+  let out: Image<MonoF32> = convolve_separable(&src, &kernel, &Clamp);
+  convolve_separable_into(&src, &kernel, &Clamp, &mut dst);
+  ```
+
+  Results are identical — both paths correlate the same normalized taps,
+  pinned by `gaussian_blur_equals_convolve_with_its_own_kernel`.
+  `gaussian_blur` and `gaussian_blur_into` are **unchanged**: σ with the
+  default `truncate` stays a one-call operation.
+
+  Why it existed at all: a σ-derived kernel had no way into the separable
+  engine, so the only place left for the parameter was the function name —
+  where `_with` already meant something else in this crate
+  (`connected_components_with_stats` returns extra data;
+  `debug_histogram_with` in `fovea-display` takes an options struct). The
+  rule going forward is the one the rest of the crate already follows:
+  **a variant is a value**, as with `resize` + `Bilinear`, `demosaic` +
+  `MalvarHeCutler`, `convert_image` + `Luminance`, `combine_images` +
+  `AbsDiff`.
+- **Breaking:** `convolve_separable` and `convolve_separable_into` are now
+  generic over `image::SeparableWeights` instead of taking
+  `&SeparableKernel<HK, VK>` concretely. Ordinary calls are unaffected —
+  `SeparableKernel` implements the trait — but code that spelled the const
+  generic parameters explicitly through a turbofish, or stored a function
+  pointer to either function, must drop the turbofish or re-infer the type.
+
 ### Fixed
 
 - `canny`'s documentation listed the wrong accumulator for `Mono16`: it

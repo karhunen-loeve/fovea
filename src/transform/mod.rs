@@ -146,7 +146,7 @@ pub use convert::{
     TruncateThreshold, convert_image, convert_image_into,
 };
 pub use convolve::{convolve, convolve_into, correlate, correlate_into};
-pub use convolve_separable::{convolve_separable, convolve_separable_into};
+pub use convolve_separable::{SeparableScratch, convolve_separable, convolve_separable_into};
 pub use demosaic::{
     BayerBilinear, BayerGains, DemosaicMethod, MalvarHeCutler, demosaic, demosaic_into,
     white_balance, white_balance_into,
