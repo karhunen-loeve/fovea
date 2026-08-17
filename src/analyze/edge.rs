@@ -78,7 +78,7 @@ use crate::analyze::threshold::hysteresis_threshold;
 /// or to inspect an intermediate — compose the public stage functions
 /// directly; see the [module documentation](self).
 ///
-/// σ is the invariant-carrying [`Sigma`](crate::Sigma) type: literals use
+/// σ is the invariant-carrying [`Sigma`] type: literals use
 /// `Sigma::new`, computed values `Sigma::try_new` — an invalid σ is caught
 /// where it is produced, not here.
 ///

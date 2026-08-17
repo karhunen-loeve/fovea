@@ -146,8 +146,10 @@ where
 ///    image with the kernel's vertical weights, converting back to the
 ///    output pixel type via [`FromLinear`].
 ///
-/// `kernel` is any [`SeparableWeights`] value — a [`SeparableKernel`] with
-/// compile-time tap counts, or a σ-derived [`GaussianKernel1D`] from
+/// `kernel` is any [`SeparableWeights`] value — a
+/// [`SeparableKernel`](crate::image::SeparableKernel) with compile-time tap
+/// counts, or a σ-derived
+/// [`GaussianKernel1D`](crate::image::GaussianKernel1D) from
 /// [`gaussian_kernel_1d`](crate::image::gaussian_kernel_1d). The kernel *is*
 /// the variant: there is no differently-named function per kernel flavour.
 ///

@@ -57,6 +57,18 @@
 //! Custom markers — arrows, calipers, target diamonds — are implemented by
 //! writing a type with [`Drawable`], not by modifying this module. See the
 //! trait documentation for an example.
+//!
+//! [`Drawable`]: crate::draw::Drawable
+//! [`Line`]: crate::draw::Line
+//! [`Rect`]: crate::draw::Rect
+//! [`Circle`]: crate::draw::Circle
+//! [`Polyline`]: crate::draw::Polyline
+//! [`Crosshair`]: crate::draw::Crosshair
+//! [`draw_line`]: crate::draw::draw_line
+//! [`draw_rect`]: crate::draw::draw_rect
+//! [`draw_circle`]: crate::draw::draw_circle
+//! [`draw_polyline`]: crate::draw::draw_polyline
+//! [`draw_crosshair`]: crate::draw::draw_crosshair
 
 mod circle;
 mod line;
