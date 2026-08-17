@@ -12,6 +12,7 @@
 //! `f64`. All of it comes from the *same* single accumulation pass — no
 //! separate contour extraction.
 
+use crate::analyze::statistics::moments::{axis_eccentricity, axis_orientation};
 use crate::{AxialOrientation, Coordinate, CoordinateF64, Rectangle, Size};
 
 /// Shape descriptors for one connected component.
@@ -215,7 +216,7 @@ impl BlobMeasurements {
     /// Call [`AxialOrientation::radians`] for the bare angle.
     pub fn orientation(&self) -> AxialOrientation {
         let (mu20, mu02, mu11) = self.central_moments();
-        AxialOrientation::from_half_atan2(2.0 * mu11, mu20 - mu02)
+        axis_orientation(mu20, mu02, mu11)
     }
 
     /// Eccentricity of the equivalent ellipse, in `[0, 1]`.
@@ -228,16 +229,7 @@ impl BlobMeasurements {
     /// (single pixel, `λ₁ = 0`) returns `0` rather than `NaN`.
     pub fn eccentricity(&self) -> f64 {
         let (mu20, mu02, mu11) = self.central_moments();
-        let avg = 0.5 * (mu20 + mu02);
-        let diff = 0.5 * (mu20 - mu02);
-        let disc = (diff * diff + mu11 * mu11).sqrt();
-        let l1 = avg + disc; // larger eigenvalue
-        let l2 = avg - disc; // smaller eigenvalue
-        if l1 <= 0.0 {
-            return 0.0;
-        }
-        // Clamp guards tiny negatives from float error at the extremes.
-        (1.0 - l2 / l1).max(0.0).sqrt()
+        axis_eccentricity(mu20, mu02, mu11)
     }
 
     /// Circularity (roundness): `4π·area / boundary_pixels²` — the cheap,

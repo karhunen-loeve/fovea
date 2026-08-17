@@ -463,6 +463,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Crosshair::arm_length` are `u32`, and degenerate polylines (fewer than
   two points) are no-ops so partially built shapes can be handled safely.
   Text rendering and non-destructive display overlays are deferred.
+- `analyze::statistics`: whole-image statistics, in two entry points that need
+  no configuration and allocate nothing.
+  `analyze::statistics::image_statistics` reports minimum, maximum, mean,
+  variance and standard deviation per channel as `ChannelStatistics<C>`, with
+  the output shape chosen by the caller's annotation exactly as `histogram`
+  does (`ChannelStatistics<_>` for single-channel input,
+  `[ChannelStatistics<_>; N]`, or `Vec<_>`). Three deliberate choices are
+  visible in the signature. **Every accessor returns `Option`:** an image with
+  no pixels, or a float channel every sample of which is `NaN`, has no mean and
+  says so rather than returning `0.0`. **`min` and `max` come back in the
+  channel's own type, not `f64`,** because they are selections rather than
+  sums, so a `u64` channel value above `2^53` stays exact where a widened one
+  would not. **Both variance conventions ship:** `variance` and `std_dev`
+  divide by `n` (an image is the whole population, and this is what imaging
+  libraries report), `sample_variance` and `sample_std_dev` divide by `n − 1`
+  and are `None` below two samples. Mean and variance use Welford's
+  recurrence rather than `Σx² / n − mean²`, which loses catastrophically on
+  the ordinary industrial case of 16-bit data with a small spread about a large
+  pedestal; accumulation is in `f64` whatever the input width, since a pixel's
+  own `f32` accumulator cannot carry the running sum of a multi-megapixel
+  frame. `NaN` samples are counted in `nan_count` and excluded from every
+  statistic, so `count + nan_count` is the pixel count and a partly-invalid
+  image is distinguishable from a clean one. Channels are admitted by the new
+  sealed `StatisticsChannel` trait.
+- `analyze::statistics::image_moments`: intensity-weighted image moments and
+  the invariants derived from them, as a chain of named stages rather than one
+  wide struct: `ImageMoments` (raw `m_pq` for `p + q ≤ 3`) →
+  `CentralMoments` (translation-invariant, via `central_moments()`) →
+  `NormalizedMoments` (translation- and scale-invariant, via `normalized()`) →
+  `NormalizedMoments::hu()` (Hu's seven invariants, which add rotation
+  invariance). Each step returns `Option` because each can genuinely not exist:
+  an image with zero total intensity has no centroid to take moments about, and
+  one with non-positive total intensity has no real scale normalisation.
+  `CentralMoments` also exposes `orientation()` (an `AxialOrientation`, since an
+  ellipse's major axis has no head or tail) and `eccentricity()`. Single-channel
+  input is a compile-time bound rather than a documented precondition: "the
+  centre of brightness of an RGB image" has no one meaning, so convert with a
+  named strategy first. Unlike the summaries above, a `NaN` sample
+  **propagates** to every moment: a moment is a sum over every pixel, so
+  skipping one would report a figure for an image that was not measured.
+  Note the convention difference from `BlobMeasurements::central_moments`,
+  which divides by area; the `μ_pq` here are unnormalized sums, which is the
+  standard definition and what the Hu invariants are built on.
 
 ### Changed
 
