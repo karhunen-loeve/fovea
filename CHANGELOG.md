@@ -603,6 +603,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signature moves with this. Corrected while writing the same sentence for
   the corner detectors, which do widen `Mono32` and up.
 
+### Performance
+
+- `fast_score_map` splits each scan line into a hot span whose whole ring is
+  guaranteed inside the frame and cold strips that keep the border-policy path,
+  the same interior/boundary split `fold_neighborhood` already uses. The hot
+  span reads the seven scan lines the ring spans once per line instead of once
+  per sample, through a const table that rewrites each ring offset as
+  `(row, dx)`, and pays no per-sample bounds test. Under `Skip`, the documented
+  default, the cold strips are empty and the border policy is never consulted.
+  Measured **1.11× / 1.15× / 1.18×** at arc length 9 / 12 / 16 on a 512×512
+  `Mono8` texture. Behaviour is unchanged and pinned as such: a test compares
+  the map against the per-pixel `fast_score_at`, which always takes the general
+  path, over every pixel under both `Clamp` and `Skip`. Also folded in: the
+  twelve non-cardinal ring positions are a constant rather than a linear search
+  per pixel.
+- Documented in `segment_score`, for the reader who has the same idea: the
+  `O(16 · arc_length)` arc scan was replaced with an `O(16 + arc_length)`
+  sliding-window minimum, measured, and reverted. Sixteen ring positions are too
+  few for the asymptotics to pay for the scratch arrays they need, and the
+  replacement was ≈6 % *slower* at arc length 9, which is the variant ORB uses.
+
 ## [0.3.0] — 2026-07-27
 
 ### Added

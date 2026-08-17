@@ -72,6 +72,23 @@ pub const FAST_RING: [(isize, isize); 16] = [
 /// border policy is asked about.
 const FOOTPRINT: usize = 2 * FAST_RING_RADIUS + 1;
 
+/// [`FAST_RING`] rewritten as `(row, dx)`, where `row` indexes the
+/// [`FOOTPRINT`] scan lines `y − 3 ..= y + 3` rather than naming a `dy`.
+///
+/// The interior scan hoists those seven rows once per scan line, so a ring
+/// sample is `rows[row][x + dx]`: one slice index instead of a `row()` call
+/// and a pair of range tests per sample.
+const FAST_RING_ROWS: [(usize, isize); 16] = {
+    let mut table = [(0usize, 0isize); 16];
+    let mut index = 0;
+    while index < 16 {
+        let (dx, dy) = FAST_RING[index];
+        table[index] = ((dy + FAST_RING_RADIUS as isize) as usize, dx);
+        index += 1;
+    }
+    table
+};
+
 // ─── SegmentTest ─────────────────────────────────────────────────────────────
 
 /// The segment test itself — an intensity threshold and an arc length,
@@ -427,13 +444,52 @@ where
     B: BorderPolicy<I>,
 {
     let region = scored_region(image, border);
-    let mut out = Image::fill(image.width(), image.height(), MonoF32::new(0.0));
+    let (width, height) = (image.width(), image.height());
+    let mut out = Image::fill(width, height, MonoF32::new(0.0));
+
+    // The columns whose ring fits horizontally, intersected with the region.
+    // `Skip` already excludes the border, so under it this *is* the region
+    // and the two cold strips below are empty, which is the point.
+    // Both bounds are clamped into the region, in both directions: on an
+    // image narrower than the ring, `Clamp` still scores every column, so
+    // `region.right()` can be below `FAST_RING_RADIUS` and an unclamped
+    // `hot_left` would index past the row.
+    let hot_left = region
+        .left()
+        .max(FAST_RING_RADIUS)
+        .min(region.right());
+    let hot_right = region
+        .right()
+        .min(width.saturating_sub(FAST_RING_RADIUS))
+        .max(hot_left);
 
     for y in region.top()..region.bottom() {
-        let row = &mut out.row_mut(y)[region.left()..region.right()];
-        for (offset, slot) in row.iter_mut().enumerate() {
-            let x = region.left() + offset;
-            *slot = MonoF32::new(score_in_region(image, x, y, test, border));
+        let rows_fit = y >= FAST_RING_RADIUS && y + FAST_RING_RADIUS < height;
+        let (hot_left, hot_right) = if rows_fit {
+            (hot_left, hot_right)
+        } else {
+            (region.left(), region.left())
+        };
+
+        // The seven scan lines the ring spans, fetched once for the whole
+        // hot span instead of once per sample.
+        let rows: Option<[&[P]; FOOTPRINT]> = rows_fit.then(|| {
+            core::array::from_fn(|offset| image.row(y - FAST_RING_RADIUS + offset))
+        });
+
+        let row = out.row_mut(y);
+        let cold = |slots: &mut [MonoF32], from: usize| {
+            for (offset, slot) in slots.iter_mut().enumerate() {
+                *slot = MonoF32::new(score_in_region(image, from + offset, y, test, border));
+            }
+        };
+        cold(&mut row[region.left()..hot_left], region.left());
+        cold(&mut row[hot_right..region.right()], hot_right);
+
+        if let Some(rows) = rows {
+            for (offset, slot) in row[hot_left..hot_right].iter_mut().enumerate() {
+                *slot = MonoF32::new(score_interior(&rows, hot_left + offset, test));
+            }
         }
     }
     out
@@ -634,9 +690,6 @@ where
     B: BorderPolicy<I>,
 {
     let (w, h) = (image.width() as isize, image.height() as isize);
-    // `to_accumulator` is the crate's named widening and does **not** rescale,
-    // so a `Mono8` 255 arrives as 255.0 and the threshold stays in grey levels.
-    let intensity = |pixel: P| f64::from(pixel.to_accumulator().channel(0));
     let sample = |index: usize| {
         let (dx, dy) = FAST_RING[index];
         let (nx, ny) = (x as isize + dx, y as isize + dy);
@@ -648,12 +701,62 @@ where
         } else {
             border.pixel_at(image, nx, ny)
         };
-        intensity(pixel)
+        intensity::<P, Acc>(pixel)
     };
 
-    let centre = intensity(image.row(y)[x]);
-    // Fully qualified: an unadorned `f64::from` here resolves against this
-    // function's own `f64: From<Acc::Channel>` bound instead of `f32`.
+    score_ring(intensity::<P, Acc>(image.row(y)[x]), test, sample)
+}
+
+/// [`score_in_region`] for a position whose whole ring lies inside the frame,
+/// reading the seven scan lines the caller has already hoisted.
+///
+/// `rows[k]` is image row `y − FAST_RING_RADIUS + k`, and the caller
+/// guarantees `FAST_RING_RADIUS <= x < width − FAST_RING_RADIUS`. Both
+/// promises together are what remove the per-sample bounds test and the
+/// per-sample `row()` call. The border policy is unreachable from here by
+/// construction, so it is not a parameter.
+fn score_interior<P, Acc>(rows: &[&[P]; FOOTPRINT], x: usize, test: SegmentTest) -> f32
+where
+    P: Copy + LinearPixel<f32, Accumulator = Acc>,
+    Acc: SingleChannel,
+    f64: From<Acc::Channel>,
+{
+    let sample = |index: usize| {
+        let (row, dx) = FAST_RING_ROWS[index];
+        intensity::<P, Acc>(rows[row][x.wrapping_add_signed(dx)])
+    };
+
+    score_ring(
+        intensity::<P, Acc>(rows[FAST_RING_RADIUS][x]),
+        test,
+        sample,
+    )
+}
+
+/// The centre-relative intensity of one pixel, in the accumulator's units.
+///
+/// `to_accumulator` is the crate's named widening and does **not** rescale,
+/// so a `Mono8` 255 arrives as 255.0 and the threshold stays in grey levels.
+#[inline(always)]
+fn intensity<P, Acc>(pixel: P) -> f64
+where
+    P: Copy + LinearPixel<f32, Accumulator = Acc>,
+    Acc: SingleChannel,
+    f64: From<Acc::Channel>,
+{
+    f64::from(pixel.to_accumulator().channel(0))
+}
+
+/// The segment test itself, over a `sample(index) -> intensity` callback.
+///
+/// The two scans differ only in how a ring position is fetched (one consults
+/// the border policy, the other indexes hoisted rows), so the ordering that
+/// makes the detector fast (cardinals first, the other twelve only for the
+/// pixels [`cardinals_admit`] cannot rule out) lives here, once.
+#[inline(always)]
+fn score_ring(centre: f64, test: SegmentTest, sample: impl Fn(usize) -> f64) -> f32 {
+    // Fully qualified: an unadorned `f64::from` here resolves against a
+    // caller's `f64: From<Acc::Channel>` bound instead of `f32`.
     let threshold = <f64 as From<f32>>::from(test.threshold());
 
     let mut ring = [0.0f64; 16];
@@ -663,7 +766,7 @@ where
     if !cardinals_admit(centre, &ring, test.arc_length(), threshold) {
         return 0.0;
     }
-    for index in (0..16).filter(|i| !CARDINALS.contains(i)) {
+    for index in NON_CARDINALS {
         ring[index] = sample(index);
     }
 
@@ -674,6 +777,10 @@ where
 /// The four ring positions at the compass points: indices 0, 4, 8 and 12 of
 /// [`FAST_RING`], i.e. straight up, right, down and left of the centre.
 const CARDINALS: [usize; 4] = [0, 4, 8, 12];
+
+/// The other twelve ring positions, in ring order: the complement of
+/// [`CARDINALS`], spelled out rather than filtered at run time.
+const NON_CARDINALS: [usize; 12] = [1, 2, 3, 5, 6, 7, 9, 10, 11, 13, 14, 15];
 
 /// The classical high-speed rejection test, generalised to any arc length.
 ///
@@ -710,11 +817,9 @@ fn cardinals_admit(centre: f64, ring: &[f64; 16], arc_length: usize, threshold: 
 /// The largest threshold at which `centre` still passes the segment test
 /// against `ring`, floored at zero.
 ///
-/// The **plain** form of the test: every one of the 16 possible arc positions
-/// is tried, with no early exit. [`cardinals_admit`] is the optimization that
-/// keeps most pixels from reaching here, and it is deliberately a separate
-/// function — this one is what the detector *means*, and a test asserts the
-/// two agree.
+/// Every one of the 16 possible arc positions is tried, with no early exit:
+/// this is what the detector *means*, and [`cardinals_admit`] is the separate
+/// optimization that keeps most pixels from reaching it.
 ///
 /// An arc passes at threshold `t` when every one of its `arc_length` pixels
 /// differs from the centre by at least `t` **in the same direction**, so the
@@ -722,11 +827,24 @@ fn cardinals_admit(centre: f64, ring: &[f64; 16], arc_length: usize, threshold: 
 /// score is the best such value over all arcs and both directions.
 ///
 /// A `NaN` sample discards the arcs that contain it rather than being
-/// silently skipped — `f64::min` would drop it and let the remaining samples
+/// silently skipped: `f64::min` would drop it and let the remaining samples
 /// decide, which would report a corner from data that is not there. Arcs
 /// clear of the `NaN` still count, so one bad sample costs the detection only
 /// if every arc needs it; a `NaN` centre costs all of them. This is
 /// [`corner_peaks`]'s "neither wins nor survives" rule at the sample level.
+///
+/// # Why this is not a sliding-window minimum
+///
+/// The double loop is `O(16 · arc_length)`, and what it computes is a
+/// sliding-window minimum of the signed differences over a circular buffer of
+/// 16 (plus a maximum, for the dark direction), which a doubled array and a
+/// prefix/suffix block decomposition would give in `O(16 + arc_length)`. That
+/// was built and measured, and it lost: on a 512x512 texture the block
+/// decomposition is ≈6 % *slower* at `arc_length = 9`, the case that matters
+/// most, because four 31-element scratch arrays cost more than the 144 cheap
+/// comparisons they replace. It won ≈6 % at 12 and was a wash at 16, which
+/// does not pay for a second scoring path. Sixteen elements is simply too few
+/// for the asymptotics to matter.
 fn segment_score(centre: f64, ring: &[f64; 16], arc_length: usize) -> f64 {
     let mut best = f64::NEG_INFINITY;
 
@@ -1102,6 +1220,79 @@ mod tests {
                             expected,
                             "n = {arc_length}, t = {threshold}, at ({x}, {y})"
                         );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_interior_and_boundary_paths_agree() {
+        // `fast_score_map` splits each scan line into a hot span that reads
+        // hoisted rows and cold strips that go through the border policy;
+        // `fast_score_at` always takes the second path. Under `Clamp` the
+        // whole image is scored, so every pixel is a comparison, and the
+        // 3-pixel frame is where the split lands.
+        let image: Image<MonoF32> = Image::generate(24, 20, |x, y| {
+            let checker = if (x / 5 + y / 3) % 2 == 0 { 0.15 } else { 0.85 };
+            MonoF32::new(checker + ((x * 3 + y * 7) % 9) as f32 * 0.01)
+        });
+
+        for arc_length in [9usize, 12, 16] {
+            let test = SegmentTest::new(0.05, arc_length);
+            let clamped = fast_score_map(&image, test, &Clamp);
+            let skipped = fast_score_map(&image, test, &Skip);
+            for y in 0..image.height() {
+                for x in 0..image.width() {
+                    assert_eq!(
+                        clamped.pixel_at(x, y).value(),
+                        fast_score_at(&image, x, y, test, &Clamp).unwrap(),
+                        "clamp, n = {arc_length}, at ({x}, {y})"
+                    );
+                    let expected =
+                        fast_score_at(&image, x, y, test, &Skip).unwrap_or(0.0);
+                    assert_eq!(
+                        skipped.pixel_at(x, y).value(),
+                        expected,
+                        "skip, n = {arc_length}, at ({x}, {y})"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn an_image_narrower_or_shorter_than_the_ring_has_no_hot_span() {
+        // The interior/boundary split has to survive an image with no
+        // interior at all. Under `Clamp` every pixel is still scored, so the
+        // hot span's column bounds can land outside the row: a 2-wide image
+        // has `region.right() == 2` while the ring needs column 3. Both
+        // orientations, and both policies.
+        for (w, h) in [(2usize, 12usize), (12, 2), (1, 1), (7, 7), (6, 40)] {
+            let image: Image<MonoF32> =
+                Image::generate(w, h, |x, y| MonoF32::new(((x * 3 + y) % 5) as f32 * 0.2));
+            for arc_length in [9usize, 16] {
+                let test = SegmentTest::new(0.05, arc_length);
+                for &clamped in &[true, false] {
+                    let scores = if clamped {
+                        fast_score_map(&image, test, &Clamp)
+                    } else {
+                        fast_score_map(&image, test, &Skip)
+                    };
+                    assert_eq!(scores.size(), image.size(), "{w}x{h}");
+                    for y in 0..h {
+                        for x in 0..w {
+                            let expected = if clamped {
+                                fast_score_at(&image, x, y, test, &Clamp).unwrap_or(0.0)
+                            } else {
+                                fast_score_at(&image, x, y, test, &Skip).unwrap_or(0.0)
+                            };
+                            assert_eq!(
+                                scores.pixel_at(x, y).value(),
+                                expected,
+                                "{w}x{h}, clamp = {clamped}, n = {arc_length}, at ({x}, {y})"
+                            );
+                        }
                     }
                 }
             }
