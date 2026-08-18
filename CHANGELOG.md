@@ -552,11 +552,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   structure-tensor response peak drifts inward from the corner as its window
   grows (measured and regression-tested since the detectors landed), and
   interpolating a displaced peak yields a precise displaced peak. Removing
-  that needs a different computation over a different input, and it is not in
-  this release. The distinction is stated in the `analyze::peak` module docs
+  that needs a different computation over a different input, which is what
+  `refine_corners` (below) does for corners; "refine" is reserved for that
+  step. The distinction is stated in the `analyze::peak` module docs
   with both error magnitudes, because every surveyed library ships the two
   concepts under the single word "sub-pixel", which is how a position that is
   still a pixel off comes to be described as sub-pixel refined.
+- `features::detect::refine_corners`: the corner **accuracy** step, the half
+  of corner localization that interpolation cannot do. Per corner it solves
+  the Förstner gradient-orthogonality least squares over a window of the
+  caller's gradient images (`radius` of about 2σ for the tensor family, 3
+  for the segment test): near a corner every pixel's gradient is
+  perpendicular to the edge line through that pixel, so the corner is the
+  least-squares intersection of the edge lines the window's gradients imply.
+  It reads the gradient field and never the response map, which is what lets
+  it remove both detector families' localization biases: the
+  structure-tensor peak's window-induced inward drift (one full pixel per
+  axis at σ = 1.6 on the regression fixture) and the segment test's
+  raster-first plateau bias (two full pixels on the same fixture). Refined
+  positions land within 0.05 px of the geometric corner for every window σ
+  from 0.8 to 2.0, regression-tested; the remaining few hundredths are the
+  gradient operator's own support mixing the two edges near the apex, the
+  method's noise floor. Composes in place over `&mut [Corner]` like
+  `interpolate_corners` and returns how many corners were refined; a corner
+  whose fit is refused (incomplete window, rank-deficient gradients, a
+  solution outside its own window) keeps its position. Returns `Result`:
+  `gx` and `gy` are two separately produced images (`Error::SizeMismatch`),
+  and a zero radius is rejected as `Error::InvalidParameter` because a
+  single-pixel window would silently refuse every corner. Responses are left
+  alone; the output type stays `Corner`, with the changed error model
+  documented rather than encoded in a new type.
 
 ### Changed
 

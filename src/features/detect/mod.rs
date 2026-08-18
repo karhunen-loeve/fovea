@@ -90,9 +90,11 @@
 //! synthetic step edge that is up to two pixels from the geometric corner —
 //! so "does not move with a parameter" is not the same as "is exact". It is
 //! the segment test's analogue of the tensor family's inward drift, and the
-//! same answer applies: a refinement step, not a different threshold, and
+//! same answer applies: [`refine_corners`], not a different threshold, and
 //! not [`interpolate_corners`] either, which locates the peak of the map it
-//! is given and cannot know that the map's peak is in the wrong place.
+//! is given and cannot know that the map's peak is in the wrong place. The
+//! segment test computes no gradients of its own, so hand `refine_corners`
+//! a Sobel pair taken from the image.
 //!
 //! ## The pipeline, and how to take it apart
 //!
@@ -117,12 +119,19 @@
 //! new API — [`fast_score_at`] is the segment test on a single pixel, and
 //! [`corner_peaks`] turns any map into keypoints.
 //!
-//! One stage is missing from that diagram because it is optional:
-//! [`interpolate_corners`] moves already-reported corners off the pixel grid
-//! to the interpolated peak of the response map. Without it every position
-//! above is an integer. With it the grid quantization is gone and nothing
-//! else is, so a tensor-family corner whose response peak has drifted
-//! inward stays drifted, precisely.
+//! Two stages are missing from that diagram because they are optional, and
+//! they remove different errors:
+//!
+//! - [`interpolate_corners`] moves already-reported corners off the pixel
+//!   grid to the interpolated peak of the response map. Without it every
+//!   position above is an integer. With it the grid quantization is gone
+//!   and nothing else is, so a tensor-family corner whose response peak has
+//!   drifted inward stays drifted, precisely.
+//! - [`refine_corners`] moves corners to the least-squares intersection of
+//!   the edge lines implied by the image's gradient field, and never reads
+//!   the response map at all. That is what removes the drift (and the
+//!   segment test's plateau bias) instead of measuring it more precisely,
+//!   so for corner positions it supersedes interpolation.
 //!
 //! ```
 //! use fovea::Sigma;
@@ -226,6 +235,7 @@
 
 mod fast;
 mod peaks;
+mod refine;
 mod structure_tensor;
 
 pub use fast::{
@@ -233,6 +243,7 @@ pub use fast::{
     fast_score_map,
 };
 pub use peaks::{corner_peaks, interpolate_corners};
+pub use refine::refine_corners;
 pub use structure_tensor::{
     CornerParams, CornerResponse, CornerResponseChannel, Harris, ShiTomasi, StructureTensor,
     corner_response_map, detect_corners, detect_corners_in_level,

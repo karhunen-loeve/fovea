@@ -176,11 +176,13 @@ where
 /// The pixel a corner position names, or `None` if it names none.
 ///
 /// Positions from [`corner_peaks`] are whole numbers, so this is a cast in
-/// the ordinary case; rounding covers a caller who interpolated once
-/// already, and the sign and finiteness tests are what keep the cast from
-/// wrapping a negative or saturating a NaN into a valid-looking index.
+/// the ordinary case; rounding covers a caller who interpolated or refined
+/// once already, and the sign and finiteness tests are what keep the cast
+/// from wrapping a negative or saturating a NaN into a valid-looking index.
+/// Shared with `refine_corners`, whose re-centring loop asks the same
+/// question of every intermediate solution.
 #[inline]
-fn pixel_site(at: CoordinateF64) -> Option<Coordinate> {
+pub(super) fn pixel_site(at: CoordinateF64) -> Option<Coordinate> {
     let (x, y) = (at.x.round(), at.y.round());
     if x >= 0.0 && y >= 0.0 && x.is_finite() && y.is_finite() {
         Some(Coordinate::new(x as usize, y as usize))
