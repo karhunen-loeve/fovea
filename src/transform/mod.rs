@@ -151,7 +151,9 @@ pub use demosaic::{
     BayerBilinear, BayerGains, DemosaicMethod, MalvarHeCutler, demosaic, demosaic_into,
     white_balance, white_balance_into,
 };
-pub(crate) use filters::non_maximum_suppression_from_gradients;
+pub(crate) use filters::{
+    nms_sector, nms_sector_from_gradient, non_maximum_suppression_from_gradients,
+};
 pub use filters::{
     DEFAULT_TRUNCATE, box_blur_3x3, box_blur_5x5, emboss, gaussian_blur, gaussian_blur_3x3,
     gaussian_blur_5x5, gaussian_blur_into,

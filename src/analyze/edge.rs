@@ -34,10 +34,18 @@
 //! let thin = non_maximum_suppression(&mag, &dir).unwrap();
 //! let edges: BinaryImage = hysteresis_threshold(&thin, low, high);
 //! ```
+//!
+//! ## From a mask to positions
+//!
+//! [`canny`] answers "which pixels are edge pixels". A measurement usually
+//! needs "where is the edge", which is a position between pixels:
+//! [`interpolate_edge_points`] turns the mask into a point list by fitting
+//! the gradient magnitude across each kept pixel. It needs the `magnitude`
+//! and gradient stages of the pipeline above, so it composes with the
+//! hand-built form rather than with `canny` alone.
 
 use core::ops::Add;
 
-use crate::Sigma;
 use crate::border::Clamp;
 use crate::image::{BinaryImage, Image, RasterImage};
 use crate::pixel::{FromLinear, LinearPixel, SingleChannel, ZeroablePixel};
@@ -45,7 +53,9 @@ use crate::transform::{
     MagnitudeChannel, gaussian_blur, gradient_magnitude, non_maximum_suppression_from_gradients,
     scharr_x, scharr_y,
 };
+use crate::{Coordinate, CoordinateF64, Error, Sigma};
 
+use crate::analyze::peak::interpolate_ridge_points;
 use crate::analyze::threshold::hysteresis_threshold;
 
 /// Single-scale Canny edge detector.
@@ -147,9 +157,112 @@ where
     )
 }
 
+/// Interpolated edge positions for the `true` pixels of `mask`.
+///
+/// The measurement form of an edge result. [`canny`] reports a set of
+/// pixels, which quantizes every edge position to the pixel grid; this fits
+/// the gradient magnitude across each kept pixel and reports where the
+/// crest actually falls, removing up to half a pixel of that quantization.
+/// Fitting is [`interpolate_ridge_points`], one 1-D fit per site along that
+/// site's own gradient, and everything it documents about the fit applies
+/// here.
+///
+/// Points come out in raster order, one per kept pixel whose fit succeeded.
+/// A pixel is dropped rather than reported at its integer position when the
+/// fit is refused, which happens on the image border and where the
+/// magnitude is flat across the site. Use
+/// [`interpolate_ridge_points`] directly if the correspondence with the
+/// input pixels has to be preserved.
+///
+/// # `magnitude` is the unthinned magnitude
+///
+/// Pass the [`gradient_magnitude`] output, **not** the
+/// [`non_maximum_suppression`](crate::transform::non_maximum_suppression)
+/// output. Suppression zeroes exactly the two neighbours each fit reads, so
+/// a thinned map leaves every site looking like an isolated spike and every
+/// point unmoved from its pixel centre: the wrong answer, quietly. The
+/// thinned map's job here is choosing the sites, which is what `mask`
+/// already carries.
+///
+/// The gradient pair must be the same `gx` / `gy` the magnitude was built
+/// from. Nothing can check that, and a mismatched pair fits along the wrong
+/// axis.
+///
+/// # Errors
+///
+/// Returns [`Error::SizeMismatch`] if `mask`, `magnitude`, `gx` and `gy` do
+/// not all share a size. Separately produced images, so this is a
+/// data-dependent relation rather than a caller precondition.
+///
+/// # Example
+///
+/// ```
+/// use fovea::Sigma;
+/// use fovea::analyze::edge::{canny, interpolate_edge_points};
+/// use fovea::border::Clamp;
+/// use fovea::image::Image;
+/// use fovea::pixel::MonoF32;
+/// use fovea::transform::{gaussian_blur, gradient_magnitude, scharr_x, scharr_y};
+///
+/// // A step from black to white between columns 5 and 6, so the edge is
+/// // at x = 5.5 and no pixel centre is on it.
+/// let image: Image<MonoF32> =
+///     Image::generate(12, 6, |x, _| MonoF32::new(if x < 6 { 0.0 } else { 1.0 }));
+///
+/// let sigma = Sigma::new(1.0);
+/// let mask = canny(&image, 0.10, 0.30, sigma);
+///
+/// // The same gradient stages `canny` runs internally.
+/// let blurred: Image<MonoF32> = gaussian_blur(&image, sigma, &Clamp);
+/// let gx = scharr_x(&blurred, &Clamp);
+/// let gy = scharr_y(&blurred, &Clamp);
+/// let magnitude = gradient_magnitude(&gx, &gy)?;
+///
+/// let points = interpolate_edge_points(&mask, &magnitude, &gx, &gy)?;
+/// assert!(!points.is_empty());
+/// for p in &points {
+///     assert!((p.x - 5.5).abs() < 1e-4, "{p:?}");
+/// }
+/// # Ok::<(), fovea::Error>(())
+/// ```
+pub fn interpolate_edge_points<IB, IM, IX, IY, P>(
+    mask: &IB,
+    magnitude: &IM,
+    gx: &IX,
+    gy: &IY,
+) -> Result<Vec<CoordinateF64>, Error>
+where
+    IB: RasterImage<Pixel = bool>,
+    IM: RasterImage<Pixel = P>,
+    IX: RasterImage<Pixel = P>,
+    IY: RasterImage<Pixel = P>,
+    P: SingleChannel,
+    f64: From<P::Channel>,
+{
+    if mask.size() != magnitude.size() {
+        return Err(Error::SizeMismatch {
+            expected: magnitude.size(),
+            actual: mask.size(),
+        });
+    }
+
+    let sites = (0..mask.height()).flat_map(|y| {
+        mask.row(y)
+            .iter()
+            .enumerate()
+            .filter(|&(_, &on)| on)
+            .map(move |(x, _)| Coordinate::new(x, y))
+    });
+
+    Ok(interpolate_ridge_points(sites, magnitude, gx, gy)?
+        .into_iter()
+        .flatten()
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::canny;
+    use super::{canny, interpolate_edge_points};
     use crate::Sigma;
     use crate::image::{Image, ImageView, RasterImage};
     use crate::pixel::{Mono8, MonoF32, MonoF64};
@@ -298,4 +411,138 @@ mod tests {
 
     // An invalid sigma is unrepresentable in the `Sigma` parameter type;
     // its rejection is tested at the type's constructors in `common.rs`.
+
+    // ── interpolate_edge_points ──────────────────────────────────────────
+
+    use crate::CoordinateF64;
+    use crate::border::Clamp;
+    use crate::error::Error;
+    use crate::transform::{gaussian_blur, gradient_magnitude, scharr_x, scharr_y};
+
+    /// The mask, magnitude and gradient pair `interpolate_edge_points`
+    /// takes, for a vertical step between columns `edge_x - 1` and
+    /// `edge_x`, so the true edge is at `edge_x - 0.5`.
+    fn step_edge_stages(
+        w: usize,
+        h: usize,
+        edge_x: usize,
+    ) -> (
+        crate::image::BinaryImage,
+        Image<MonoF32>,
+        Image<MonoF32>,
+        Image<MonoF32>,
+    ) {
+        let sigma = Sigma::new(1.0);
+        let image: Image<MonoF32> =
+            Image::generate(w, h, |x, _| MonoF32::new(if x < edge_x { 0.0 } else { 1.0 }));
+        let mask = canny(&image, 0.10, 0.30, sigma);
+        let blurred: Image<MonoF32> = gaussian_blur(&image, sigma, &Clamp);
+        let gx = scharr_x(&blurred, &Clamp);
+        let gy = scharr_y(&blurred, &Clamp);
+        let magnitude = gradient_magnitude(&gx, &gy).unwrap();
+        (mask, magnitude, gx, gy)
+    }
+
+    #[test]
+    fn edge_points_land_between_the_pixel_columns() {
+        // The step sits between columns 5 and 6, so no pixel centre is on
+        // the edge and every interpolated point must be at x = 5.5.
+        let (mask, magnitude, gx, gy) = step_edge_stages(12, 6, 6);
+        let points = interpolate_edge_points(&mask, &magnitude, &gx, &gy).unwrap();
+        assert!(!points.is_empty(), "the fixture should produce edges");
+        for p in &points {
+            assert!((p.x - 5.5).abs() < 1e-4, "{p:?}");
+        }
+    }
+
+    #[test]
+    fn an_edge_on_a_pixel_centre_is_not_moved() {
+        // A step whose transition is centred *on* column 6 (one half-value
+        // sample there) rather than between two columns. The magnitude
+        // ridge is then symmetric about column 6, so the fit reports the
+        // pixel centre it started from: interpolation is not a
+        // perturbation, and an edge that really is on a pixel stays there.
+        let sigma = Sigma::new(1.0);
+        let image: Image<MonoF32> = Image::generate(13, 5, |x, _| {
+            MonoF32::new(match x.cmp(&6) {
+                core::cmp::Ordering::Less => 0.0,
+                core::cmp::Ordering::Equal => 0.5,
+                core::cmp::Ordering::Greater => 1.0,
+            })
+        });
+        let mask = canny(&image, 0.05, 0.15, sigma);
+        let blurred: Image<MonoF32> = gaussian_blur(&image, sigma, &Clamp);
+        let gx = scharr_x(&blurred, &Clamp);
+        let gy = scharr_y(&blurred, &Clamp);
+        let magnitude = gradient_magnitude(&gx, &gy).unwrap();
+
+        let points = interpolate_edge_points(&mask, &magnitude, &gx, &gy).unwrap();
+        assert!(!points.is_empty(), "the fixture should produce edges");
+        for p in &points {
+            assert!((p.x - 6.0).abs() < 1e-6, "{p:?}");
+        }
+    }
+
+    #[test]
+    fn edge_points_come_out_in_raster_order() {
+        let (mask, magnitude, gx, gy) = step_edge_stages(12, 6, 6);
+        let points = interpolate_edge_points(&mask, &magnitude, &gx, &gy).unwrap();
+        let ys: Vec<f64> = points.iter().map(|p| p.y).collect();
+        assert!(ys.windows(2).all(|w| w[0] <= w[1]), "{ys:?}");
+    }
+
+    #[test]
+    fn an_empty_mask_yields_no_points() {
+        let (_, magnitude, gx, gy) = step_edge_stages(12, 6, 6);
+        let empty = Image::fill(12, 6, false);
+        let points = interpolate_edge_points(&empty, &magnitude, &gx, &gy).unwrap();
+        assert_eq!(points, Vec::<CoordinateF64>::new());
+    }
+
+    #[test]
+    fn a_thinned_magnitude_leaves_every_point_on_its_pixel() {
+        // The documented misuse: passing the suppressed map instead of the
+        // magnitude. Suppression zeroed the two neighbours each fit reads,
+        // so every site looks like an isolated spike and no point moves.
+        // The failure is silent, which is why the docs pin it and this test
+        // records it.
+        use crate::transform::non_maximum_suppression;
+
+        let sigma = Sigma::new(1.0);
+        let image: Image<MonoF32> =
+            Image::generate(12, 6, |x, _| MonoF32::new(if x < 6 { 0.0 } else { 1.0 }));
+        let mask = canny(&image, 0.10, 0.30, sigma);
+        let blurred: Image<MonoF32> = gaussian_blur(&image, sigma, &Clamp);
+        let gx = scharr_x(&blurred, &Clamp);
+        let gy = scharr_y(&blurred, &Clamp);
+        let magnitude = gradient_magnitude(&gx, &gy).unwrap();
+        let direction = crate::transform::gradient_direction(&gx, &gy).unwrap();
+        let thinned = non_maximum_suppression(&magnitude, &direction).unwrap();
+
+        let wrong = interpolate_edge_points(&mask, &thinned, &gx, &gy).unwrap();
+        assert!(!wrong.is_empty());
+        for p in &wrong {
+            assert_eq!(p.x, p.x.round(), "{p:?}");
+        }
+
+        // The same sites on the magnitude do move off the grid.
+        let right = interpolate_edge_points(&mask, &magnitude, &gx, &gy).unwrap();
+        assert!(right.iter().all(|p| (p.x - p.x.round()).abs() > 1e-6));
+    }
+
+    #[test]
+    fn mismatched_stages_are_rejected() {
+        let (mask, magnitude, gx, gy) = step_edge_stages(12, 6, 6);
+        let small: crate::image::BinaryImage = Image::fill(11, 6, true);
+        assert!(matches!(
+            interpolate_edge_points(&small, &magnitude, &gx, &gy),
+            Err(Error::SizeMismatch { .. })
+        ));
+
+        let wrong_gradient: Image<MonoF32> = Image::fill(11, 6, MonoF32::new(1.0));
+        assert!(matches!(
+            interpolate_edge_points(&mask, &magnitude, &wrong_gradient, &gy),
+            Err(Error::SizeMismatch { .. })
+        ));
+    }
 }

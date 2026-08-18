@@ -21,8 +21,14 @@
 //!
 //! Contour points are **integer pixel coordinates** — the pixels the
 //! tracer visited. Tracing knows which pixels form the border, not where
-//! the underlying edge crosses them; sub-pixel boundary refinement is a
-//! separate concern and deliberately not folded in here.
+//! the underlying edge crosses them, and it works from a binary mask, which
+//! no longer holds the greyscale evidence of where the boundary really is.
+//! So interpolating the border between pixels is a separate step over
+//! different inputs and is deliberately not folded in here:
+//! [`analyze::peak::interpolate_ridge_points`](crate::analyze::peak::interpolate_ridge_points)
+//! takes [`Contour::points`] as its sites, plus the gradient magnitude and
+//! gradient pair of the image the mask came from, and returns one
+//! interpolated position per vertex in vertex order.
 //!
 //! Cheap aggregate measurements (pixel-count area, boundary-pixel count,
 //! moments) remain single-pass in

@@ -22,6 +22,58 @@
 //! assert_eq!(result.width(), 8);
 //! assert_eq!(result.height(), 8);
 //! ```
+//!
+//! # Locating the match between pixels
+//!
+//! The score map is sampled on the pixel grid, so the best-scoring
+//! *position* is at best the nearest whole-pixel offset to where the
+//! template actually sits: a report accurate to plus or minus half a pixel,
+//! whatever the underlying alignment. Fitting a quadratic to the scores
+//! around the winner recovers the rest, via
+//! [`analyze::peak::interpolate_peak`](crate::analyze::peak::interpolate_peak).
+//!
+//! Which extremum to fit is a property of the method and is not carried in
+//! its type: [`SAD`] and [`SSD`] are *minimized* at the best match, [`NCC`]
+//! is maximized, so the caller names the one that matches the method it
+//! chose.
+//!
+//! ```
+//! use fovea::Coordinate;
+//! use fovea::analyze::peak::{interpolate_peak, Extremum};
+//! use fovea::image::{Image, ImageView};
+//! use fovea::pixel::MonoF32;
+//! use fovea::transform::{match_template, SSD};
+//!
+//! // A blob sitting half a pixel right of a pixel centre, and a template
+//! // of the same blob centred on one.
+//! let image: Image<MonoF32> = Image::generate(9, 9, |x, y| {
+//!     let (dx, dy) = (x as f64 - 4.5, y as f64 - 4.0);
+//!     MonoF32::new((-(dx * dx + dy * dy) / 4.5).exp() as f32)
+//! });
+//! let template: Image<MonoF32> = Image::generate(3, 3, |x, y| {
+//!     let (dx, dy) = (x as f64 - 1.0, y as f64 - 1.0);
+//!     MonoF32::new((-(dx * dx + dy * dy) / 4.5).exp() as f32)
+//! });
+//!
+//! let scores: Image<MonoF32> = match_template(&image, &template, SSD)?;
+//!
+//! // The lowest score. Offsets 3 and 4 tie, so no single pixel is right.
+//! let mut best = Coordinate::new(0, 0);
+//! for y in 0..scores.height() {
+//!     for x in 0..scores.width() {
+//!         if scores.pixel_at(x, y).value() < scores.pixel_at(best.x, best.y).value() {
+//!             best = Coordinate::new(x, y);
+//!         }
+//!     }
+//! }
+//!
+//! // SSD is minimized at the match, so that is the extremum to fit.
+//! let at = interpolate_peak(&scores, best, Extremum::Minimum)
+//!     .expect("a smooth score valley has a vertex");
+//! assert!((at.x - 3.5).abs() < 1e-3, "{at:?}");
+//! assert!((at.y - 3.0).abs() < 1e-3, "{at:?}");
+//! # Ok::<(), fovea::Error>(())
+//! ```
 
 use core::marker::PhantomData;
 use std::ops::Sub as StdSub;

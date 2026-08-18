@@ -13,6 +13,7 @@
 //! | "How bright is this image, and how uniform?" | [`statistics::image_statistics`](crate::analyze::statistics::image_statistics) | Min, max, mean, variance and standard deviation, per channel. |
 //! | "Where is the brightness, and what shape is it?" | [`statistics::image_moments`](crate::analyze::statistics::image_moments) | Raw, central and normalized intensity moments, and Hu invariants. |
 //! | "Where are the edges in this image?" | [`edge::canny`](crate::analyze::edge::canny) | Binary edge mask. |
+//! | "Where does a peak fall *between* pixels?" | [`peak`](crate::analyze::peak) | Fitted vertex of a corner response, match score, or gradient ridge. |
 //! | "What threshold separates foreground?" | [`histogram::otsu_threshold`](crate::analyze::histogram::otsu_threshold) / [`histogram::otsu_binary_mask`](crate::analyze::histogram::otsu_binary_mask) | Threshold value or binary mask. |
 //! | "Keep weak edges only if connected to a strong one?" | [`threshold::hysteresis_threshold`](crate::analyze::threshold::hysteresis_threshold) | Binary mask. |
 //! | "Threshold each pixel against its local neighbourhood (uneven lighting)?" | [`threshold::adaptive_threshold`](crate::analyze::threshold::adaptive_threshold) | Binary mask. |
@@ -29,5 +30,6 @@ pub mod contours;
 pub mod edge;
 pub mod histogram;
 pub mod integral;
+pub mod peak;
 pub mod statistics;
 pub mod threshold;

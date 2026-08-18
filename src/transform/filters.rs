@@ -878,7 +878,7 @@ where
 /// `(-1, 1)` anti-diagonal. Every step has `dy >= 0`, which
 /// [`nms_survives`] relies on when picking the two neighbour rows.
 #[inline]
-fn nms_sector(theta: f64) -> (isize, isize) {
+pub(crate) fn nms_sector(theta: f64) -> (isize, isize) {
     use core::f64::consts::PI;
     // Fold (-π, π] onto [0, π): opposite gradients share an edge orientation.
     let mut a = theta;
@@ -913,7 +913,7 @@ fn nms_sector(theta: f64) -> (isize, isize) {
 /// vertical and by the angle path as horizontal. Its magnitude is `0`, so
 /// the suppressed output is `0` under either sector.
 #[inline]
-fn nms_sector_from_gradient(gx: f64, gy: f64) -> (isize, isize) {
+pub(crate) fn nms_sector_from_gradient(gx: f64, gy: f64) -> (isize, isize) {
     /// `tan(22.5°)`
     const T22: f64 = 0.414_213_562_373_095_05;
     /// `tan(67.5°)`

@@ -506,6 +506,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Note the convention difference from `BlobMeasurements::central_moments`,
   which divides by area; the `μ_pq` here are unnormalized sums, which is the
   standard definition and what the Hu invariants are built on.
+- `analyze::peak`: peak interpolation, one quadratic fit shared by every
+  operation in the crate that reports a position as a pixel index. A corner
+  peak, a template-match score, an edge on a gradient ridge and a traced
+  contour vertex are all quantized to the grid and so all carry up to half a
+  pixel of error along each axis, systematically. Fitting a quadratic to the
+  samples around the winner and reporting the fitted vertex removes it.
+  `analyze::peak::interpolate_peak` is the 2-D fit over a 3×3 window,
+  `interpolate_peak_along` the 1-D fit across a gradient ridge,
+  `interpolate_ridge_points` that fit over a list of sites, and
+  `parabola_vertex` the 1-D arithmetic on its own for three samples that did
+  not come from an image. The 2-D fit **includes the xy cross term**: two
+  independent 1-D fits are cheaper and are wrong for a peak whose iso-contours
+  lie at an angle to the pixel axes, which is exactly what a corner response
+  and a match score surface produce.
+  `analyze::peak::Extremum` names which stationary point the caller expects,
+  because `transform::SSD` and `SAD` are *minimized* at the best match while
+  `NCC` and every corner response are maximized; naming it is what lets the
+  fit refuse a surface that curves the other way instead of returning the
+  wrong stationary point silently. Every entry point returns `Option`: a flat
+  plateau has no unique vertex, a saddle is not a maximum, and a site on the
+  image border has no neighbour on one side.
+- `analyze::edge::interpolate_edge_points` and
+  `features::detect::interpolate_corners`: the two named call sites of the
+  above. `interpolate_edge_points` turns a `canny` mask plus the magnitude and
+  gradient stages into a point list, one interpolated position per kept pixel.
+  `interpolate_corners` takes `&mut [Corner]` and moves each corner to the
+  interpolated peak of the response map, composing after the detector like
+  `features::retain_top_n` does, and returns how many were interpolated. Two
+  requirements
+  neither type system can express, so both are documented and
+  regression-tested: `interpolate_edge_points` needs the **unthinned**
+  magnitude (suppression zeroes exactly the two neighbours each fit reads, so
+  a thinned map leaves every point on its pixel centre, which is a plausible
+  wrong answer), and `interpolate_corners` needs corners in the *response map's*
+  frame, so it runs on `corner_peaks` output before any level→base lift.
+  For contours, `interpolate_ridge_points` takes `Contour::points` as its
+  sites and returns one entry per vertex **in vertex order**, `None` where the
+  fit was refused rather than dropping it, because a contour is a sequence and
+  removing a vertex splices two unrelated parts of the outline together.
+- **Naming, and what interpolation does not do.** Nothing added here is called
+  "sub-pixel" or "refinement". Interpolation removes the ≤0.5 px *grid
+  quantization*; it leaves the surface's own *localization bias* untouched,
+  because it locates the extremum of the surface it is handed. A
+  structure-tensor response peak drifts inward from the corner as its window
+  grows (measured and regression-tested since the detectors landed), and
+  interpolating a displaced peak yields a precise displaced peak. Removing
+  that needs a different computation over a different input, and it is not in
+  this release. The distinction is stated in the `analyze::peak` module docs
+  with both error magnitudes, because every surveyed library ships the two
+  concepts under the single word "sub-pixel", which is how a position that is
+  still a pixel off comes to be described as sub-pixel refined.
 
 ### Changed
 

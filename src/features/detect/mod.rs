@@ -90,7 +90,9 @@
 //! synthetic step edge that is up to two pixels from the geometric corner —
 //! so "does not move with a parameter" is not the same as "is exact". It is
 //! the segment test's analogue of the tensor family's inward drift, and the
-//! same answer applies: a refinement step, not a different threshold.
+//! same answer applies: a refinement step, not a different threshold, and
+//! not [`interpolate_corners`] either, which locates the peak of the map it
+//! is given and cannot know that the map's peak is in the wrong place.
 //!
 //! ## The pipeline, and how to take it apart
 //!
@@ -114,6 +116,13 @@
 //! Scharr instead of Sobel, or a box window instead of a Gaussian, needs no
 //! new API — [`fast_score_at`] is the segment test on a single pixel, and
 //! [`corner_peaks`] turns any map into keypoints.
+//!
+//! One stage is missing from that diagram because it is optional:
+//! [`interpolate_corners`] moves already-reported corners off the pixel grid
+//! to the interpolated peak of the response map. Without it every position
+//! above is an integer. With it the grid quantization is gone and nothing
+//! else is, so a tensor-family corner whose response peak has drifted
+//! inward stays drifted, precisely.
 //!
 //! ```
 //! use fovea::Sigma;
@@ -223,7 +232,7 @@ pub use fast::{
     FAST_RING, FAST_RING_RADIUS, FastParams, SegmentTest, fast, fast_in_level, fast_score_at,
     fast_score_map,
 };
-pub use peaks::corner_peaks;
+pub use peaks::{corner_peaks, interpolate_corners};
 pub use structure_tensor::{
     CornerParams, CornerResponse, CornerResponseChannel, Harris, ShiTomasi, StructureTensor,
     corner_response_map, detect_corners, detect_corners_in_level,
