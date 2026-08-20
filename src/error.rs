@@ -204,7 +204,7 @@ pub enum Error {
     LabelOverflow {
         /// `MAX_LABEL` of the chosen label pixel type — the maximum
         /// foreground label the type can represent.
-        label_capacity: u64,
+        label_capacity: u32,
     },
 }
 
@@ -516,7 +516,7 @@ mod tests {
     #[test]
     fn display_label_overflow() {
         let err = Error::LabelOverflow {
-            label_capacity: u32::MAX as u64,
+            label_capacity: u32::MAX,
         };
         assert_eq!(
             err.to_string(),

@@ -669,6 +669,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `SeparableKernel` implements the trait — but code that spelled the const
   generic parameters explicitly through a turbofish, or stored a function
   pointer to either function, must drop the turbofish or re-infer the type.
+- **Breaking:** the label-index vocabulary narrows from `u64` to `u32`:
+  `LabelPixel::MAX_LABEL`, `LabelPixel::from_label_index` /
+  `to_label_index`, `Labeling::label_count`, the count
+  `connected_components_into` returns,
+  `Error::LabelOverflow::label_capacity`, and the label
+  `ContourHierarchy::component_for_label` takes. The engine's
+  provisional-label and compaction buffers (and its union-find) move to
+  `u32` with them, halving the width of the working set that both
+  full-image labeling passes read and write, the passes hysteresis
+  thresholding and blob measurements ride on. This is a buffer-width
+  result, not a benchmark: no wall-clock claim is made. The narrowing is
+  also what makes the types honest about capacity: those buffers are what
+  bounds a labeling pass, so a `u64` index advertised a range no pass
+  could deliver, and a hypothetical `Label64` could never have carried a
+  label that `Label32` cannot. Labels are bounded by the image's pixel
+  count, so nothing reachable changes below a 4-gigapixel input; an image
+  that would need the `(u32::MAX + 1)`-th provisional label now returns
+  `Error::LabelOverflow` when the engine's label space is spent, instead
+  of a capacity the types promised and the buffers did not have.
+- **Breaking (for implementors):** `MatchMethod` gains the non-generic
+  supertrait `transform::ScorePolarity`, whose associated const
+  `EXTREMUM` states where the method's score map marks the best match:
+  `SAD` and `SSD` carry `Extremum::Minimum`, `NCC` carries
+  `Extremum::Maximum`. The peak fit is now asked for the method's own
+  polarity, `interpolate_peak(&scores, best, SSD::EXTREMUM)`, instead of
+  a convention the caller has to remember and can invert without any
+  diagnostic. Callers of `match_template` are unaffected; an external
+  `MatchMethod` implementor must add the one-line `ScorePolarity` impl.
+  The const lives on a supertrait rather than on `MatchMethod` itself
+  because an associated const on a trait with three type parameters
+  cannot be read without naming all three: `SSD::EXTREMUM` compiles only
+  from a non-generic trait.
 
 ### Fixed
 

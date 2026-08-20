@@ -213,7 +213,7 @@ impl ContourHierarchy {
     /// label image), or `None` if the label is `0` (background) or out of
     /// range.
     #[must_use]
-    pub fn component_for_label(&self, label: u64) -> Option<&ComponentContour> {
+    pub fn component_for_label(&self, label: u32) -> Option<&ComponentContour> {
         let index = usize::try_from(label.checked_sub(1)?).ok()?;
         self.components.get(index)
     }

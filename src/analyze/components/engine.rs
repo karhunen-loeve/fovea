@@ -66,7 +66,7 @@ where
 pub fn connected_components_into<L, C>(
     image: &impl RasterImage<Pixel = bool>,
     out: &mut Image<L>,
-) -> Result<u64, Error>
+) -> Result<u32, Error>
 where
     L: LabelPixel,
     C: Connectivity,
@@ -124,7 +124,7 @@ where
         let mut sink = WithStats { out: &mut stats };
         run::<L, C, _, WithStats<'_>>(image, &mut labels, &mut sink)?
     };
-    debug_assert_eq!(stats.len() as u64, label_count);
+    debug_assert_eq!(stats.len(), label_count as usize);
     Ok((
         Labeling {
             labels,
@@ -199,7 +199,7 @@ where
         };
         run::<L, C, _, WithMeasurements<'_>>(image, &mut labels, &mut sink)?
     };
-    debug_assert_eq!(measurements.len() as u64, label_count);
+    debug_assert_eq!(measurements.len(), label_count as usize);
     Ok((
         Labeling {
             labels,
@@ -216,12 +216,12 @@ where
 /// Maximum number of raster-preceding neighbours examined per pixel
 /// across every shipped [`Connectivity`]. Currently 4 (for
 /// [`Connectivity8`](super::Connectivity8)). The pass-1 inner buffer
-/// `others: [u64; MAX_NEIGHBOURS]` hardcodes this constant. Adding a
+/// `others: [u32; MAX_NEIGHBOURS]` hardcodes this constant. Adding a
 /// connectivity with more predecessors requires lifting this and is
 /// flagged for follow-up design.
 const MAX_NEIGHBOURS: usize = 4;
 
-fn run<L, C, I, S>(image: &I, out: &mut Image<L>, sink: &mut S) -> Result<u64, Error>
+fn run<L, C, I, S>(image: &I, out: &mut Image<L>, sink: &mut S) -> Result<u32, Error>
 where
     L: LabelPixel,
     C: Connectivity,
@@ -235,9 +235,12 @@ where
     }
 
     // ── Pass 1 ───────────────────────────────────────────────────────
-    // Provisional labels live in a flat W*H Vec<u64>, raster-scan
-    // order. Zero is the background sentinel.
-    let mut prov: Vec<u64> = vec![0; w * h];
+    // Provisional labels live in a flat W*H Vec<u32>, raster-scan
+    // order. Zero is the background sentinel. `u32` is the width of
+    // `LabelPixel::MAX_LABEL`, and this buffer is read and written by
+    // both full-image passes, so its width is the engine's memory
+    // traffic.
+    let mut prov: Vec<u32> = vec![0; w * h];
     // Capacity hint: pathological all-stripes input produces ~W*H/4
     // labels; using that as the initial allocation keeps `make_set`
     // amortised cheap without over-allocating in the common case.
@@ -254,9 +257,12 @@ where
             // Collect provisional labels of the already-visited
             // foreground neighbours. The smallest is tracked
             // separately; everything else goes in `others`, which is
-            // unioned with `smallest` at the end.
-            let mut smallest: u64 = u64::MAX;
-            let mut others: [u64; MAX_NEIGHBOURS] = [0; MAX_NEIGHBOURS];
+            // unioned with `smallest` at the end. `0` doubles as the
+            // "none seen yet" sentinel: provisional labels start at 1,
+            // so no foreground neighbour can carry it (`u32::MAX` could
+            // not serve — it is itself a valid label).
+            let mut smallest: u32 = 0;
+            let mut others: [u32; MAX_NEIGHBOURS] = [0; MAX_NEIGHBOURS];
             let mut other_count = 0usize;
 
             for &(dx, dy) in C::OFFSETS {
@@ -269,11 +275,11 @@ where
                 if p == 0 {
                     continue;
                 }
-                if p < smallest {
-                    if smallest != u64::MAX {
-                        others[other_count] = smallest;
-                        other_count += 1;
-                    }
+                if smallest == 0 {
+                    smallest = p;
+                } else if p < smallest {
+                    others[other_count] = smallest;
+                    other_count += 1;
                     smallest = p;
                 } else if p != smallest {
                     others[other_count] = p;
@@ -281,14 +287,18 @@ where
                 }
             }
 
-            let label = if smallest == u64::MAX {
-                let new_label = uf.make_set();
-                if new_label > L::MAX_LABEL {
-                    return Err(Error::LabelOverflow {
-                        label_capacity: L::MAX_LABEL,
-                    });
+            let label = if smallest == 0 {
+                // `make_set` returns `None` only when the u32 label
+                // space itself is spent; a narrower `L` trips the
+                // `MAX_LABEL` comparison long before.
+                match uf.make_set() {
+                    Some(new_label) if new_label <= L::MAX_LABEL => new_label,
+                    _ => {
+                        return Err(Error::LabelOverflow {
+                            label_capacity: L::MAX_LABEL,
+                        });
+                    }
                 }
-                new_label
             } else {
                 for &o in &others[..other_count] {
                     uf.union(smallest, o);
@@ -304,8 +314,11 @@ where
     // Resolve roots and compact labels to a dense `1..=label_count`,
     // writing the output pixels and forwarding `(label, first, x, y)`
     // to the stats sink.
-    let mut compact: Vec<u64> = vec![0; uf.len() as usize];
-    let mut compact_counter: u64 = 1;
+    let mut compact: Vec<u32> = vec![0; uf.len()];
+    // Compact labels assigned so far. `label_count + 1` cannot wrap:
+    // a new root only appears while `label_count` is strictly below
+    // the provisional-label total, which pass 1 capped at `u32::MAX`.
+    let mut label_count: u32 = 0;
 
     for y in 0..h {
         for x in 0..w {
@@ -317,14 +330,14 @@ where
                 let root = uf.find(p);
                 let existing = compact[root as usize];
                 let (c, first) = if existing == 0 {
-                    let assigned = compact_counter;
+                    let assigned = label_count + 1;
                     compact[root as usize] = assigned;
-                    compact_counter += 1;
+                    label_count = assigned;
                     (assigned, true)
                 } else {
                     (existing, false)
                 };
-                // Invariant: 0 < c <= compact_counter - 1 <= L::MAX_LABEL
+                // Invariant: 0 < c <= label_count <= L::MAX_LABEL
                 // (the pass-1 overflow check guarantees this).
                 debug_assert!(
                     c <= L::MAX_LABEL,
@@ -350,7 +363,7 @@ where
         }
     }
 
-    Ok(compact_counter - 1)
+    Ok(label_count)
 }
 
 /// Returns `true` if the foreground pixel at `(x, y)` is a 4-connected
@@ -666,7 +679,7 @@ mod tests {
         let (_, stats) = connected_components_with_stats::<Label32, Connectivity4>(&img).unwrap();
         let total_area: u64 = stats.iter().map(|s| s.area).sum();
         assert_eq!(total_area as usize, fg);
-        assert_eq!(stats.len() as u64, r.label_count);
+        assert_eq!(stats.len(), r.label_count as usize);
     }
 
     // Stats tests ─────────────────────────────────────────────────────
@@ -759,16 +772,16 @@ mod tests {
     }
 
     impl LabelPixel for TinyLabel {
-        const MAX_LABEL: u64 = 3;
-        fn from_label_index(i: u64) -> Option<Self> {
+        const MAX_LABEL: u32 = 3;
+        fn from_label_index(i: u32) -> Option<Self> {
             if i == 0 || i > 3 {
                 None
             } else {
                 Some(TinyLabel(i as u8))
             }
         }
-        fn to_label_index(self) -> u64 {
-            self.0 as u64
+        fn to_label_index(self) -> u32 {
+            self.0 as u32
         }
     }
 

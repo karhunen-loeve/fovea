@@ -138,8 +138,9 @@ pub fn hysteresis_threshold_into<I, P>(
     );
 
     // 3. keep[label] = true iff that weak component holds a strong pixel.
-    //    Index 0 is the background label and stays false.
-    let mut keep = vec![false; (labeling.label_count + 1) as usize];
+    //    Index 0 is the background label and stays false. Widen before
+    //    the `+ 1`: `label_count` can be `u32::MAX` itself.
+    let mut keep = vec![false; labeling.label_count as usize + 1];
     for y in 0..h {
         let weak_row = weak.row(y);
         let img_row = image.row(y);

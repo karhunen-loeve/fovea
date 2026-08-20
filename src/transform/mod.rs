@@ -178,4 +178,6 @@ pub use morphology::{
 };
 pub use pyramid::{Gaussian, PyramidMethod, pyr_down, pyr_up};
 pub use resize::{Bilinear, NearestNeighbor, ResizeMethod, resize, resize_into};
-pub use template_match::{MatchMethod, NCC, SAD, SSD, match_template, match_template_into};
+pub use template_match::{
+    MatchMethod, NCC, SAD, SSD, ScorePolarity, match_template, match_template_into,
+};

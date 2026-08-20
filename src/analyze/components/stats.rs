@@ -150,7 +150,7 @@ pub(super) mod sink {
         /// boundary flag for this pixel, meaningful only when
         /// [`NEEDS_BOUNDARY`](StatsSink::NEEDS_BOUNDARY) is `true`
         /// (otherwise always `false`).
-        fn record(&mut self, compact_label: u64, first: bool, at: Coordinate, is_boundary: bool);
+        fn record(&mut self, compact_label: u32, first: bool, at: Coordinate, is_boundary: bool);
     }
 
     /// Sink that drops every record. Compiles down to no work.
@@ -158,7 +158,7 @@ pub(super) mod sink {
 
     impl StatsSink for NoStats {
         #[inline(always)]
-        fn record(&mut self, _compact_label: u64, _first: bool, _at: Coordinate, _is_boundary: bool) {}
+        fn record(&mut self, _compact_label: u32, _first: bool, _at: Coordinate, _is_boundary: bool) {}
     }
 
     /// Sink that accumulates per-component stats into a `Vec` indexed
@@ -172,12 +172,12 @@ pub(super) mod sink {
         // do not need the boundary flag, so the engine's neighbour-check is
         // const-folded away and this path is unchanged.
         #[inline]
-        fn record(&mut self, compact_label: u64, first: bool, at: Coordinate, _is_boundary: bool) {
+        fn record(&mut self, compact_label: u32, first: bool, at: Coordinate, _is_boundary: bool) {
             if first {
                 // Compact labels are dense `1..=label_count`, so each
                 // new label appears exactly once with `first = true`
                 // and `compact_label == out.len() + 1`.
-                debug_assert_eq!(self.out.len() as u64, compact_label - 1);
+                debug_assert_eq!(self.out.len(), (compact_label - 1) as usize);
                 self.out.push(ComponentStats::from_seed(at));
             } else {
                 self.out[(compact_label - 1) as usize].extend(at);
@@ -197,9 +197,9 @@ pub(super) mod sink {
         const NEEDS_BOUNDARY: bool = true;
 
         #[inline]
-        fn record(&mut self, compact_label: u64, first: bool, at: Coordinate, is_boundary: bool) {
+        fn record(&mut self, compact_label: u32, first: bool, at: Coordinate, is_boundary: bool) {
             if first {
-                debug_assert_eq!(self.out.len() as u64, compact_label - 1);
+                debug_assert_eq!(self.out.len(), (compact_label - 1) as usize);
                 self.out.push(BlobMeasurements::from_seed(at, is_boundary));
             } else {
                 self.out[(compact_label - 1) as usize].extend(at, is_boundary);

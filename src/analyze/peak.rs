@@ -87,6 +87,11 @@ use crate::{Coordinate, CoordinateF64, Orientation};
 /// go through the same code, and naming which is expected is what lets the
 /// fit refuse a surface that curves the other way instead of returning the
 /// wrong stationary point with no indication.
+///
+/// For a template-match score map, do not name it by hand: the method
+/// carries its own polarity as
+/// [`ScorePolarity::EXTREMUM`](crate::transform::ScorePolarity), so
+/// `SSD::EXTREMUM` cannot disagree with the map `SSD` produced.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Extremum {
     /// The centre sample is expected to be the largest, and the fitted

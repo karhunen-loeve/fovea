@@ -92,7 +92,7 @@ pub struct Labeling<L: LabelPixel> {
     pub labels: Image<L>,
 
     /// Number of distinct foreground components in `labels`.
-    pub label_count: u64,
+    pub label_count: u32,
 }
 
 impl<L: LabelPixel> core::fmt::Debug for Labeling<L> {

@@ -123,7 +123,7 @@ where
                 0 => None, // off-view: a topmost component is top-level
                 bg_label => hole_owner[bg_label as usize - 1],
             };
-            let label = fg_index as u64 + 1;
+            let label = fg_index as u32 + 1;
             let outer = Contour::new(
                 trace_border(
                     &foreground.labels,
@@ -162,7 +162,7 @@ where
 }
 
 /// Label index at `(x, y)`, `0` for background **and** off-view.
-fn label_at<L: LabelPixel>(labels: &Image<L>, x: i64, y: i64) -> u64 {
+fn label_at<L: LabelPixel>(labels: &Image<L>, x: i64, y: i64) -> u32 {
     if x < 0 || y < 0 {
         return 0;
     }
@@ -231,7 +231,7 @@ fn mark_frame_labels<L: LabelPixel>(labels: &Image<L>, out: &mut [bool]) {
 /// different backtrack.
 fn trace_border<L: LabelPixel>(
     labels: &Image<L>,
-    label: u64,
+    label: u32,
     start: Coordinate,
     backtrack: (i64, i64),
 ) -> Vec<Coordinate> {
@@ -500,7 +500,7 @@ mod tests {
         let (labeling, hierarchy) = extract(&img);
         assert_eq!(labeling.label_count, 2);
         for (index, component) in hierarchy.components().iter().enumerate() {
-            let label = index as u64 + 1;
+            let label = index as u32 + 1;
             let first = component.outer().points()[0];
             assert_eq!(
                 labeling.labels.pixel_at(first.x, first.y).to_label_index(),
