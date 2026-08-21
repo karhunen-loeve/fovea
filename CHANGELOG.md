@@ -314,6 +314,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   collinear vertices), which is why the strictly-positive `PixelDistance`
   was not reused. `const fn new` for literals, `try_new` returning
   `Error::InvalidParameter` for computed values.
+- `OddWindowSide`: a fourth **invariant-carrying parameter type** beside
+  `Sigma`, `PixelDistance` and `Tolerance`, holding the side length of a
+  square neighbourhood centred on the pixel being processed, odd and
+  non-zero.
+  `const fn new` for literals (an even literal in a `const` **fails to
+  compile**), `try_new` returning `Error::InvalidParameter` for values
+  computed from data, and `radius()` for the half-width, which is exact
+  because the side is odd. `adaptive_threshold` / `adaptive_threshold_into`
+  take it instead of a bare `usize` (see *Changed*), which removes their
+  "window must be odd and non-zero" panic entirely.
+- `analyze::threshold::HysteresisThresholds<C>`: the `low <= high`
+  threshold pair as one value. The invariant is a *relation*, so neither
+  number is checkable on its own and the pair is what gets validated, once,
+  where it is born. `new` for literals and `try_new` (returning
+  `Error::InvalidParameter`) for thresholds derived from data, such as
+  fractions of a measured magnitude peak. `C` is the comparison channel,
+  and only `PartialOrd` is required, so the float case works: `!(low <=
+  high)` is also exactly the test that rejects a **NaN** threshold, which
+  would otherwise pass silently and return an empty mask, since every
+  comparison against NaN is false. Unlike the other parameter types `new`
+  is not `const`, because the comparison goes through `PartialOrd` on a
+  generic channel and trait methods cannot be called in a `const fn`, so
+  an invalid literal panics on first execution rather than failing to
+  compile.
+- `transform::Clamp::try_new`: the computed-bounds constructor beside the
+  existing panicking `Clamp::new`, returning `Error::InvalidParameter` and
+  naming the first channel where `lo > hi`. A clip range derived from image
+  data (a histogram percentile, an exposure estimate) can come out inverted
+  for reasons that are not a programmer bug. `new` keeps its panic for
+  literals and is unchanged.
 - `analyze::components::Connectivity::Dual`: each connectivity now names
   the connectivity the background must be labeled with when the foreground
   uses it (`Connectivity8::Dual = Connectivity4` and vice versa). Additive:
@@ -687,6 +717,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   result would have been silently wrong near the seam. Call `.radians()` for
   the bare angle, or prefer `.signed_difference(other)` when comparing two
   blobs' axes, which wraps at π instead of reading 80° and −80° as 160° apart.
+- **Breaking:** `analyze::threshold::hysteresis_threshold` (+ its `_into`
+  variant) and `analyze::edge::canny` take one `HysteresisThresholds`
+  argument instead of two bare `low` / `high` values (see *Added*). Wrap
+  literals in `HysteresisThresholds::new(low, high)`, validate computed
+  thresholds with `HysteresisThresholds::try_new(low, high)?`. Both
+  functions are now **total in their thresholds** and their
+  `!(low <= high)` panic is gone; `canny`'s only remaining panic is
+  `gaussian_blur`'s `MAX_RADIUS` capacity bound. `canny` still takes its
+  pair in `f32` and widens it to the accumulator channel, which is `f32` or
+  `f64` and nothing else, since `MagnitudeChannel` is sealed over exactly
+  those two, so the widening is order-preserving and the pair is re-typed
+  rather than re-validated.
+- **Breaking:** `analyze::threshold::adaptive_threshold` (+ its `_into`
+  variant) takes `OddWindowSide` instead of `window: usize` (see *Added*).
+  Write `OddWindowSide::new(31)` for a literal, `OddWindowSide::try_new(side)?` for
+  a side computed from data. The value's meaning is unchanged: it is still
+  the window's side length, not its radius, matching OpenCV's `blockSize`.
+  The "window must be odd and non-zero" panic is gone from both
+  functions.
 - **Breaking:** `gaussian_blur` (+ its `_into` variant),
   `gaussian_kernel_1d` / `gaussian_kernel_size`, and `canny`
   take the new `Sigma` parameter type instead of a raw `f32` σ (see

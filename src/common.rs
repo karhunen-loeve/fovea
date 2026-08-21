@@ -474,6 +474,110 @@ impl Tolerance {
     }
 }
 
+/// A validated square-window side length: odd and non-zero.
+///
+/// The side of a neighbourhood centred on the pixel being processed, in
+/// pixels: the `window` of
+/// [`adaptive_threshold`](crate::analyze::threshold::adaptive_threshold).
+/// An even side has no centre pixel and a zero side has no pixels at all,
+/// so both are rejected; `1` is valid and degenerate (the window is the
+/// pixel itself).
+///
+/// This is **one axis**, not a window. Whether a consumer applies it to
+/// both axes is the consumer's choice: `adaptive_threshold` does, and
+/// documents its neighbourhood as `window × window`. A window with
+/// independent width and height is a [`Size`], which is what
+/// [`SlidingWindow`](crate::image::SlidingWindow) takes.
+///
+/// Unlike [`Sigma`] and [`Tolerance`], whose invariants are inequalities
+/// on a float, this one is a *parity* property, which is why the name
+/// states it, the same choice `NonZeroUsize` makes. Same construction
+/// discipline as the other parameter types: [`OddWindowSide::new`] (const,
+/// panics, and so a compile error in `const` contexts) for literals,
+/// [`OddWindowSide::try_new`] for values computed from data.
+///
+/// The side length rather than the radius is the wrapped quantity,
+/// matching OpenCV's `blockSize` and scikit-image's `block_size`, so a
+/// number read off a reference implementation transfers unchanged. Use
+/// [`radius`](Self::radius) where the half-width is what the loop needs;
+/// for an odd side it is exact.
+///
+/// # Example
+///
+/// ```
+/// use fovea::OddWindowSide;
+///
+/// const LOCAL: OddWindowSide = OddWindowSide::new(15);
+/// assert_eq!(LOCAL.get(), 15);
+/// assert_eq!(LOCAL.radius(), 7);
+///
+/// // An even side is rejected where it is computed, not where it is used.
+/// let from_data = 2 * 8;
+/// assert!(OddWindowSide::try_new(from_data).is_err());
+/// ```
+///
+/// In a `const` context an invalid literal does not compile at all, which
+/// is the point of the `const fn`:
+///
+/// ```compile_fail
+/// use fovea::OddWindowSide;
+/// // ERROR: evaluation of constant value failed. The window side must be
+/// // odd and non-zero.
+/// const WINDOW: OddWindowSide = OddWindowSide::new(16);
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct OddWindowSide(usize);
+
+impl OddWindowSide {
+    /// Creates an `OddWindowSide` from a literal or otherwise proven-valid
+    /// value.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `side` is zero or even. As a `const fn`, this is a
+    /// **compile error** when evaluated in a `const` context. For values
+    /// computed from data, use [`Self::try_new`].
+    #[must_use]
+    pub const fn new(side: usize) -> Self {
+        assert!(
+            side != 0 && side % 2 == 1,
+            "OddWindowSide::new: window side must be odd and non-zero"
+        );
+        Self(side)
+    }
+
+    /// Creates an `OddWindowSide` from a computed value, validating it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidParameter`] if `side` is zero or even.
+    pub fn try_new(side: usize) -> Result<Self, Error> {
+        if side != 0 && side % 2 == 1 {
+            Ok(Self(side))
+        } else {
+            Err(Error::InvalidParameter(format!(
+                "window side must be odd and non-zero, got {side}"
+            )))
+        }
+    }
+
+    /// Returns the side length.
+    #[must_use]
+    pub const fn get(self) -> usize {
+        self.0
+    }
+
+    /// Returns the half-width: `(side − 1) / 2`, exact because the side is
+    /// odd.
+    ///
+    /// A window of side `s` centred on `(x, y)` spans
+    /// `x − radius ..= x + radius` before any clipping.
+    #[must_use]
+    pub const fn radius(self) -> usize {
+        self.0 / 2
+    }
+}
+
 /// Canonicalizes a radian value into `(−π, π]`.
 fn wrap_two_pi(radians: f32) -> f32 {
     const PI: f32 = core::f32::consts::PI;
@@ -817,6 +921,52 @@ mod tests {
     #[should_panic(expected = "finite and positive")]
     fn pixel_distance_new_panics_on_invalid_literal() {
         let _ = PixelDistance::new(0.0);
+    }
+
+    #[test]
+    fn odd_window_side_valid_values_round_trip() {
+        assert_eq!(OddWindowSide::new(31).get(), 31);
+        assert_eq!(OddWindowSide::try_new(3).unwrap().get(), 3);
+        // Const construction: an even literal here would not compile.
+        const W: OddWindowSide = OddWindowSide::new(15);
+        assert_eq!(W.get(), 15);
+        // A side of 1 is degenerate but valid: the window is the pixel.
+        assert_eq!(OddWindowSide::new(1).radius(), 0);
+    }
+
+    #[test]
+    fn odd_window_side_try_new_rejects_even_and_zero() {
+        // A window side can be computed (from a physical feature size and a
+        // pixel pitch, say) and land on an even number or zero, so each is
+        // an error value rather than a crash.
+        for side in [0, 2, 4, 100] {
+            let err = OddWindowSide::try_new(side).unwrap_err();
+            match err {
+                Error::InvalidParameter(reason) => assert!(
+                    reason.contains("odd and non-zero"),
+                    "reason {reason:?} does not name the invariant"
+                ),
+                other => panic!("expected InvalidParameter, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "odd and non-zero")]
+    fn odd_window_side_new_panics_on_even_literal() {
+        let _ = OddWindowSide::new(8);
+    }
+
+    #[test]
+    fn odd_window_side_radius_is_the_exact_half_width() {
+        // The reason the side is the wrapped quantity and the radius is
+        // derived: for an odd side the two determine each other exactly, so
+        // a consumer can take either without a rounding decision.
+        for side in [1, 3, 5, 31, 101] {
+            let w = OddWindowSide::new(side);
+            assert_eq!(w.radius(), side / 2);
+            assert_eq!(2 * w.radius() + 1, side);
+        }
     }
 
     // ───────────────────────────────────────────────────────────────────

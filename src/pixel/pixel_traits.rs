@@ -431,24 +431,24 @@ pub(crate) mod single_channel_sealed {
 /// A single-channel pixel is accepted:
 ///
 /// ```
-/// use fovea::analyze::threshold::hysteresis_threshold;
+/// use fovea::analyze::threshold::{HysteresisThresholds, hysteresis_threshold};
 /// use fovea::image::Image;
 /// use fovea::pixel::MonoF32;
 ///
 /// let img = Image::fill(4, 4, MonoF32::new(0.5));
-/// let _mask = hysteresis_threshold(&img, 0.2f32, 0.8f32);
+/// let _mask = hysteresis_threshold(&img, HysteresisThresholds::new(0.2f32, 0.8));
 /// ```
 ///
 /// A multi-channel pixel is rejected at compile time, not at runtime:
 ///
 /// ```compile_fail
-/// use fovea::analyze::threshold::hysteresis_threshold;
+/// use fovea::analyze::threshold::{HysteresisThresholds, hysteresis_threshold};
 /// use fovea::image::Image;
 /// use fovea::pixel::RgbF32;
 ///
 /// let img = Image::fill(4, 4, RgbF32::new(0.5, 0.5, 0.5));
 /// // ERROR: `RgbF32: SingleChannel` is not satisfied.
-/// let _mask = hysteresis_threshold(&img, 0.2f32, 0.8f32);
+/// let _mask = hysteresis_threshold(&img, HysteresisThresholds::new(0.2f32, 0.8));
 /// ```
 pub trait SingleChannel: HomogeneousPixel + single_channel_sealed::Sealed {}
 

@@ -13,7 +13,7 @@
 //!
 //! ```
 //! use fovea::Sigma;
-//! use fovea::analyze::threshold::hysteresis_threshold;
+//! use fovea::analyze::threshold::{HysteresisThresholds, hysteresis_threshold};
 //! use fovea::border::Clamp;
 //! use fovea::image::{BinaryImage, Image};
 //! use fovea::pixel::MonoF32;
@@ -22,9 +22,10 @@
 //!     scharr_x, scharr_y,
 //! };
 //!
-//! // A hand-built Canny, equivalent to `canny(&image, low, high, sigma)`.
+//! // A hand-built Canny, equivalent to `canny(&image, thresholds, sigma)`.
 //! let image = Image::fill(16, 16, MonoF32::new(0.5));
-//! let (low, high, sigma) = (0.05, 0.15, Sigma::new(1.4));
+//! let thresholds = HysteresisThresholds::new(0.05_f32, 0.15);
+//! let sigma = Sigma::new(1.4);
 //!
 //! let blurred: Image<MonoF32> = gaussian_blur(&image, sigma, &Clamp);
 //! let gx = scharr_x(&blurred, &Clamp);
@@ -32,7 +33,7 @@
 //! let mag = gradient_magnitude(&gx, &gy).unwrap();
 //! let dir = gradient_direction(&gx, &gy).unwrap();
 //! let thin = non_maximum_suppression(&mag, &dir).unwrap();
-//! let edges: BinaryImage = hysteresis_threshold(&thin, low, high);
+//! let edges: BinaryImage = hysteresis_threshold(&thin, thresholds);
 //! ```
 //!
 //! ## From a mask to positions
@@ -56,7 +57,7 @@ use crate::transform::{
 use crate::{Coordinate, CoordinateF64, Error, Sigma};
 
 use crate::analyze::peak::interpolate_ridge_points;
-use crate::analyze::threshold::hysteresis_threshold;
+use crate::analyze::threshold::{HysteresisThresholds, hysteresis_threshold};
 
 /// Single-scale Canny edge detector.
 ///
@@ -70,17 +71,18 @@ use crate::analyze::threshold::hysteresis_threshold;
 ///
 /// `sigma` is a true Gaussian standard deviation (it parameterises
 /// [`gaussian_blur`]); larger values smooth away more detail before
-/// differentiation. `low` and `high` are absolute gradient-magnitude
-/// thresholds applied after suppression: a pixel survives iff its magnitude
-/// is `>= low` **and** its 8-connected ridge component reaches a `>= high`
+/// differentiation. `thresholds` carries the absolute gradient-magnitude
+/// pair applied after suppression: a pixel survives iff its magnitude is
+/// `>= low` **and** its 8-connected ridge component reaches a `>= high`
 /// pixel. Because the blur preserves brightness, these thresholds keep a
 /// stable, kernel-independent meaning across `sigma`.
 ///
 /// Works for any single-channel input whose linear accumulator is a float
 /// pixel — `Mono8`, `Mono16`, `Mono<BITS>` and `MonoF32` accumulate in
 /// `MonoF32`; `Mono32`, `Mono64` and `MonoF64` accumulate in `MonoF64`. The
-/// thresholds are taken as `f32` for ergonomics and widened to the
-/// accumulator's channel as needed.
+/// thresholds are taken in `f32` for ergonomics and widened to the
+/// accumulator's channel as needed; that widening is order-preserving, so
+/// the pair stays valid without a second check.
 ///
 /// Scharr is used for the gradient (better rotational symmetry than Sobel)
 /// and [`Clamp`] for every border (so the output keeps the input size). To
@@ -88,21 +90,24 @@ use crate::analyze::threshold::hysteresis_threshold;
 /// or to inspect an intermediate — compose the public stage functions
 /// directly; see the [module documentation](self).
 ///
-/// σ is the invariant-carrying [`Sigma`] type: literals use
-/// `Sigma::new`, computed values `Sigma::try_new` — an invalid σ is caught
-/// where it is produced, not here.
+/// Both parameters are invariant-carrying types: literals use `Sigma::new`
+/// and [`HysteresisThresholds::new`], values computed from data the
+/// matching `try_new`, so an invalid σ or a misordered threshold pair is
+/// caught where it is produced, not here.
 ///
 /// # Panics
 ///
-/// Panics if `!(low <= high)` (via [`hysteresis_threshold`]), or if σ's
-/// derived kernel radius exceeds
-/// [`MAX_RADIUS`](crate::image::MAX_RADIUS) (via [`gaussian_blur`]).
+/// Panics if σ's derived kernel radius exceeds
+/// [`MAX_RADIUS`](crate::image::MAX_RADIUS) (via [`gaussian_blur`]). The
+/// threshold relation cannot fail here, because it is carried by
+/// [`HysteresisThresholds`].
 ///
 /// # Example
 ///
 /// ```
 /// use fovea::Sigma;
 /// use fovea::analyze::edge::canny;
+/// use fovea::analyze::threshold::HysteresisThresholds;
 /// use fovea::image::{Image, ImageView};
 /// use fovea::pixel::MonoF32;
 ///
@@ -111,7 +116,8 @@ use crate::analyze::threshold::hysteresis_threshold;
 ///     MonoF32::new(if x < 3 { 0.0 } else { 1.0 })
 /// });
 ///
-/// let edges = canny(&image, 0.10, 0.30, Sigma::new(1.0));
+/// let thresholds = HysteresisThresholds::new(0.10_f32, 0.30);
+/// let edges = canny(&image, thresholds, Sigma::new(1.0));
 ///
 /// // The response is a thin edge at the boundary (the step sits between
 /// // columns 2 and 3, so the kept ridge is one or two columns wide there).
@@ -122,7 +128,11 @@ use crate::analyze::threshold::hysteresis_threshold;
 /// assert!(columns.iter().all(|&x| x == 2 || x == 3), "{columns:?}");
 /// ```
 #[must_use]
-pub fn canny<I, P, Acc>(image: &I, low: f32, high: f32, sigma: Sigma) -> BinaryImage
+pub fn canny<I, P, Acc>(
+    image: &I,
+    thresholds: HysteresisThresholds<f32>,
+    sigma: Sigma,
+) -> BinaryImage
 where
     I: RasterImage<Pixel = P>,
     P: Copy + LinearPixel<f32, Accumulator = Acc>,
@@ -150,10 +160,13 @@ where
     // `gradient_direction` → `non_maximum_suppression` form is public and
     // yields the same mask; see the module docs.
     let thinned = non_maximum_suppression_from_gradients(&magnitude, &gx, &gy);
+    // `Acc::Channel` is `f32` or `f64`, because `MagnitudeChannel` is
+    // sealed over exactly those two, so `From<f32>` is the identity or an
+    // exact widening and the `low <= high` relation survives it. That is
+    // what lets the pair be re-typed rather than re-validated.
     hysteresis_threshold(
         &thinned,
-        <Acc::Channel as From<f32>>::from(low),
-        <Acc::Channel as From<f32>>::from(high),
+        thresholds.map_monotone(<Acc::Channel as From<f32>>::from),
     )
 }
 
@@ -199,6 +212,7 @@ where
 /// ```
 /// use fovea::Sigma;
 /// use fovea::analyze::edge::{canny, interpolate_edge_points};
+/// use fovea::analyze::threshold::HysteresisThresholds;
 /// use fovea::border::Clamp;
 /// use fovea::image::Image;
 /// use fovea::pixel::MonoF32;
@@ -210,7 +224,8 @@ where
 ///     Image::generate(12, 6, |x, _| MonoF32::new(if x < 6 { 0.0 } else { 1.0 }));
 ///
 /// let sigma = Sigma::new(1.0);
-/// let mask = canny(&image, 0.10, 0.30, sigma);
+/// let thresholds = HysteresisThresholds::new(0.10_f32, 0.30);
+/// let mask = canny(&image, thresholds, sigma);
 ///
 /// // The same gradient stages `canny` runs internally.
 /// let blurred: Image<MonoF32> = gaussian_blur(&image, sigma, &Clamp);
@@ -262,10 +277,15 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{canny, interpolate_edge_points};
+    use super::{HysteresisThresholds, canny, interpolate_edge_points};
     use crate::Sigma;
     use crate::image::{Image, ImageView, RasterImage};
     use crate::pixel::{Mono8, MonoF32, MonoF64};
+
+    /// The `(low, high)` pair as one argument, so the call sites stay short.
+    fn t(low: f32, high: f32) -> HysteresisThresholds<f32> {
+        HysteresisThresholds::new(low, high)
+    }
 
     /// Number of `true` pixels in a binary mask.
     fn count_true(mask: &crate::image::BinaryImage) -> usize {
@@ -300,14 +320,14 @@ mod tests {
         // A vertical step between x = 3 and x = 4 in an 8×6 image ⇒ a thin
         // edge confined to that boundary.
         let image = Image::generate(8, 6, |x, _| MonoF32::new(if x < 4 { 0.0 } else { 1.0 }));
-        let edges = canny(&image, 0.10, 0.30, Sigma::new(1.0));
+        let edges = canny(&image, t(0.10, 0.30), Sigma::new(1.0));
         assert_thin_edge(&edges, &[3, 4]);
     }
 
     #[test]
     fn uniform_image_no_edges() {
         let image = Image::fill(12, 12, MonoF32::new(0.5));
-        let edges = canny(&image, 0.05, 0.15, Sigma::new(1.2));
+        let edges = canny(&image, t(0.05, 0.15), Sigma::new(1.2));
         assert_eq!(count_true(&edges), 0);
     }
 
@@ -317,7 +337,7 @@ mod tests {
         let image = Image::generate(16, 16, |x, y| {
             MonoF32::new(if (x + y) % 2 == 0 { 0.50 } else { 0.502 })
         });
-        let edges = canny(&image, 0.10, 0.30, Sigma::new(1.0));
+        let edges = canny(&image, t(0.10, 0.30), Sigma::new(1.0));
         assert_eq!(count_true(&edges), 0);
     }
 
@@ -334,7 +354,7 @@ mod tests {
         });
         // Thresholds chosen so the weak step alone is below `high` but above
         // `low`, and the strong step is above `high`.
-        let edges = canny(&image, 0.02, 0.20, Sigma::new(1.0));
+        let edges = canny(&image, t(0.02, 0.20), Sigma::new(1.0));
         let cols = edge_columns(&edges);
         assert!(cols.contains(&5), "edge column present: {cols:?}");
         // The weak rows (lower half) are linked through the boundary column.
@@ -346,7 +366,7 @@ mod tests {
     fn accepts_integer_input() {
         // `Mono8` accumulates in `MonoF32`; canny accepts it directly.
         let image = Image::generate(8, 6, |x, _| Mono8::new(if x < 4 { 0 } else { 255 }));
-        let edges = canny(&image, 8.0, 30.0, Sigma::new(1.0));
+        let edges = canny(&image, t(8.0, 30.0), Sigma::new(1.0));
         assert_thin_edge(&edges, &[3, 4]);
     }
 
@@ -354,7 +374,7 @@ mod tests {
     fn generic_over_mono_f64() {
         // The pipeline runs end to end on a 64-bit float accumulator.
         let image = Image::generate(8, 6, |x, _| MonoF64::new(if x < 4 { 0.0 } else { 1.0 }));
-        let edges = canny(&image, 0.10, 0.30, Sigma::new(1.0));
+        let edges = canny(&image, t(0.10, 0.30), Sigma::new(1.0));
         assert_thin_edge(&edges, &[3, 4]);
     }
 
@@ -385,9 +405,10 @@ mod tests {
             };
             MonoF32::new(v)
         });
-        let (low, high, sigma) = (0.02f32, 0.08f32, Sigma::new(1.2));
+        let thresholds = t(0.02, 0.08);
+        let sigma = Sigma::new(1.2);
 
-        let fused = canny(&image, low, high, sigma);
+        let fused = canny(&image, thresholds, sigma);
 
         let blurred: Image<MonoF32> = gaussian_blur(&image, sigma, &Clamp);
         let gx = scharr_x(&blurred, &Clamp);
@@ -395,7 +416,7 @@ mod tests {
         let mag = gradient_magnitude(&gx, &gy).unwrap();
         let dir = gradient_direction(&gx, &gy).unwrap();
         let thin = non_maximum_suppression(&mag, &dir).unwrap();
-        let staged = hysteresis_threshold(&thin, low, high);
+        let staged = hysteresis_threshold(&thin, thresholds);
 
         assert!(count_true(&fused) > 0, "the fixture should produce edges");
         for y in 0..N {
@@ -435,7 +456,7 @@ mod tests {
         let sigma = Sigma::new(1.0);
         let image: Image<MonoF32> =
             Image::generate(w, h, |x, _| MonoF32::new(if x < edge_x { 0.0 } else { 1.0 }));
-        let mask = canny(&image, 0.10, 0.30, sigma);
+        let mask = canny(&image, t(0.10, 0.30), sigma);
         let blurred: Image<MonoF32> = gaussian_blur(&image, sigma, &Clamp);
         let gx = scharr_x(&blurred, &Clamp);
         let gy = scharr_y(&blurred, &Clamp);
@@ -470,7 +491,7 @@ mod tests {
                 core::cmp::Ordering::Greater => 1.0,
             })
         });
-        let mask = canny(&image, 0.05, 0.15, sigma);
+        let mask = canny(&image, t(0.05, 0.15), sigma);
         let blurred: Image<MonoF32> = gaussian_blur(&image, sigma, &Clamp);
         let gx = scharr_x(&blurred, &Clamp);
         let gy = scharr_y(&blurred, &Clamp);
@@ -511,7 +532,7 @@ mod tests {
         let sigma = Sigma::new(1.0);
         let image: Image<MonoF32> =
             Image::generate(12, 6, |x, _| MonoF32::new(if x < 6 { 0.0 } else { 1.0 }));
-        let mask = canny(&image, 0.10, 0.30, sigma);
+        let mask = canny(&image, t(0.10, 0.30), sigma);
         let blurred: Image<MonoF32> = gaussian_blur(&image, sigma, &Clamp);
         let gx = scharr_x(&blurred, &Clamp);
         let gy = scharr_y(&blurred, &Clamp);

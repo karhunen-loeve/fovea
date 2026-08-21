@@ -1,5 +1,7 @@
 use core::marker::PhantomData;
 
+use crate::Error;
+
 #[cfg(test)]
 use crate::image::ImageView;
 use crate::image::{Image, RasterImage, RasterImageMut};
@@ -2125,11 +2127,20 @@ where
 ///
 /// # Construction
 ///
-/// Use [`Clamp::new`] — the only public constructor. It validates
-/// `lo <= hi` channel-wise so that inverted ranges (which would collapse
-/// every input to `hi`) are rejected at construction time. Fields are
-/// **private** to keep this invariant load-bearing; read them back with
-/// [`Clamp::lo`] / [`Clamp::hi`] if you need them.
+/// [`Clamp::new`] and [`Clamp::try_new`] are the only public
+/// constructors. Both validate `lo <= hi` channel-wise so that inverted
+/// ranges (which would collapse every input to `hi`) are rejected at
+/// construction time; they differ only in how a bad range is reported.
+/// Use `new` for literals and bounds already proven, `try_new` for a
+/// range computed from data (an auto-exposure percentile, a clip level
+/// read from a recipe) where an inversion is a value to handle rather
+/// than a bug to abort on. This is the same split as
+/// [`Sigma::new`](crate::Sigma) / `Sigma::try_new`, with `new` not
+/// `const` here because the channel comparison goes through [`Ord`] and
+/// trait methods cannot be called in a `const fn`.
+///
+/// Fields are **private** to keep this invariant load-bearing; read them
+/// back with [`Clamp::lo`] / [`Clamp::hi`] if you need them.
 ///
 /// # Not to be confused with [`Narrow`]
 ///
@@ -2172,9 +2183,9 @@ where
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Clamp<P> {
-    // Private: the `lo <= hi` invariant established by `Clamp::new`
-    // must not be bypassable via struct literals. See P1-6 / the
-    // `convert` impl, which assumes well-ordered bounds.
+    // Private: the `lo <= hi` invariant established by `Clamp::new` /
+    // `Clamp::try_new` must not be bypassable via struct literals. See
+    // P1-6 / the `convert` impl, which assumes well-ordered bounds.
     lo: P,
     hi: P,
 }
@@ -2192,7 +2203,8 @@ where
     /// Panics if any channel of `lo` is greater than the corresponding
     /// channel of `hi`. An inverted range collapses every input to `hi`
     /// (`min(max(v, lo), hi) == hi`), which is almost certainly not what
-    /// the caller intended.
+    /// the caller intended. For bounds computed from data, use
+    /// [`Self::try_new`].
     ///
     /// # Example
     ///
@@ -2213,20 +2225,64 @@ where
     /// ```
     #[inline]
     pub fn new(lo: P, hi: P) -> Self {
-        // Per-channel validation: matches the channel-wise semantics of
-        // `convert`. Done once at construction so the hot loop pays
-        // nothing for it: checks belong where the data becomes a
-        // contract.
-        let n = <<P as HomogeneousPixel>::Channels as Array<P::Channel>>::LEN;
-        for i in 0..n {
-            if lo.channel(i) > hi.channel(i) {
-                panic!(
-                    "Clamp::new: lo > hi on channel {i} — every input would \
-                     collapse to `hi`. Did you swap the arguments?"
-                );
-            }
+        match Self::inverted_channel(lo, hi) {
+            None => Self { lo, hi },
+            Some(i) => panic!(
+                "Clamp::new: lo > hi on channel {i} — every input would \
+                 collapse to `hi`. Did you swap the arguments?"
+            ),
         }
-        Self { lo, hi }
+    }
+
+    /// Construct a [`Clamp`] strategy from computed bounds, validating
+    /// that `lo <= hi` channel-wise.
+    ///
+    /// The `try_new` half of the parameter-type discipline: a clip range
+    /// derived from image data (a histogram percentile, an exposure
+    /// estimate) can come out inverted for reasons that are not a
+    /// programmer bug, and whoever called the estimator is who can say
+    /// what to do about it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidParameter`](crate::Error::InvalidParameter)
+    /// if any channel of `lo` exceeds the corresponding channel of `hi`,
+    /// naming the first such channel.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use fovea::pixel::Mono8;
+    /// # use fovea::transform::Clamp;
+    /// let (p1, p99) = (Mono8::new(20), Mono8::new(235));
+    /// let strat = Clamp::try_new(p1, p99)?;
+    /// assert_eq!(strat.hi(), Mono8::new(235));
+    ///
+    /// // A degenerate histogram can invert the pair; that is a value,
+    /// // not a bug.
+    /// assert!(Clamp::try_new(Mono8::new(200), Mono8::new(50)).is_err());
+    /// # Ok::<(), fovea::Error>(())
+    /// ```
+    #[inline]
+    pub fn try_new(lo: P, hi: P) -> Result<Self, Error> {
+        match Self::inverted_channel(lo, hi) {
+            None => Ok(Self { lo, hi }),
+            Some(i) => Err(Error::InvalidParameter(format!(
+                "clamp range is inverted on channel {i}: lo > hi, so every \
+                 input would collapse to `hi`"
+            ))),
+        }
+    }
+
+    /// Index of the first channel where `lo > hi`, if any.
+    ///
+    /// Per-channel, matching the channel-wise semantics of `convert`, and
+    /// evaluated once at construction so the hot loop pays nothing for it:
+    /// checks belong where the data becomes a contract.
+    #[inline]
+    fn inverted_channel(lo: P, hi: P) -> Option<usize> {
+        let n = <<P as HomogeneousPixel>::Channels as Array<P::Channel>>::LEN;
+        (0..n).find(|&i| lo.channel(i) > hi.channel(i))
     }
 }
 
@@ -2257,9 +2313,10 @@ where
             let hi = self.hi.channel(i);
             // Explicit two-step: clamp up to `lo`, then down to `hi`.
             // No `lo <= hi` precondition check here: that invariant is
-            // established once by `Clamp::new` (P1-6) and the private
-            // fields prevent it from being violated. Re-checking per
-            // pixel would burn N*M cycles for a constant property.
+            // established once by `Clamp::new` / `Clamp::try_new` (P1-6)
+            // and the private fields prevent it from being violated.
+            // Re-checking per pixel would burn N*M cycles for a constant
+            // property.
             let v = if v < lo { lo } else { v };
             if v > hi { hi } else { v }
         });
@@ -9284,6 +9341,33 @@ mod tests {
     fn clamp_new_inverted_single_channel_panics_with_index() {
         // Channels 0 and 2 are fine; channel 1 (green) is inverted.
         let _ = Clamp::new(Rgb8::new(10, 200, 10), Rgb8::new(200, 50, 200));
+    }
+
+    #[test]
+    fn clamp_try_new_valid_range_constructs() {
+        // The `try_new` half of the parameter-type discipline: same
+        // validation, reported as a value.
+        let strat = Clamp::try_new(Mono8::new(20), Mono8::new(235)).unwrap();
+        assert_eq!(strat.lo(), Mono8::new(20));
+        assert_eq!(strat.hi(), Mono8::new(235));
+        assert_eq!(strat, Clamp::new(Mono8::new(20), Mono8::new(235)));
+        // Equal bounds are valid here too, for the same reason as in `new`.
+        assert!(Clamp::try_new(Mono8::new(128), Mono8::new(128)).is_ok());
+    }
+
+    #[test]
+    fn clamp_try_new_reports_the_inverted_channel() {
+        // Channels 0 and 2 are fine; channel 1 (green) is inverted. The
+        // message names the first offending channel, as `new`'s panic does.
+        let err = Clamp::try_new(Rgb8::new(10, 200, 10), Rgb8::new(200, 50, 200)).unwrap_err();
+        match err {
+            crate::Error::InvalidParameter(reason) => assert!(
+                reason.contains("channel 1"),
+                "reason {reason:?} does not name channel 1"
+            ),
+            other => panic!("expected InvalidParameter, got {other:?}"),
+        }
+        assert!(Clamp::try_new(Mono8::new(200), Mono8::new(50)).is_err());
     }
 
     #[test]
