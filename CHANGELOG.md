@@ -582,6 +582,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   single-pixel window would silently refuse every corner. Responses are left
   alone; the output type stays `Corner`, with the changed error model
   documented rather than encoded in a new type.
+- `analyze::quality`: image quality metrics, the first operations in the crate
+  that take **two** images and report how far apart they are.
+  `squared_error(&a, &b)` makes one pass over both and returns a
+  `SquaredError` holding a `ChannelSquaredError` per channel; every value
+  metric is an accessor on it — `sum_squared_error`, `mean_squared_error`,
+  `root_mean_squared_error`, `max_absolute_error` and
+  `peak_signal_to_noise_ratio` — and `SquaredError::pooled()` returns the same
+  record with the channels' accumulators summed. Per channel rather than
+  pooled by default because "the MSE of a colour image" is three different
+  numbers in the literature and a demosaic regression cares which; note that
+  the pooled PSNR is the PSNR of the pooled MSE, the figure other libraries
+  report, and is *not* the mean of the per-channel PSNRs. Accessors return
+  `Option` (an empty pair, or a float pair whose every difference is `NaN`,
+  has no mean error), a `NaN` difference is counted in `nan_count` and
+  excluded, and an MSE of zero gives `f64::INFINITY` for the PSNR rather than
+  an error, because that is what the definition says. Both images must be the
+  same pixel type — an error between `Mono8` and `MonoF32` needs a range
+  convention this crate deliberately does not have — while the two *image*
+  types stay independent, so a region of view compares against an owned
+  reference. `max_absolute_error` ships beyond the three planned metrics
+  because it is the assertion a regression test actually wants: a small mean
+  hides one catastrophic pixel.
+- `analyze::quality::PeakValue`: the full-scale value (`L`) PSNR divides by and
+  SSIM's `C1` / `C2` are fractions of, as an invariant-carrying parameter type
+  alongside `Sigma`, `PixelDistance` and `Tolerance`. `PeakValue::of_pixel::<P>()`
+  reads the pixel type's own `WhiteChannel`, so `Mono<10>` reports **1023, not
+  65535** — a PSNR built on the channel type's storage maximum is 36 dB
+  optimistic on 10-bit sensor data. Float-channel pixels do not implement
+  `WhiteChannel` and therefore **fail to compile** through that constructor
+  rather than silently assuming `1.0`; a float caller writes
+  `PeakValue::new(1.0)` and owns the assumption. `const new` for literals,
+  `try_new` for computed values. The rustdoc states what it is not: the range
+  of the representation, not the largest value the data happens to contain.
+- `analyze::quality::ssim` / `ssim_map`: structural similarity, one score or
+  the per-position map it averages. `SsimParams::reference(peak)` builds the
+  published parameters of Wang et al. (2004) — an 11-tap Gaussian window at
+  σ = 1.5, `K1 = 0.01`, `K2 = 0.03` — so a score is comparable with MATLAB's
+  `ssim`, OpenCV's sample and scikit-image's `gaussian_weights=True` path;
+  `SsimParams::TRUNCATE` is pinned at 3.0 rather than the crate's blur default
+  of 4.0 precisely to derive 11 taps from σ = 1.5 instead of 13. Parameters
+  are a value, not a `_with` suffix. Implemented as five separable Gaussian
+  convolutions with the `Skip` border, **not** on the integral image: a
+  summed-area table has no product accumulator for the covariance term and
+  computes a uniform window, which is not the window any published figure
+  uses. Each image is globally mean-centred before the moments are formed,
+  which is load-bearing rather than tidy — the separable engine's kernel taps
+  are `f32`, so an uncentred moment on a narrow signal riding a large pedestal
+  carries enough absolute error to drive the window variance negative; on the
+  regression fixture the uncentred score is 0.703 where the correct answer is
+  0.967, and with the peak named for the signal it reaches −30, outside SSIM's
+  range. Single-channel by a compile-time bound, because `C1` and `C2` are
+  fractions of one dynamic range and colour SSIM has no settled definition:
+  convert with `Luminance` and name the choice. The map is the
+  `(w − 2r) × (h − 2r)` block where the window lies wholly inside the frame,
+  with map `(x, y)` reporting input `(x + r, y + r)`, the convention
+  `match_template` already uses; an image the window does not fit is
+  `Error::InvalidParameter` rather than a clipped window, since a value
+  extrapolated past the edge is not a measurement. `NaN` propagates here,
+  where `squared_error` excludes it, because a window statistic has no
+  per-position count to record an exclusion in.
 
 ### Changed
 

@@ -21,6 +21,7 @@
 //! | "How many foreground blobs are in this mask?" | [`components`](crate::analyze::components) | Label image and optional component stats. |
 //! | "What shape are the blobs (moments, orientation, roundness)?" | [`components::connected_components_with_measurements`](crate::analyze::components::connected_components_with_measurements) | Per-blob moments + boundary count, with derived shape descriptors. |
 //! | "What is each blob's outline — polygon, holes, nesting?" | [`contours::extract_contours`](crate::analyze::contours::extract_contours) | Traced border polygons with outer/hole hierarchy. |
+//! | "How far is this image from a reference?" | [`quality`](crate::analyze::quality) | MSE / RMSE / PSNR per channel, or an SSIM score and map. |
 //!
 //! Do not use this module for operations that produce another image of the
 //! same conceptual kind. Those belong in [`crate::transform`].
@@ -31,5 +32,6 @@ pub mod edge;
 pub mod histogram;
 pub mod integral;
 pub mod peak;
+pub mod quality;
 pub mod statistics;
 pub mod threshold;
