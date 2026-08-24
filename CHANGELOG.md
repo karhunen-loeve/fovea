@@ -53,12 +53,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   chains without re-validation.
 - `Sigma` and `PixelDistance`: **invariant-carrying parameter types**
   (finite and strictly positive), the `std::num::NonZeroUsize` pattern
-  applied to algorithm parameters. Literals use the `const fn new`
-  (in a `const` context an invalid literal **fails to compile**; at
-  runtime it panics deterministically on first execution); values
+  applied to algorithm parameters. Literals use the `sigma!` /
+  `pixel_distance!` macros, which are inline `const { }` blocks, so an
+  invalid literal **fails to compile** wherever it is written; values
   computed from data use `try_new`, which returns the new
   `Error::InvalidParameter` so a NaN from an estimator or a formula chain
-  is a value, not a crash. Functions taking these types are total in
+  is a value, not a crash. `new` is the checked `const fn` under the
+  macros and returns `Option<Self>`; there is no panicking constructor. Functions taking these types are total in
   them: `gaussian_blur` (+ its `_into` variant),
   `gaussian_kernel_1d` / `gaussian_kernel_size`, and `canny` now take
   `Sigma` instead of a raw `f32` and no longer document a `sigma <= 0`
@@ -125,8 +126,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   compile-time requirement (`pixel::SingleChannel`), not a runtime check.
 - `features::detect::Harris` and `features::detect::CornerParams` are
   **invariant-carrying parameter types** (the same discipline as `Sigma` and
-  `std::num::NonZeroUsize`): `const fn new` for literals, `try_new` returning
-  `Error::InvalidParameter` for computed values. `Harris` owns its own
+  `std::num::NonZeroUsize`): `const fn new` returning `Option<Self>`, plus
+  the `harris!` literal macro for the single-scalar `Harris`, and `try_new`
+  returning `Error::InvalidParameter` for computed values. `Harris` owns its own
   sensitivity, and its domain `0 < k < 0.25` is a consequence rather than a
   convention — `det ≤ tr²/4` for a symmetric 2×2 matrix, so at `k ≥ 0.25`
   the response is non-positive for *every* tensor and the detector can never
@@ -182,8 +184,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   keypoint model was not shaped around Harris.
 - `features::detect::SegmentTest` and `features::detect::FastParams` are
   **invariant-carrying parameter types**, matching `Harris` / `CornerParams`:
-  `const fn new` for literals, `try_new` returning `Error::InvalidParameter`
-  for computed values. `SegmentTest` owns the threshold and the arc length
+  `const fn new` returning `Option<Self>`, and `try_new` returning
+  `Error::InvalidParameter` for computed values. Neither takes a literal
+  macro: their argument names are the information. `SegmentTest` owns the threshold and the arc length
   because neither decides anything alone, and both its domains are
   consequences rather than conventions. The threshold must be strictly
   positive — at `t = 0` every pixel of a flat field passes on all 16 ring
@@ -312,38 +315,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Sigma` and `PixelDistance` — a geometric tolerance in pixels, finite
   and non-negative. Zero is deliberately valid (ε = 0 removes exactly the
   collinear vertices), which is why the strictly-positive `PixelDistance`
-  was not reused. `const fn new` for literals, `try_new` returning
-  `Error::InvalidParameter` for computed values.
+  was not reused. The `tolerance!` macro for literals, `try_new` returning
+  `Error::InvalidParameter` for computed values, and a `const fn new`
+  returning `Option<Self>` underneath.
 - `OddWindowSide`: a fourth **invariant-carrying parameter type** beside
   `Sigma`, `PixelDistance` and `Tolerance`, holding the side length of a
   square neighbourhood centred on the pixel being processed, odd and
   non-zero.
-  `const fn new` for literals (an even literal in a `const` **fails to
-  compile**), `try_new` returning `Error::InvalidParameter` for values
-  computed from data, and `radius()` for the half-width, which is exact
+  The `window!` macro for literals (an even literal **fails to compile**,
+  wherever it is written), `try_new` returning `Error::InvalidParameter` for
+  values computed from data, and `radius()` for the half-width, which is exact
   because the side is odd. `adaptive_threshold` / `adaptive_threshold_into`
   take it instead of a bare `usize` (see *Changed*), which removes their
   "window must be odd and non-zero" panic entirely.
 - `analyze::threshold::HysteresisThresholds<C>`: the `low <= high`
   threshold pair as one value. The invariant is a *relation*, so neither
   number is checkable on its own and the pair is what gets validated, once,
-  where it is born. `new` for literals and `try_new` (returning
-  `Error::InvalidParameter`) for thresholds derived from data, such as
-  fractions of a measured magnitude peak. `C` is the comparison channel,
+  where it is born. `try_new` (returning `Error::InvalidParameter`) is the
+  only constructor, for literals and for thresholds derived from data alike,
+  such as fractions of a measured magnitude peak. `C` is the comparison channel,
   and only `PartialOrd` is required, so the float case works: `!(low <=
   high)` is also exactly the test that rejects a **NaN** threshold, which
   would otherwise pass silently and return an empty mask, since every
-  comparison against NaN is false. Unlike the other parameter types `new`
-  is not `const`, because the comparison goes through `PartialOrd` on a
-  generic channel and trait methods cannot be called in a `const fn`, so
-  an invalid literal panics on first execution rather than failing to
-  compile.
-- `transform::Clamp::try_new`: the computed-bounds constructor beside the
-  existing panicking `Clamp::new`, returning `Error::InvalidParameter` and
-  naming the first channel where `lo > hi`. A clip range derived from image
-  data (a histogram percentile, an exposure estimate) can come out inverted
-  for reasons that are not a programmer bug. `new` keeps its panic for
-  literals and is unchanged.
+  comparison against NaN is false. Unlike the other parameter types there
+  is no `const fn new` and no literal macro, because the comparison goes
+  through `PartialOrd` on a generic channel and trait methods cannot be
+  called in a `const fn`. With no compile-time tier to protect, an
+  `Option`-returning `new` would differ from `try_new` only by discarding
+  the reason, so it does not exist.
+- `transform::Clamp::try_new`: the validating constructor, returning
+  `Error::InvalidParameter` and naming the first channel where `lo > hi`. A
+  clip range derived from image data (a histogram percentile, an exposure
+  estimate) can come out inverted for reasons that are not a programmer bug.
+  It replaces the panicking `Clamp::new`, which is **removed** (see
+  *Changed*): `Ord` on the channel puts a `const` constructor out of reach,
+  so there is no compile-time tier for a second constructor to preserve.
 - `analyze::components::Connectivity::Dual`: each connectivity now names
   the connectivity the background must be labeled with when the foreground
   uses it (`Connectivity8::Dual = Connectivity4` and vice versa). Additive:
@@ -426,7 +432,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   colour its site sampled, returning the same Bayer type, so the result
   keeps its CFA phase and feeds straight into `demosaic`. Gains are
   `transform::BayerGains`, an invariant-carrying parameter type (finite and
-  non-negative; `const fn new` for literals, `try_new` →
+  non-negative; `const fn new` returning `Option<Self>`, `try_new` →
   `Error::InvalidParameter` for ratios estimated from data), keyed by
   `CfaColor` with one gain shared by both green sites. Balancing the mosaic
   before interpolation is the industrial order and the one that matters for
@@ -642,8 +648,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   optimistic on 10-bit sensor data. Float-channel pixels do not implement
   `WhiteChannel` and therefore **fail to compile** through that constructor
   rather than silently assuming `1.0`; a float caller writes
-  `PeakValue::new(1.0)` and owns the assumption. `const new` for literals,
-  `try_new` for computed values. The rustdoc states what it is not: the range
+  `peak!(1.0)` and owns the assumption. The `peak!` macro for literals,
+  `try_new` for computed values, and a `const fn new` returning
+  `Option<Self>` underneath. The rustdoc states what it is not: the range
   of the representation, not the largest value the data happens to contain.
 - `analyze::quality::ssim` / `ssim_map`: structural similarity, one score or
   the per-position map it averages. `SsimParams::reference(peak)` builds the
@@ -672,6 +679,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   extrapolated past the edge is not a measurement. `NaN` propagates here,
   where `squared_error` excludes it, because a window statistic has no
   per-position count to record an exclusion in.
+- Literal macros for the invariant-carrying parameter types: `sigma!`,
+  `pixel_distance!`, `tolerance!`, `window!`, `peak!` and `harris!`. Each
+  expands to an inline `const { }` block around the type's checked
+  constructor, so an invalid literal is a **compile error** wherever it is
+  written, not only inside a `const` item:
+
+  ```rust
+  let blurred: Image<MonoF32> = gaussian_blur(&img, sigma!(1.4), &Clamp);
+  const WINDOW: OddWindowSide = window!(31);
+  // error[E0080]: evaluation panicked: sigma must be finite and
+  //               strictly positive
+  let bad = sigma!(-1.4);
+  ```
+
+  A value that is not a constant expression does not compile through a
+  macro (`error[E0435]`); that is what `try_new` is for, and it reports a
+  reason the caller can act on. The macros are the reason no parameter type
+  needs a panicking constructor: the compile-time guarantee that a `const fn`
+  only *sometimes* delivers is unconditional here.
+- `Offset`: the grid-displacement vocabulary type, `Offset { dx: i32, dy:
+  i32 }` in `common` and re-exported at the crate root beside `Coordinate`.
+  One named type for "a signed step on the pixel grid" — a connectivity
+  neighbourhood, a detector's sampling ring, a chain-code direction, a
+  filter tap — which the crate previously spelled as bare pairs in four
+  different widths. It carries **no invariant** (every `(dx, dy)` is a
+  meaningful step, so there is no `try_new` and no validation); what it
+  carries is the field names, which is what makes a transposed step fail to
+  compile instead of silently answering a different question. Deliberately
+  not an arithmetic type, and deliberately **without** `From<(i32, i32)>`:
+  the pair is the shape the transposition slips through, pinned by a
+  `compile_fail` doctest.
+- `Coordinate::checked_add(Offset) -> Option<Coordinate>` and
+  `Coordinate::offset_to(Coordinate) -> Offset`. `checked_add` is the
+  crate's one neighbourhood bounds check, replacing four open-coded
+  versions that each handled the negative half differently (a widening cast
+  to `i64` and a four-way range test in the labeling engine, an
+  off-view-reports-label-0 helper in the contour tracer, a `debug_assert!`
+  in the chain decoder, and a pair of `checked_add_signed` calls in the
+  peak fitter). It covers the negative half only, because the far
+  edge already has an answer: `ImageView::get` returns `Option`, so
+  `c.checked_add(off).and_then(|p| img.get(p.x, p.y))` is the whole check,
+  composed from two operations that each say what they mean.
+  `offset_to` is the inverse, saturating rather than wrapping for
+  separations beyond `i32`.
 
 ### Changed
 
@@ -719,9 +770,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   blobs' axes, which wraps at π instead of reading 80° and −80° as 160° apart.
 - **Breaking:** `analyze::threshold::hysteresis_threshold` (+ its `_into`
   variant) and `analyze::edge::canny` take one `HysteresisThresholds`
-  argument instead of two bare `low` / `high` values (see *Added*). Wrap
-  literals in `HysteresisThresholds::new(low, high)`, validate computed
-  thresholds with `HysteresisThresholds::try_new(low, high)?`. Both
+  argument instead of two bare `low` / `high` values (see *Added*). Build
+  the pair with `HysteresisThresholds::try_new(low, high)?`, whether the two
+  numbers are literals or computed. Both
   functions are now **total in their thresholds** and their
   `!(low <= high)` panic is gone; `canny`'s only remaining panic is
   `gaussian_blur`'s `MAX_RADIUS` capacity bound. `canny` still takes its
@@ -731,7 +782,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rather than re-validated.
 - **Breaking:** `analyze::threshold::adaptive_threshold` (+ its `_into`
   variant) takes `OddWindowSide` instead of `window: usize` (see *Added*).
-  Write `OddWindowSide::new(31)` for a literal, `OddWindowSide::try_new(side)?` for
+  Write `window!(31)` for a literal, `OddWindowSide::try_new(side)?` for
   a side computed from data. The value's meaning is unchanged: it is still
   the window's side length, not its radius, matching OpenCV's `blockSize`.
   The "window must be odd and non-zero" panic is gone from both
@@ -739,7 +790,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking:** `gaussian_blur` (+ its `_into` variant),
   `gaussian_kernel_1d` / `gaussian_kernel_size`, and `canny`
   take the new `Sigma` parameter type instead of a raw `f32` σ (see
-  *Added*). Wrap literals in `Sigma::new(…)`; validate computed values
+  *Added*). Write `sigma!(…)` for literals; validate computed values
   with `Sigma::try_new(…)?` where they are produced.
 - **Breaking:** `gaussian_blur_with` and `gaussian_blur_with_into` are
   **removed**. A `truncate` other than the default is not a variant of
@@ -810,6 +861,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   because an associated const on a trait with three type parameters
   cannot be read without naming all three: `SSD::EXTREMUM` compiles only
   from a non-generic trait.
+
+- **Breaking:** no invariant-carrying parameter type has a panicking
+  constructor any more. `new` on `Sigma`, `PixelDistance`, `Tolerance`,
+  `OddWindowSide`, `PeakValue`, `Harris`, `SegmentTest`, `FastParams`,
+  `CornerParams` and `BayerGains` returns **`Option<Self>`** instead of
+  `Self`, and `Clamp::new` is **removed** in favour of `Clamp::try_new`.
+  The old shape rested on a mistaken premise: a `const fn` whose body
+  `assert!`s is a compile error only when the compiler happens to evaluate
+  it at compile time, and a runtime abort everywhere else, with nothing at
+  the call site to say which applies. `Sigma::new(detail_estimate(&image))`
+  compiled and aborted on a flat frame, which is the per-function panic the
+  parameter types exist to remove, relocated one call earlier rather than
+  eliminated.
+
+  The compile-time guarantee moved to the literal macros (see *Added*),
+  which deliver it unconditionally. Migration is mechanical:
+
+  ```rust
+  // before                              // after
+  Sigma::new(1.4)                         sigma!(1.4)
+  OddWindowSide::new(31)                  window!(31)
+  Harris::new(0.04)                       harris!(0.04)
+  Sigma::new(computed)                    Sigma::try_new(computed)?
+  Clamp::new(lo, hi)                      Clamp::try_new(lo, hi)?
+  SegmentTest::new(0.08, 9)               SegmentTest::new(0.08, 9).unwrap()
+  ```
+
+  The four composites (`SegmentTest`, `FastParams`, `CornerParams`,
+  `BayerGains`) get no macro, because their argument *names* are the
+  information and `harris!(1.4, 0.01, 3)` reads worse than the named
+  constructor; bind them to a `const` item and `.unwrap()` is checked at
+  compile time as before. `HysteresisThresholds` and `Clamp` get neither a
+  macro nor an `Option` constructor: both compare through a trait method
+  (`PartialOrd`, `Ord`), which a `const fn` cannot call on stable Rust, so
+  there is no compile-time tier for a second constructor to preserve and
+  `try_new` alone carries them.
+- **Breaking:** the four public places that spelled a grid displacement as
+  a bare pair now take or return the new `Offset` (see *Added*):
+  `analyze::components::Connectivity::OFFSETS` is `&'static [Offset]` (was
+  `&'static [(i32, i32)]`), `features::detect::FAST_RING` is `[Offset; 16]`
+  (was `[(isize, isize); 16]`), `analyze::contours::ChainDirection::offset`
+  returns `Offset` and `ChainDirection::from_offset` takes one argument
+  instead of two, and `transform::DemosaicMethod::interpolate` takes
+  `at: Coordinate` with `S: Fn(Offset) -> f32` (was `x: usize, y: usize`
+  with `S: Fn(isize, isize) -> f32`).
+
+  Three widths for one concept was the symptom; the unshared bounds check
+  was the problem, and it is now `Coordinate::checked_add`. The
+  `DemosaicMethod` half is where the type-level argument bites hardest:
+  `MalvarHeCutler`'s row and column kernels are each other's transpose, so
+  a tap written `(dy, dx)` is a *different* kernel that still compiles, and
+  until now only a numeric round-trip test stood between that and a wrong
+  colour. Migration is mechanical — `(dx, dy)` becomes `Offset::new(dx,
+  dy)`, `(0, 0)` becomes `Offset::ZERO`, and a destructuring `let (dx, dy)
+  = …` becomes field access.
 
 ### Fixed
 

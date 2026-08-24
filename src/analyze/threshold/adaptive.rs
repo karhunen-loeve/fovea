@@ -155,13 +155,13 @@ impl AdaptiveAccumulator for MonoF64 {
 /// # Examples
 ///
 /// ```
-/// use fovea::OddWindowSide;
 /// use fovea::analyze::threshold::{adaptive_threshold, Bias};
 /// use fovea::image::{Image, ImageView};
 /// use fovea::pixel::{Mono8, Mono32};
+/// use fovea::window;
 ///
 /// let img = Image::fill(5, 5, Mono8::new(100));
-/// let window = OddWindowSide::new(3);
+/// let window = window!(3);
 /// // Zero bias: a pixel equal to its local mean is background (strict `>`).
 /// let mask = adaptive_threshold::<_, Mono32>(&img, window, Bias::new(0)).unwrap();
 /// assert!(!mask.pixel_at(2, 2));
@@ -269,16 +269,16 @@ impl<A: AdaptiveAccumulator> PartialEq for Bias<A> {
 /// # Examples
 ///
 /// ```
-/// use fovea::OddWindowSide;
 /// use fovea::analyze::threshold::{adaptive_threshold, Bias};
 /// use fovea::image::{Image, ImageView, ImageViewMut};
 /// use fovea::pixel::{Mono8, Mono32};
+/// use fovea::window;
 ///
 /// // A flat field (value 50) with one locally bright spot (90).
 /// let mut img = Image::fill(7, 3, Mono8::new(50));
 /// *img.pixel_at_mut(3, 1) = Mono8::new(90);
 ///
-/// let mask = adaptive_threshold::<_, Mono32>(&img, OddWindowSide::new(3), Bias::new(0)).unwrap();
+/// let mask = adaptive_threshold::<_, Mono32>(&img, window!(3), Bias::new(0)).unwrap();
 /// assert!(mask.pixel_at(3, 1));   // brighter than its local mean
 /// assert!(!mask.pixel_at(0, 0));  // flat field → equals local mean
 /// ```
@@ -372,7 +372,7 @@ mod tests {
 
     /// Shorthand for the window literal each behaviour test pins.
     fn win(side: usize) -> OddWindowSide {
-        OddWindowSide::new(side)
+        OddWindowSide::new(side).unwrap()
     }
 
     /// Collect the `true` pixel coordinates of a mask into a sorted set.
@@ -508,8 +508,8 @@ mod tests {
     // `adaptive_threshold`: the parity invariant moved into `OddWindowSide`, so
     // this function has no window precondition left to violate and the
     // rejection is tested at the constructor instead (see the `odd_window_side_*`
-    // tests in `common`). `OddWindowSide::new(2)` in a `const` does not even
-    // compile, which is the point of the move.
+    // tests in `common`). `window!(2)` does not compile at all, wherever it is
+    // written, which is the point of the move.
 
     #[test]
     fn accumulator_overflow_is_err() {

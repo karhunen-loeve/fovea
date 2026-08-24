@@ -6,6 +6,8 @@
 //! connectivities (e.g. 6-connected on a hex grid, knight's-move)
 //! is intentionally out of scope.
 
+use crate::Offset;
+
 mod sealed {
     pub trait Sealed {}
 }
@@ -17,7 +19,7 @@ mod sealed {
 /// trait. The trait is consumed as a type parameter, not a value \u2014
 /// the engine never instantiates a `Connectivity`.
 ///
-/// Implementors declare `OFFSETS`, the `(dx, dy)` offsets of the
+/// Implementors declare `OFFSETS`, the [`Offset`]s of the
 /// already-visited neighbours that the labeling pass should examine
 /// when classifying each pixel. All offsets are *raster-scan-preceding*:
 /// `dy < 0`, or `dy == 0 && dx < 0`. This invariant lets pass 1 collect
@@ -29,9 +31,9 @@ pub trait Connectivity: sealed::Sealed + Copy {
     /// (2 for 4-connectivity: N, W; 4 for 8-connectivity: NW, N, NE, W).
     const NEIGHBOURS: usize;
 
-    /// Offsets `(dx, dy)` of those neighbours. All have `dy <= 0`, and
-    /// when `dy == 0` then `dx < 0` \u2014 i.e. raster-scan-preceding only.
-    const OFFSETS: &'static [(i32, i32)];
+    /// Offsets of those neighbours. All have `dy <= 0`, and when
+    /// `dy == 0` then `dx < 0`: raster-scan-preceding only.
+    const OFFSETS: &'static [Offset];
 
     /// The connectivity the *background* must be labeled with when the
     /// foreground is labeled with `Self`.
@@ -63,7 +65,7 @@ impl sealed::Sealed for Connectivity8 {}
 impl Connectivity for Connectivity4 {
     const NEIGHBOURS: usize = 2;
     // W, N \u2014 the two raster-preceding orthogonal neighbours.
-    const OFFSETS: &'static [(i32, i32)] = &[(-1, 0), (0, -1)];
+    const OFFSETS: &'static [Offset] = &[Offset::new(-1, 0), Offset::new(0, -1)];
     type Dual = Connectivity8;
 }
 
@@ -71,7 +73,12 @@ impl Connectivity for Connectivity8 {
     const NEIGHBOURS: usize = 4;
     // NW, N, NE, W \u2014 the four raster-preceding neighbours, top row
     // left-to-right then current-row west.
-    const OFFSETS: &'static [(i32, i32)] = &[(-1, -1), (0, -1), (1, -1), (-1, 0)];
+    const OFFSETS: &'static [Offset] = &[
+        Offset::new(-1, -1),
+        Offset::new(0, -1),
+        Offset::new(1, -1),
+        Offset::new(-1, 0),
+    ];
     type Dual = Connectivity4;
 }
 
@@ -82,7 +89,10 @@ mod tests {
     #[test]
     fn connectivity4_offsets_are_w_n_only() {
         assert_eq!(Connectivity4::NEIGHBOURS, 2);
-        assert_eq!(Connectivity4::OFFSETS, &[(-1, 0), (0, -1)]);
+        assert_eq!(
+            Connectivity4::OFFSETS,
+            &[Offset::new(-1, 0), Offset::new(0, -1)]
+        );
     }
 
     #[test]
@@ -90,19 +100,22 @@ mod tests {
         assert_eq!(Connectivity8::NEIGHBOURS, 4);
         assert_eq!(
             Connectivity8::OFFSETS,
-            &[(-1, -1), (0, -1), (1, -1), (-1, 0)]
+            &[
+                Offset::new(-1, -1),
+                Offset::new(0, -1),
+                Offset::new(1, -1),
+                Offset::new(-1, 0),
+            ]
         );
     }
 
     #[test]
     fn all_offsets_are_raster_preceding() {
         for offsets in [Connectivity4::OFFSETS, Connectivity8::OFFSETS] {
-            for &(dx, dy) in offsets {
+            for &off in offsets {
                 assert!(
-                    dy < 0 || (dy == 0 && dx < 0),
-                    "offset ({}, {}) is not raster-scan-preceding",
-                    dx,
-                    dy
+                    off.dy < 0 || (off.dy == 0 && off.dx < 0),
+                    "offset {off:?} is not raster-scan-preceding"
                 );
             }
         }

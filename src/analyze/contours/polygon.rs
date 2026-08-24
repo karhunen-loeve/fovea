@@ -234,8 +234,9 @@ pub fn convex_hull(points: &[Coordinate]) -> Vec<Coordinate> {
 /// # Examples
 ///
 /// ```
-/// use fovea::{Coordinate, Tolerance};
+/// use fovea::Coordinate;
 /// use fovea::analyze::contours::approximate_polygon;
+/// use fovea::tolerance;
 ///
 /// // A traced 4×4 square border has 12 points; only its 4 corners
 /// // survive collinear removal.
@@ -247,7 +248,7 @@ pub fn convex_hull(points: &[Coordinate]) -> Vec<Coordinate> {
 /// ]
 /// .map(Coordinate::from)
 /// .to_vec();
-/// let corners = approximate_polygon(&border, Tolerance::new(0.0));
+/// let corners = approximate_polygon(&border, tolerance!(0.0));
 /// assert_eq!(corners.len(), 4);
 /// ```
 #[must_use]
@@ -315,6 +316,7 @@ fn simplify_open(points: &[Coordinate], epsilon: f64, out: &mut Vec<Coordinate>)
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tolerance;
 
     fn c(x: usize, y: usize) -> Coordinate {
         Coordinate::new(x, y)
@@ -415,7 +417,7 @@ mod tests {
         ]
         .map(Coordinate::from)
         .to_vec();
-        let simplified = approximate_polygon(&border, Tolerance::new(0.0));
+        let simplified = approximate_polygon(&border, tolerance!(0.0));
         assert_eq!(simplified.len(), 4);
         for corner in [c(0, 0), c(3, 0), c(3, 3), c(0, 3)] {
             assert!(simplified.contains(&corner), "missing {corner:?}");
@@ -439,21 +441,21 @@ mod tests {
         ]
         .map(Coordinate::from)
         .to_vec();
-        let coarse = approximate_polygon(&outline, Tolerance::new(1.5));
+        let coarse = approximate_polygon(&outline, tolerance!(1.5));
         assert!(!coarse.contains(&c(4, 1)), "bump survived ε=1.5: {coarse:?}");
-        let fine = approximate_polygon(&outline, Tolerance::new(0.5));
+        let fine = approximate_polygon(&outline, tolerance!(0.5));
         assert!(fine.contains(&c(4, 1)), "bump lost at ε=0.5: {fine:?}");
     }
 
     #[test]
     fn approximate_degenerate_inputs_pass_through() {
-        assert_eq!(approximate_polygon(&[], Tolerance::new(1.0)), vec![]);
+        assert_eq!(approximate_polygon(&[], tolerance!(1.0)), vec![]);
         assert_eq!(
-            approximate_polygon(&[c(1, 2)], Tolerance::new(1.0)),
+            approximate_polygon(&[c(1, 2)], tolerance!(1.0)),
             vec![c(1, 2)]
         );
         assert_eq!(
-            approximate_polygon(&[c(1, 2), c(3, 4)], Tolerance::new(1.0)),
+            approximate_polygon(&[c(1, 2), c(3, 4)], tolerance!(1.0)),
             vec![c(1, 2), c(3, 4)]
         );
     }

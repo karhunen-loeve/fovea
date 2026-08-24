@@ -134,9 +134,9 @@
 //!   so for corner positions it supersedes interpolation.
 //!
 //! ```
-//! use fovea::Sigma;
 //! use fovea::border::Clamp;
 //! use fovea::features::detect::{corner_peaks, Harris, StructureTensor};
+//! use fovea::{harris, sigma};
 //! use fovea::image::Image;
 //! use fovea::pixel::MonoF32;
 //! use fovea::transform::{scharr_x, scharr_y};
@@ -148,8 +148,8 @@
 //!
 //! let gx = scharr_x(&image, &Clamp);
 //! let gy = scharr_y(&image, &Clamp);
-//! let tensor = StructureTensor::from_gradients(&gx, &gy, Sigma::new(1.2))?;
-//! let response = tensor.response(&Harris::new(0.04));
+//! let tensor = StructureTensor::from_gradients(&gx, &gy, sigma!(1.2))?;
+//! let response = tensor.response(&harris!(0.04));
 //!
 //! // The square's four corners, and nothing else.
 //! let peak = corner_peaks(&response, 0.0, 3)
@@ -204,11 +204,12 @@
 //! in the base-image frame so they are directly comparable:
 //!
 //! ```
-//! use fovea::{CoordinateF64, PixelDistance, Sigma};
+//! use fovea::CoordinateF64;
 //! use fovea::features::HasPosition;
 //! use fovea::features::detect::{detect_corners_in_level, CornerParams, ShiTomasi};
 //! use fovea::image::{Image, ScaledImage};
 //! use fovea::pixel::MonoF32;
+//! use fovea::{pixel_distance, sigma};
 //! use fovea::transform::pyr_down;
 //!
 //! let base: Image<MonoF32> = Image::generate(48, 48, |x, y| {
@@ -218,12 +219,12 @@
 //! // Octave 1: pyr_down keeps even samples — distance 2, origin unshifted.
 //! let level = ScaledImage::new(
 //!     pyr_down(&base),
-//!     PixelDistance::new(2.0),
+//!     pixel_distance!(2.0),
 //!     CoordinateF64::new(0.0, 0.0),
-//!     Sigma::new(1.0),
+//!     sigma!(1.0),
 //! );
 //!
-//! let params = CornerParams::try_new(Sigma::new(1.0), 0.05, 2)?;
+//! let params = CornerParams::try_new(sigma!(1.0), 0.05, 2)?;
 //! let corners = detect_corners_in_level(&level, &ShiTomasi, params);
 //!
 //! // Found on a 24×24 level, reported in the 48×48 base frame: an x of 30

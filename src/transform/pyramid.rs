@@ -263,9 +263,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{pixel_distance, sigma};
     use crate::image::{Decimated, PyramidLevel, ScaledImage};
     use crate::pixel::{Mono8, MonoF32};
-    use crate::{CoordinateF64, PixelDistance, Sigma};
+    use crate::CoordinateF64;
 
     // ── pyr_down: size contract ─────────────────────────────────────────
 
@@ -548,9 +549,9 @@ mod tests {
         level = pyr_down(&level);
         let scaled = ScaledImage::new(
             level,
-            PixelDistance::new(4.0),
+            pixel_distance!(4.0),
             CoordinateF64::new(0.0, 0.0),
-            Sigma::new(1.0),
+            sigma!(1.0),
         );
 
         // Find the argmax on the coarse level.

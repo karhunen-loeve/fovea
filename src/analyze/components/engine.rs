@@ -265,13 +265,15 @@ where
             let mut others: [u32; MAX_NEIGHBOURS] = [0; MAX_NEIGHBOURS];
             let mut other_count = 0usize;
 
-            for &(dx, dy) in C::OFFSETS {
-                let nx = x as i64 + dx as i64;
-                let ny = y as i64 + dy as i64;
-                if nx < 0 || ny < 0 || nx >= w as i64 || ny >= h as i64 {
+            let site = Coordinate::new(x, y);
+            for &offset in C::OFFSETS {
+                let Some(n) = site.checked_add(offset) else {
+                    continue;
+                };
+                if n.x >= w || n.y >= h {
                     continue;
                 }
-                let p = prov[ny as usize * w + nx as usize];
+                let p = prov[n.y * w + n.x];
                 if p == 0 {
                     continue;
                 }

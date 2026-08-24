@@ -246,17 +246,18 @@ pub type GaussianPyramid<P> = Pyramid<Image<P>>;
 /// # Example
 ///
 /// ```
-/// use fovea::{CoordinateF64, PixelDistance, Sigma};
+/// use fovea::CoordinateF64;
 /// use fovea::image::{Decimated, Image, ScaledImage};
 /// use fovea::pixel::MonoF32;
+/// use fovea::{pixel_distance, sigma};
 ///
 /// // Level 1 of a 2× pyramid built by even-sample decimation:
 /// // adjacent samples are 2 base pixels apart, grid origin unshifted.
 /// let level = ScaledImage::new(
 ///     Image::<MonoF32>::zero(4, 4),
-///     PixelDistance::new(2.0),
+///     pixel_distance!(2.0),
 ///     CoordinateF64::new(0.0, 0.0),
-///     Sigma::new(1.0),
+///     sigma!(1.0),
 /// );
 ///
 /// let base = level.to_base(CoordinateF64::new(1.5, 3.0));
@@ -304,15 +305,16 @@ pub trait Decimated: PyramidLevel {
     /// # Example
     ///
     /// ```
-    /// use fovea::{CoordinateF64, PixelDistance, Sigma};
+    /// use fovea::CoordinateF64;
     /// use fovea::image::{Decimated, Image, ScaledImage};
     /// use fovea::pixel::MonoF32;
+    /// use fovea::{pixel_distance, sigma};
     ///
     /// let level = ScaledImage::new(
     ///     Image::<MonoF32>::zero(4, 4),
-    ///     PixelDistance::new(2.0),
+    ///     pixel_distance!(2.0),
     ///     CoordinateF64::new(0.5, 0.5),
-    ///     Sigma::new(1.0),
+    ///     sigma!(1.0),
     /// );
     ///
     /// let local = CoordinateF64::new(1.5, 3.0);
@@ -336,15 +338,16 @@ pub trait Decimated: PyramidLevel {
 /// # Example
 ///
 /// ```
-/// use fovea::{CoordinateF64, PixelDistance, Sigma};
+/// use fovea::CoordinateF64;
 /// use fovea::image::{Image, ScaledImage, ScaleLevel};
 /// use fovea::pixel::MonoF32;
+/// use fovea::{pixel_distance, sigma};
 ///
 /// let level = ScaledImage::new(
 ///     Image::<MonoF32>::zero(8, 8),
-///     PixelDistance::new(1.0),
+///     pixel_distance!(1.0),
 ///     CoordinateF64::new(0.0, 0.0),
-///     Sigma::new(1.6),
+///     sigma!(1.6),
 /// );
 /// assert_eq!(level.sigma().get(), 1.6);
 /// ```
@@ -375,9 +378,10 @@ pub trait ScaleLevel: PyramidLevel {
 /// # Example
 ///
 /// ```
-/// use fovea::{CoordinateF64, PixelDistance, Sigma};
+/// use fovea::CoordinateF64;
 /// use fovea::image::{Decimated, Image, ImageView, ScaledImage, ScaleLevel};
 /// use fovea::pixel::MonoF32;
+/// use fovea::{pixel_distance, sigma};
 /// use fovea::transform::pyr_down;
 ///
 /// let base = Image::fill(16, 16, MonoF32::new(1.0));
@@ -386,9 +390,9 @@ pub trait ScaleLevel: PyramidLevel {
 /// // pyr_down keeps even samples: distance 2, origin unshifted, σ = 1.
 /// let level = ScaledImage::new(
 ///     coarse,
-///     PixelDistance::new(2.0),
+///     pixel_distance!(2.0),
 ///     CoordinateF64::new(0.0, 0.0),
-///     Sigma::new(1.0),
+///     sigma!(1.0),
 /// );
 ///
 /// assert_eq!(level.size().width, 8);
@@ -484,6 +488,7 @@ impl<P: Copy> ScaleLevel for ScaledImage<P> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{pixel_distance, sigma};
     use crate::pixel::{Mono8, MonoF32};
 
     fn two_level_pyramid() -> Pyramid<Image<Mono8>> {
@@ -627,15 +632,15 @@ mod tests {
     fn scaled_image_accessors() {
         let level = ScaledImage::new(
             Image::fill(4, 4, MonoF32::new(0.5)),
-            PixelDistance::new(2.0),
+            pixel_distance!(2.0),
             CoordinateF64::new(0.0, 0.0),
-            Sigma::new(1.0),
+            sigma!(1.0),
         );
         assert_eq!(level.size(), Size::new(4, 4));
         assert_eq!(level.image().pixel_at(1, 1), MonoF32::new(0.5));
-        assert_eq!(level.pixel_distance(), PixelDistance::new(2.0));
+        assert_eq!(level.pixel_distance(), pixel_distance!(2.0));
         assert_eq!(level.origin_offset(), CoordinateF64::new(0.0, 0.0));
-        assert_eq!(level.sigma(), Sigma::new(1.0));
+        assert_eq!(level.sigma(), sigma!(1.0));
         let img = level.into_image();
         assert_eq!(img.size(), Size::new(4, 4));
     }
@@ -645,9 +650,9 @@ mod tests {
         // pyr_down convention: coarse pixel k sits at base pixel 2k.
         let level = ScaledImage::new(
             Image::<MonoF32>::zero(4, 4),
-            PixelDistance::new(2.0),
+            pixel_distance!(2.0),
             CoordinateF64::new(0.0, 0.0),
-            Sigma::new(1.0),
+            sigma!(1.0),
         );
         assert_eq!(
             level.to_base(CoordinateF64::new(0.0, 0.0)),
@@ -665,9 +670,9 @@ mod tests {
         // fine ones — the offset is the whole point of the affine map.
         let level = ScaledImage::new(
             Image::<MonoF32>::zero(4, 4),
-            PixelDistance::new(2.0),
+            pixel_distance!(2.0),
             CoordinateF64::new(0.5, 0.5),
-            Sigma::new(1.0),
+            sigma!(1.0),
         );
         assert_eq!(
             level.to_base(CoordinateF64::new(0.0, 0.0)),
@@ -684,9 +689,9 @@ mod tests {
         // An upsampled "octave −1" is an ordinary level with distance 0.5.
         let level = ScaledImage::new(
             Image::<MonoF32>::zero(16, 16),
-            PixelDistance::new(0.5),
+            pixel_distance!(0.5),
             CoordinateF64::new(0.0, 0.0),
-            Sigma::new(0.8),
+            sigma!(0.8),
         );
         assert_eq!(
             level.to_base(CoordinateF64::new(6.0, 10.0)),
@@ -700,9 +705,9 @@ mod tests {
         // would be wrong: the offset must be subtracted before dividing.
         let level = ScaledImage::new(
             Image::<MonoF32>::zero(4, 4),
-            PixelDistance::new(2.0),
+            pixel_distance!(2.0),
             CoordinateF64::new(0.5, 0.5),
-            Sigma::new(1.0),
+            sigma!(1.0),
         );
         for local in [
             CoordinateF64::new(0.0, 0.0),
@@ -717,9 +722,9 @@ mod tests {
     fn to_local_projects_base_coordinates_into_the_level() {
         let level = ScaledImage::new(
             Image::<MonoF32>::zero(4, 4),
-            PixelDistance::new(2.0),
+            pixel_distance!(2.0),
             CoordinateF64::new(0.0, 0.0),
-            Sigma::new(1.0),
+            sigma!(1.0),
         );
         assert_eq!(
             level.to_local(CoordinateF64::new(6.0, 8.0)),
@@ -736,9 +741,9 @@ mod tests {
     fn to_local_on_an_upsampled_level() {
         let level = ScaledImage::new(
             Image::<MonoF32>::zero(16, 16),
-            PixelDistance::new(0.5),
+            pixel_distance!(0.5),
             CoordinateF64::new(0.0, 0.0),
-            Sigma::new(0.8),
+            sigma!(0.8),
         );
         assert_eq!(
             level.to_local(CoordinateF64::new(3.0, 5.0)),
@@ -752,20 +757,20 @@ mod tests {
         let levels = vec![
             ScaledImage::new(
                 Image::<MonoF32>::zero(8, 8),
-                PixelDistance::new(1.0),
+                pixel_distance!(1.0),
                 CoordinateF64::new(0.0, 0.0),
-                Sigma::new(0.5),
+                sigma!(0.5),
             ),
             ScaledImage::new(
                 Image::<MonoF32>::zero(4, 4),
-                PixelDistance::new(2.0),
+                pixel_distance!(2.0),
                 CoordinateF64::new(0.0, 0.0),
-                Sigma::new(1.0),
+                sigma!(1.0),
             ),
         ];
         let p = Pyramid::try_from_levels(levels).unwrap();
         assert_eq!(p.depth(), 2);
-        assert_eq!(p.level(1).pixel_distance(), PixelDistance::new(2.0));
-        assert_eq!(p.level(1).sigma(), Sigma::new(1.0));
+        assert_eq!(p.level(1).pixel_distance(), pixel_distance!(2.0));
+        assert_eq!(p.level(1).sigma(), sigma!(1.0));
     }
 }

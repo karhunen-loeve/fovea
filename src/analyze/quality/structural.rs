@@ -11,7 +11,7 @@ use crate::image::{
 };
 use crate::pixel::{MonoF64, SingleChannel};
 use crate::transform::convolve_separable;
-use crate::{Error, Sigma};
+use crate::{Error, Sigma, sigma};
 
 use crate::analyze::statistics::StatisticsChannel;
 use crate::border::Skip;
@@ -54,18 +54,18 @@ use super::PeakValue;
 /// # Example
 ///
 /// ```
-/// use fovea::Sigma;
 /// use fovea::analyze::quality::{PeakValue, SsimParams};
 /// use fovea::pixel::Mono8;
+/// use fovea::sigma;
 ///
 /// let params = SsimParams::reference(PeakValue::of_pixel::<Mono8>());
-/// assert_eq!(params.sigma(), Sigma::new(1.5));
+/// assert_eq!(params.sigma(), sigma!(1.5));
 /// assert_eq!(params.window_size(), 11); // the published 11×11 window
 /// assert_eq!(params.k1(), 0.01);
 /// assert_eq!(params.k2(), 0.03);
 ///
 /// // A wider window, for a large frame where 11 pixels is a small detail.
-/// let wide = SsimParams::try_new(params.peak(), Sigma::new(3.0), 0.01, 0.03)?;
+/// let wide = SsimParams::try_new(params.peak(), sigma!(3.0), 0.01, 0.03)?;
 /// assert_eq!(wide.window_size(), 19);
 /// # Ok::<(), fovea::Error>(())
 /// ```
@@ -79,7 +79,7 @@ pub struct SsimParams {
 
 impl SsimParams {
     /// The window σ of the published parameters: `1.5`.
-    pub const REFERENCE_SIGMA: Sigma = Sigma::new(1.5);
+    pub const REFERENCE_SIGMA: Sigma = sigma!(1.5);
 
     /// The luminance stabilizing constant of the published parameters:
     /// `0.01`. `C1 = (K1 · peak)²`.
@@ -530,6 +530,7 @@ fn non_negative(value: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::peak;
     use crate::Size;
     use crate::analyze::statistics::{ChannelStatistics, image_statistics};
     use crate::image::ContiguousImage;
@@ -554,22 +555,22 @@ mod tests {
     #[test]
     fn the_reference_parameters_are_the_published_eleven_tap_window() {
         let params = reference_params();
-        assert_eq!(params.sigma(), Sigma::new(1.5));
+        assert_eq!(params.sigma(), sigma!(1.5));
         assert_eq!(params.k1(), 0.01);
         assert_eq!(params.k2(), 0.03);
         // The whole reason `TRUNCATE` is 3.0 and not the crate's blur default
         // of 4.0: 4.0 would give 13 taps and a score no publication reports.
         assert_eq!(params.window_size(), 11);
-        assert_eq!(gaussian_kernel_size(Sigma::new(1.5), 4.0), 13);
+        assert_eq!(gaussian_kernel_size(sigma!(1.5), 4.0), 13);
     }
 
     #[test]
     fn a_non_positive_stabilizing_constant_is_refused() {
         let peak = PeakValue::of_pixel::<Mono8>();
-        assert!(SsimParams::try_new(peak, Sigma::new(1.5), 0.0, 0.03).is_err());
-        assert!(SsimParams::try_new(peak, Sigma::new(1.5), 0.01, -0.03).is_err());
-        assert!(SsimParams::try_new(peak, Sigma::new(1.5), f64::NAN, 0.03).is_err());
-        assert!(SsimParams::try_new(peak, Sigma::new(1.5), 0.01, 0.03).is_ok());
+        assert!(SsimParams::try_new(peak, sigma!(1.5), 0.0, 0.03).is_err());
+        assert!(SsimParams::try_new(peak, sigma!(1.5), 0.01, -0.03).is_err());
+        assert!(SsimParams::try_new(peak, sigma!(1.5), f64::NAN, 0.03).is_err());
+        assert!(SsimParams::try_new(peak, sigma!(1.5), 0.01, 0.03).is_ok());
     }
 
     #[test]
@@ -578,17 +579,17 @@ mod tests {
         // variance at all, and a score that is only the luminance term.
         let peak = PeakValue::of_pixel::<Mono8>();
         assert_eq!(
-            gaussian_kernel_size(Sigma::new(0.1), SsimParams::TRUNCATE),
+            gaussian_kernel_size(sigma!(0.1), SsimParams::TRUNCATE),
             1
         );
-        let refused = SsimParams::try_new(peak, Sigma::new(0.1), 0.01, 0.03);
+        let refused = SsimParams::try_new(peak, sigma!(0.1), 0.01, 0.03);
         assert!(
             matches!(refused, Err(Error::InvalidParameter(_))),
             "{refused:?}"
         );
 
         // The smallest accepted window is three taps.
-        let accepted = SsimParams::try_new(peak, Sigma::new(0.2), 0.01, 0.03).unwrap();
+        let accepted = SsimParams::try_new(peak, sigma!(0.2), 0.01, 0.03).unwrap();
         assert_eq!(accepted.window_size(), 3);
     }
 
@@ -597,8 +598,8 @@ mod tests {
         // The check that lets `ssim` be panic-free where `gaussian_blur` is
         // not: MAX_RADIUS is 64, so radius = round(3σ) > 64 means σ > 21.5.
         let peak = PeakValue::of_pixel::<Mono8>();
-        assert!(SsimParams::try_new(peak, Sigma::new(21.0), 0.01, 0.03).is_ok());
-        let refused = SsimParams::try_new(peak, Sigma::new(40.0), 0.01, 0.03);
+        assert!(SsimParams::try_new(peak, sigma!(21.0), 0.01, 0.03).is_ok());
+        let refused = SsimParams::try_new(peak, sigma!(40.0), 0.01, 0.03);
         assert!(
             matches!(refused, Err(Error::InvalidParameter(_))),
             "{refused:?}"
@@ -791,7 +792,7 @@ mod tests {
         // What that costs, measured on this fixture: the uncentred score is
         // 0.703 where the centred one is 0.967, and at a named peak of 100 the
         // uncentred score reaches −30, outside SSIM's range entirely.
-        let peak = PeakValue::new(1023.0);
+        let peak = peak!(1023.0);
         let params = SsimParams::reference(peak);
 
         // Two images with identical value distributions and transposed
@@ -825,7 +826,7 @@ mod tests {
         // narrow signal, an uncentred variance error of ~190 counts against a
         // `C2` of `(0.03·100)² = 9` produces scores in the thousands. The
         // bound is the invariant that catches it.
-        let params = SsimParams::reference(PeakValue::new(100.0));
+        let params = SsimParams::reference(peak!(100.0));
         let a = Image::generate(48, 48, |x, y| {
             Mono16::new(60_000 + ((x * 3 + y) % 7) as u16)
         });
@@ -858,7 +859,7 @@ mod tests {
     fn nan_propagates_rather_than_being_silently_dropped() {
         // The stated policy: a window statistic has no count to record an
         // exclusion in, so it must not pretend the sample was not there.
-        let params = SsimParams::reference(PeakValue::new(1.0));
+        let params = SsimParams::reference(peak!(1.0));
         let mut a = Image::generate(32, 32, |x, _| MonoF32::new(x as f32 / 31.0));
         let b = a.clone();
         *a.pixel_at_mut(16, 16) = MonoF32::new(f32::NAN);
@@ -885,8 +886,8 @@ mod tests {
             )
         });
 
-        let narrow = SsimParams::try_new(peak, Sigma::new(1.5), 0.01, 0.03).unwrap();
-        let wide = SsimParams::try_new(peak, Sigma::new(4.0), 0.01, 0.03).unwrap();
+        let narrow = SsimParams::try_new(peak, sigma!(1.5), 0.01, 0.03).unwrap();
+        let wide = SsimParams::try_new(peak, sigma!(4.0), 0.01, 0.03).unwrap();
         assert_eq!(narrow.window_size(), 11);
         assert_eq!(wide.window_size(), 25);
 

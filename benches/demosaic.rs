@@ -86,7 +86,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     });
 
     // The memory-bound floor: same traversal, no neighbourhood.
-    let gains = BayerGains::new(1.9, 1.0, 1.6);
+    let gains = BayerGains::new(1.9, 1.0, 1.6).unwrap();
     group.bench_function("white balance 512x512 BayerRggb8", |b| {
         b.iter(|| white_balance(black_box(&raw8), gains))
     });

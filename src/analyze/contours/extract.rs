@@ -3,22 +3,74 @@
 use crate::analyze::components::{Connectivity, Labeling, connected_components};
 use crate::image::{Image, ImageView, RasterImage};
 use crate::pixel::LabelPixel;
-use crate::{Coordinate, Error};
+use crate::{Coordinate, Error, Offset};
 
 use super::hierarchy::{ComponentContour, Contour, ContourHierarchy, ContourKind};
 
 /// Clockwise Moore ring in image coordinates (y grows downward),
 /// starting west: W, NW, N, NE, E, SE, S, SW.
-const MOORE_RING: [(i64, i64); 8] = [
-    (-1, 0),
-    (-1, -1),
-    (0, -1),
-    (1, -1),
-    (1, 0),
-    (1, 1),
-    (0, 1),
-    (-1, 1),
+const MOORE_RING: [Offset; 8] = [
+    Offset::new(-1, 0),
+    Offset::new(-1, -1),
+    Offset::new(0, -1),
+    Offset::new(1, -1),
+    Offset::new(1, 0),
+    Offset::new(1, 1),
+    Offset::new(0, 1),
+    Offset::new(-1, 1),
 ];
+
+/// The step from a hole's first raster pixel to the foreground pixel above
+/// it, which is the seed the inner border is traced from.
+const NORTH: Offset = Offset::new(0, -1);
+
+/// A position the tracer may visit, including ones off the top or left of
+/// the view.
+///
+/// The trace steps onto positions before it knows whether they carry the
+/// label, and the first backtrack of a component touching the left or top
+/// edge is outside the view entirely, so those two cases cannot be a
+/// [`Coordinate`]. This is where they live, and
+/// [`on_grid`](TracePos::on_grid) is the single place the negative half of
+/// the bounds check happens; the far edge is
+/// [`Image::get`](crate::image::ImageView::get)'s `Option`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct TracePos {
+    x: i64,
+    y: i64,
+}
+
+impl TracePos {
+    /// The position one [`Offset`] away.
+    const fn step(self, offset: Offset) -> Self {
+        Self {
+            x: self.x + offset.dx as i64,
+            y: self.y + offset.dy as i64,
+        }
+    }
+
+    /// The [`Coordinate`] at this position, or `None` if it is off the top
+    /// or left of the view.
+    const fn on_grid(self) -> Option<Coordinate> {
+        if self.x < 0 || self.y < 0 {
+            None
+        } else {
+            Some(Coordinate {
+                x: self.x as usize,
+                y: self.y as usize,
+            })
+        }
+    }
+}
+
+impl From<Coordinate> for TracePos {
+    fn from(value: Coordinate) -> Self {
+        Self {
+            x: value.x as i64,
+            y: value.y as i64,
+        }
+    }
+}
 
 /// Trace every component's borders and derive the outer/hole hierarchy.
 ///
@@ -102,7 +154,7 @@ where
         if is_outside[bg_index] {
             continue;
         }
-        let owner_label = label_at(&foreground.labels, first.x as i64, first.y as i64 - 1);
+        let owner_label = label_at(&foreground.labels, first.checked_add(NORTH));
         debug_assert!(
             owner_label > 0,
             "the pixel above a hole's first pixel must be foreground"
@@ -118,8 +170,7 @@ where
         .iter()
         .enumerate()
         .map(|(fg_index, &first)| {
-            let enclosing = match label_at(&background.labels, first.x as i64, first.y as i64 - 1)
-            {
+            let enclosing = match label_at(&background.labels, first.checked_add(NORTH)) {
                 0 => None, // off-view: a topmost component is top-level
                 bg_label => hole_owner[bg_label as usize - 1],
             };
@@ -129,7 +180,7 @@ where
                     &foreground.labels,
                     label,
                     first,
-                    (first.x as i64 - 1, first.y as i64),
+                    TracePos::from(first).step(Offset::new(-1, 0)),
                 ),
                 ContourKind::Outer,
             );
@@ -138,14 +189,11 @@ where
                 .map(|&hole_first| {
                     // Seed on the owning foreground pixel above the hole,
                     // backtracking into the hole.
-                    let seed = Coordinate::new(hole_first.x, hole_first.y - 1);
+                    let seed = hole_first
+                        .checked_add(NORTH)
+                        .expect("a hole's first pixel has foreground above it");
                     Contour::new(
-                        trace_border(
-                            &foreground.labels,
-                            label,
-                            seed,
-                            (hole_first.x as i64, hole_first.y as i64),
-                        ),
+                        trace_border(&foreground.labels, label, seed, TracePos::from(hole_first)),
                         ContourKind::Hole,
                     )
                 })
@@ -161,13 +209,13 @@ where
     Ok((foreground, ContourHierarchy { components }))
 }
 
-/// Label index at `(x, y)`, `0` for background **and** off-view.
-fn label_at<L: LabelPixel>(labels: &Image<L>, x: i64, y: i64) -> u32 {
-    if x < 0 || y < 0 {
-        return 0;
-    }
-    labels
-        .get(x as usize, y as usize)
+/// Label index at `at`, `0` for background **and** off-view.
+///
+/// Takes the `Option` [`TracePos::on_grid`] and
+/// [`Coordinate::checked_add`] produce, so an off-view position is one
+/// `None` rather than a sign test repeated at each call site.
+fn label_at<L: LabelPixel>(labels: &Image<L>, at: Option<Coordinate>) -> u32 {
+    at.and_then(|c| labels.get(c.x, c.y))
         .map_or(0, LabelPixel::to_label_index)
 }
 
@@ -233,31 +281,31 @@ fn trace_border<L: LabelPixel>(
     labels: &Image<L>,
     label: u32,
     start: Coordinate,
-    backtrack: (i64, i64),
+    backtrack: TracePos,
 ) -> Vec<Coordinate> {
-    let s = (start.x as i64, start.y as i64);
-    let matches = |p: (i64, i64)| label_at(labels, p.0, p.1) == label;
-    debug_assert!(matches(s) && !matches(backtrack));
+    let matches = |p: TracePos| label_at(labels, p.on_grid()) == label;
+    debug_assert!(matches(TracePos::from(start)) && !matches(backtrack));
 
     let mut contour = vec![start];
-    let mut current = s;
+    let mut current = start;
     let mut back = backtrack;
-    let mut first_move: Option<(i64, i64)> = None;
+    let mut first_move: Option<Coordinate> = None;
     // Every border pixel is visited at most 4 times (once per approach
     // side), so this bound is unreachable in correct code.
     let budget = 4 * labels.width() * labels.height() + 8;
 
     for _ in 0..budget {
+        let here = TracePos::from(current);
         let back_dir = MOORE_RING
             .iter()
-            .position(|&(dx, dy)| (current.0 + dx, current.1 + dy) == back)
+            .position(|&offset| here.step(offset) == back)
             .expect("backtrack is 8-adjacent to the current pixel");
         let mut next = None;
         for k in 1..=8 {
-            let dir = (back_dir + k) % 8;
-            let p = (current.0 + MOORE_RING[dir].0, current.1 + MOORE_RING[dir].1);
+            let p = here.step(MOORE_RING[(back_dir + k) % 8]);
             if matches(p) {
-                next = Some(p);
+                // `matches` is false off-grid, so a match is on the grid.
+                next = p.on_grid();
                 break;
             }
             back = p; // last rejected position becomes the next backtrack
@@ -265,7 +313,7 @@ fn trace_border<L: LabelPixel>(
         let Some(next) = next else {
             return contour; // isolated pixel: nothing 8-adjacent matches
         };
-        if current == s {
+        if current == start {
             match first_move {
                 None => first_move = Some(next),
                 Some(first) if first == next => {
@@ -278,7 +326,7 @@ fn trace_border<L: LabelPixel>(
             }
         }
         current = next;
-        contour.push(Coordinate::new(current.0 as usize, current.1 as usize));
+        contour.push(current);
     }
     unreachable!("border trace exceeded the visit budget");
 }

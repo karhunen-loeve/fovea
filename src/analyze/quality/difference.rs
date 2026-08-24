@@ -386,6 +386,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::peak;
     use crate::image::{Image, SubView};
     use crate::pixel::{Mono8, Mono16, MonoF32, MonoF64, Rgb8};
     use crate::{Coordinate, Rectangle, Size};
@@ -574,7 +575,7 @@ mod tests {
         assert_eq!(error.mean_squared_error(), Some(f64::INFINITY));
         assert_eq!(error.max_absolute_error(), Some(f64::INFINITY));
         let psnr = error
-            .peak_signal_to_noise_ratio(PeakValue::new(1.0))
+            .peak_signal_to_noise_ratio(peak!(1.0))
             .unwrap();
         assert_eq!(psnr, f64::NEG_INFINITY);
     }

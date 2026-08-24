@@ -578,14 +578,14 @@ fn gaussian_radius(sigma: Sigma, truncate: f32) -> usize {
 /// means "this `sigma` is out of range", not "allocate a bigger buffer":
 ///
 /// ```
-/// use fovea::Sigma;
 /// use fovea::image::{MAX_RADIUS, gaussian_kernel_size};
+/// use fovea::sigma;
 ///
 /// let supported = |sigma, truncate| {
 ///     gaussian_kernel_size(sigma, truncate) <= 2 * MAX_RADIUS + 1
 /// };
-/// assert!(supported(Sigma::new(16.0), 4.0));
-/// assert!(!supported(Sigma::new(20.0), 4.0)); // 161 taps — `gaussian_blur` would panic
+/// assert!(supported(sigma!(16.0), 4.0));
+/// assert!(!supported(sigma!(20.0), 4.0)); // 161 taps — `gaussian_blur` would panic
 /// ```
 ///
 /// # Panics
@@ -595,13 +595,13 @@ fn gaussian_radius(sigma: Sigma, truncate: f32) -> usize {
 /// # Example
 ///
 /// ```
-/// use fovea::Sigma;
 /// use fovea::image::gaussian_kernel_size;
+/// use fovea::sigma;
 ///
 /// // radius = round(4.0 * 1.0) = 4 → 9 taps
-/// assert_eq!(gaussian_kernel_size(Sigma::new(1.0), 4.0), 9);
+/// assert_eq!(gaussian_kernel_size(sigma!(1.0), 4.0), 9);
 /// // tiny sigma rounds down to radius 0 → 1 tap (identity)
-/// assert_eq!(gaussian_kernel_size(Sigma::new(0.05), 4.0), 1);
+/// assert_eq!(gaussian_kernel_size(sigma!(0.05), 4.0), 1);
 /// ```
 #[must_use]
 pub fn gaussian_kernel_size(sigma: Sigma, truncate: f32) -> usize {
@@ -628,10 +628,10 @@ pub fn gaussian_kernel_size(sigma: Sigma, truncate: f32) -> usize {
 /// # Example
 ///
 /// ```
-/// use fovea::Sigma;
 /// use fovea::image::gaussian_kernel_1d;
+/// use fovea::sigma;
 ///
-/// let k = gaussian_kernel_1d(Sigma::new(1.0), 4.0);
+/// let k = gaussian_kernel_1d(sigma!(1.0), 4.0);
 /// assert_eq!(k.len(), 9);
 /// assert_eq!(k.anchor(), 4);
 /// // Normalized: the weights sum to 1.
@@ -693,6 +693,7 @@ impl<const HK: usize, const VK: usize> PartialEq for SeparableKernel<HK, VK> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sigma;
     use crate::image::ImageView;
 
     // ── constructors ────────────────────────────────────────────────────
@@ -987,7 +988,7 @@ mod tests {
         // The DC / normalization invariant — the single most important
         // property (brightness preservation).
         for &sigma in &[0.5f32, 0.8, 1.0, 1.7, 3.0, 8.0] {
-            let k = gaussian_kernel_1d(Sigma::new(sigma), 4.0);
+            let k = gaussian_kernel_1d(Sigma::new(sigma).unwrap(), 4.0);
             let sum: f32 = k.weights().iter().sum();
             assert!(
                 (sum - 1.0).abs() < 1e-6,
@@ -998,7 +999,7 @@ mod tests {
 
     #[test]
     fn gaussian_kernel_weights_symmetric() {
-        let k = gaussian_kernel_1d(Sigma::new(1.5), 4.0);
+        let k = gaussian_kernel_1d(sigma!(1.5), 4.0);
         let w = k.weights();
         let n = w.len();
         for i in 0..n {
@@ -1016,7 +1017,7 @@ mod tests {
         // Compare to an independent brute-force normalized reference.
         let sigma = 1.3f32;
         let truncate = 4.0f32;
-        let k = gaussian_kernel_1d(Sigma::new(sigma), truncate);
+        let k = gaussian_kernel_1d(Sigma::new(sigma).unwrap(), truncate);
         let radius = k.radius();
         let n = k.len();
 
@@ -1039,20 +1040,20 @@ mod tests {
     #[test]
     fn gaussian_kernel_size_follows_truncate() {
         // size = 2 * round(truncate * sigma) + 1
-        assert_eq!(gaussian_kernel_size(Sigma::new(1.0), 4.0), 9); // radius 4
-        assert_eq!(gaussian_kernel_size(Sigma::new(2.0), 3.0), 13); // radius 6
-        assert_eq!(gaussian_kernel_size(Sigma::new(1.0), 3.0), 7); // radius 3
+        assert_eq!(gaussian_kernel_size(sigma!(1.0), 4.0), 9); // radius 4
+        assert_eq!(gaussian_kernel_size(sigma!(2.0), 3.0), 13); // radius 6
+        assert_eq!(gaussian_kernel_size(sigma!(1.0), 3.0), 7); // radius 3
         // size() agrees with the built kernel's tap count.
         assert_eq!(
-            gaussian_kernel_1d(Sigma::new(1.0), 4.0).len(),
-            gaussian_kernel_size(Sigma::new(1.0), 4.0)
+            gaussian_kernel_1d(sigma!(1.0), 4.0).len(),
+            gaussian_kernel_size(sigma!(1.0), 4.0)
         );
     }
 
     #[test]
     fn gaussian_kernel_tiny_sigma_is_identity() {
         // sigma small enough that round(truncate * sigma) == 0 ⇒ 1 tap [1.0].
-        let k = gaussian_kernel_1d(Sigma::new(0.05), 4.0);
+        let k = gaussian_kernel_1d(sigma!(0.05), 4.0);
         assert_eq!(k.len(), 1);
         assert_eq!(k.radius(), 0);
         assert_eq!(k.anchor(), 0);
@@ -1065,14 +1066,14 @@ mod tests {
     #[test]
     #[should_panic(expected = "truncate must be > 0.0")]
     fn gaussian_kernel_zero_truncate_panics() {
-        let _ = gaussian_kernel_1d(Sigma::new(1.0), 0.0);
+        let _ = gaussian_kernel_1d(sigma!(1.0), 0.0);
     }
 
     #[test]
     #[should_panic(expected = "exceeds MAX_RADIUS")]
     fn gaussian_kernel_over_radius_panics() {
         // radius = round(4.0 * 20.0) = 80 > MAX_RADIUS (64).
-        let _ = gaussian_kernel_1d(Sigma::new(20.0), 4.0);
+        let _ = gaussian_kernel_1d(sigma!(20.0), 4.0);
     }
 
     #[test]
@@ -1080,11 +1081,11 @@ mod tests {
         // The size query is total where the builder is not: it must report
         // the derived size for an out-of-range sigma so callers can test
         // admissibility instead of catching a panic.
-        assert_eq!(gaussian_kernel_size(Sigma::new(20.0), 4.0), 161);
-        assert!(gaussian_kernel_size(Sigma::new(20.0), 4.0) > 2 * MAX_RADIUS + 1);
+        assert_eq!(gaussian_kernel_size(sigma!(20.0), 4.0), 161);
+        assert!(gaussian_kernel_size(sigma!(20.0), 4.0) > 2 * MAX_RADIUS + 1);
         // The largest admissible sigma sits exactly on the bound.
         assert_eq!(
-            gaussian_kernel_size(Sigma::new(16.0), 4.0),
+            gaussian_kernel_size(sigma!(16.0), 4.0),
             2 * MAX_RADIUS + 1
         );
     }
@@ -1092,7 +1093,7 @@ mod tests {
     #[test]
     fn gaussian_kernel_at_max_radius_is_ok() {
         // radius exactly MAX_RADIUS must succeed: round(4.0 * 16.0) = 64.
-        let k = gaussian_kernel_1d(Sigma::new(16.0), 4.0);
+        let k = gaussian_kernel_1d(sigma!(16.0), 4.0);
         assert_eq!(k.radius(), MAX_RADIUS);
         assert_eq!(k.len(), 2 * MAX_RADIUS + 1);
         let sum: f32 = k.weights().iter().sum();
@@ -1109,7 +1110,7 @@ mod tests {
         // use, so the shortcut cannot rot silently.
         for sigma in [0.05f32, 0.8, 1.5, 4.0] {
             for truncate in [3.0f32, 4.0] {
-                let k = gaussian_kernel_1d(Sigma::new(sigma), truncate);
+                let k = gaussian_kernel_1d(Sigma::new(sigma).unwrap(), truncate);
                 let w = k.weights();
                 let n = w.len();
 
@@ -1138,7 +1139,7 @@ mod tests {
     #[test]
     fn gaussian_kernel_reports_the_same_taps_on_both_axes() {
         // A Gaussian is isotropic: one weight array serves both passes.
-        let k = gaussian_kernel_1d(Sigma::new(1.5), 4.0);
+        let k = gaussian_kernel_1d(sigma!(1.5), 4.0);
         assert_eq!(k.h_weights(), k.v_weights());
         assert_eq!(k.h_anchor(), k.v_anchor());
         assert_eq!(k.h_weights(), k.weights());
@@ -1193,12 +1194,12 @@ mod tests {
 
         // radius = round(4.0 * 1.0) = 4 ⇒ 9 taps, anchor 4.
         assert_eq!(
-            axes(&gaussian_kernel_1d(Sigma::new(1.0), 4.0)),
+            axes(&gaussian_kernel_1d(sigma!(1.0), 4.0)),
             (9, 4, 9, 4)
         );
         // Tiny σ collapses to the 1-tap identity, the trait's edge case.
         assert_eq!(
-            axes(&gaussian_kernel_1d(Sigma::new(0.05), 4.0)),
+            axes(&gaussian_kernel_1d(sigma!(0.05), 4.0)),
             (1, 0, 1, 0)
         );
     }

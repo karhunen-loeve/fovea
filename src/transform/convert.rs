@@ -2127,17 +2127,20 @@ where
 ///
 /// # Construction
 ///
-/// [`Clamp::new`] and [`Clamp::try_new`] are the only public
-/// constructors. Both validate `lo <= hi` channel-wise so that inverted
-/// ranges (which would collapse every input to `hi`) are rejected at
-/// construction time; they differ only in how a bad range is reported.
-/// Use `new` for literals and bounds already proven, `try_new` for a
-/// range computed from data (an auto-exposure percentile, a clip level
-/// read from a recipe) where an inversion is a value to handle rather
-/// than a bug to abort on. This is the same split as
-/// [`Sigma::new`](crate::Sigma) / `Sigma::try_new`, with `new` not
-/// `const` here because the channel comparison goes through [`Ord`] and
-/// trait methods cannot be called in a `const fn`.
+/// [`Clamp::try_new`] is the only public constructor. It validates
+/// `lo <= hi` channel-wise so that inverted ranges (which would collapse
+/// every input to `hi`) are rejected at construction time, whether the
+/// bounds are literals or an auto-exposure percentile: an inversion is a
+/// value to handle, not a bug to abort on.
+///
+/// The other parameter types in the crate ([`Sigma`](crate::Sigma),
+/// [`OddWindowSide`](crate::OddWindowSide)) add a `const fn new` returning
+/// [`Option`], which is what lets a literal be checked at compile time
+/// behind a macro such as [`sigma!`](crate::sigma). That is impossible
+/// here: the channel comparison goes through [`Ord`] and trait methods
+/// cannot be called in a `const fn`. With no compile-time tier to
+/// preserve, an `Option`-returning `new` would differ from `try_new` only
+/// by discarding the reason, so it does not exist.
 ///
 /// Fields are **private** to keep this invariant load-bearing; read them
 /// back with [`Clamp::lo`] / [`Clamp::hi`] if you need them.
@@ -2156,20 +2159,22 @@ where
 /// let img = Image::fill(4, 4, Mono8::new(10));
 /// let out: Image<Mono8> = convert_image(
 ///     &img,
-///     Clamp::new(Mono8::new(20), Mono8::new(235)),
+///     Clamp::try_new(Mono8::new(20), Mono8::new(235))?,
 /// );
 /// assert_eq!(out.pixel_at(0, 0), Mono8::new(20)); // clamped up to lo
+/// # Ok::<(), fovea::Error>(())
 /// ```
 ///
 /// Per-channel ranges on multi-channel pixels are naturally expressible:
 /// ```
 /// # use fovea::pixel::Rgb8;
 /// # use fovea::transform::{Clamp, ConvertPixel};
-/// let strat = Clamp::new(
+/// let strat = Clamp::try_new(
 ///     Rgb8::new(16, 16, 16),
 ///     Rgb8::new(235, 240, 235),
-/// );
+/// )?;
 /// assert_eq!(strat.convert(&Rgb8::new(5, 250, 100)), Rgb8::new(16, 240, 100));
+/// # Ok::<(), fovea::Error>(())
 /// ```
 ///
 /// Direct struct-literal construction is rejected so the `lo <= hi`
@@ -2183,8 +2188,8 @@ where
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Clamp<P> {
-    // Private: the `lo <= hi` invariant established by `Clamp::new` /
-    // `Clamp::try_new` must not be bypassable via struct literals. See
+    // Private: the `lo <= hi` invariant established by `Clamp::try_new`
+    // must not be bypassable via struct literals. See
     // P1-6 / the `convert` impl, which assumes well-ordered bounds.
     lo: P,
     hi: P,
@@ -2195,53 +2200,14 @@ where
     P: HomogeneousPixel,
     P::Channel: Ord,
 {
-    /// Construct a [`Clamp`] strategy after validating that `lo <= hi`
-    /// channel-wise.
+    /// Construct a [`Clamp`] strategy from bounds, validating that
+    /// `lo <= hi` channel-wise.
     ///
-    /// # Panics (Tier 3 — programmer bug)
-    ///
-    /// Panics if any channel of `lo` is greater than the corresponding
-    /// channel of `hi`. An inverted range collapses every input to `hi`
-    /// (`min(max(v, lo), hi) == hi`), which is almost certainly not what
-    /// the caller intended. For bounds computed from data, use
-    /// [`Self::try_new`].
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// # use fovea::pixel::Mono8;
-    /// # use fovea::transform::Clamp;
-    /// let strat = Clamp::new(Mono8::new(20), Mono8::new(235));
-    /// assert_eq!(strat.lo(), Mono8::new(20));
-    /// assert_eq!(strat.hi(), Mono8::new(235));
-    /// ```
-    ///
-    /// Inverted ranges are rejected:
-    ///
-    /// ```should_panic
-    /// # use fovea::pixel::Mono8;
-    /// # use fovea::transform::Clamp;
-    /// let _ = Clamp::new(Mono8::new(200), Mono8::new(50));
-    /// ```
-    #[inline]
-    pub fn new(lo: P, hi: P) -> Self {
-        match Self::inverted_channel(lo, hi) {
-            None => Self { lo, hi },
-            Some(i) => panic!(
-                "Clamp::new: lo > hi on channel {i} — every input would \
-                 collapse to `hi`. Did you swap the arguments?"
-            ),
-        }
-    }
-
-    /// Construct a [`Clamp`] strategy from computed bounds, validating
-    /// that `lo <= hi` channel-wise.
-    ///
-    /// The `try_new` half of the parameter-type discipline: a clip range
-    /// derived from image data (a histogram percentile, an exposure
-    /// estimate) can come out inverted for reasons that are not a
-    /// programmer bug, and whoever called the estimator is who can say
-    /// what to do about it.
+    /// The only constructor; see the type documentation for why there is no
+    /// `const` sibling. A clip range derived from image data (a histogram
+    /// percentile, an exposure estimate) can come out inverted for reasons
+    /// that are not a programmer bug, and whoever called the estimator is
+    /// who can say what to do about it.
     ///
     /// # Errors
     ///
@@ -2313,8 +2279,8 @@ where
             let hi = self.hi.channel(i);
             // Explicit two-step: clamp up to `lo`, then down to `hi`.
             // No `lo <= hi` precondition check here: that invariant is
-            // established once by `Clamp::new` / `Clamp::try_new` (P1-6)
-            // and the private fields prevent it from being violated.
+            // established once by `Clamp::try_new` (P1-6) and the
+            // private fields prevent it from being violated.
             // Re-checking per pixel would burn N*M cycles for a constant
             // property.
             let v = if v < lo { lo } else { v };
@@ -9309,15 +9275,15 @@ mod tests {
 
     // ─── Clamp<P> ─────────────────────────────────────────────────────────
 
-    // ── P1-6: Clamp::new constructor and inverted-range rejection ──────────────────────────────────────────────
+    // ── P1-6: Clamp::try_new constructor and inverted-range rejection ─────────────────────────────────────────
 
     #[test]
     fn clamp_new_valid_range_constructs() {
-        let strat = Clamp::new(Mono8::new(20), Mono8::new(235));
+        let strat = Clamp::try_new(Mono8::new(20), Mono8::new(235)).unwrap();
         assert_eq!(strat.lo(), Mono8::new(20));
         assert_eq!(strat.hi(), Mono8::new(235));
         // Equivalent to the struct-literal form.
-        assert_eq!(strat, Clamp::new(Mono8::new(20), Mono8::new(235)));
+        assert_eq!(strat, Clamp::try_new(Mono8::new(20), Mono8::new(235)).unwrap());
     }
 
     #[test]
@@ -9325,22 +9291,22 @@ mod tests {
         // lo == hi is degenerate but technically valid: every input
         // collapses to that exact value. Treated as a deliberate choice,
         // not a bug.
-        let strat = Clamp::new(Mono8::new(128), Mono8::new(128));
+        let strat = Clamp::try_new(Mono8::new(128), Mono8::new(128)).unwrap();
         assert_eq!(strat.convert(&Mono8::new(0)), Mono8::new(128));
         assert_eq!(strat.convert(&Mono8::new(255)), Mono8::new(128));
     }
 
     #[test]
-    #[should_panic(expected = "lo > hi on channel 0")]
-    fn clamp_new_inverted_mono_panics() {
-        let _ = Clamp::new(Mono8::new(200), Mono8::new(50));
+    fn clamp_inverted_mono_is_an_error() {
+        let err = Clamp::try_new(Mono8::new(200), Mono8::new(50)).unwrap_err();
+        assert!(format!("{err}").contains("channel 0"), "{err}");
     }
 
     #[test]
-    #[should_panic(expected = "lo > hi on channel 1")]
-    fn clamp_new_inverted_single_channel_panics_with_index() {
+    fn clamp_inverted_single_channel_names_the_index() {
         // Channels 0 and 2 are fine; channel 1 (green) is inverted.
-        let _ = Clamp::new(Rgb8::new(10, 200, 10), Rgb8::new(200, 50, 200));
+        let err = Clamp::try_new(Rgb8::new(10, 200, 10), Rgb8::new(200, 50, 200)).unwrap_err();
+        assert!(format!("{err}").contains("channel 1"), "{err}");
     }
 
     #[test]
@@ -9350,7 +9316,7 @@ mod tests {
         let strat = Clamp::try_new(Mono8::new(20), Mono8::new(235)).unwrap();
         assert_eq!(strat.lo(), Mono8::new(20));
         assert_eq!(strat.hi(), Mono8::new(235));
-        assert_eq!(strat, Clamp::new(Mono8::new(20), Mono8::new(235)));
+        assert_eq!(strat, Clamp::try_new(Mono8::new(20), Mono8::new(235)).unwrap());
         // Equal bounds are valid here too, for the same reason as in `new`.
         assert!(Clamp::try_new(Mono8::new(128), Mono8::new(128)).is_ok());
     }
@@ -9372,7 +9338,7 @@ mod tests {
 
     #[test]
     fn clamp_new_rgb_all_equal_lo_hi() {
-        let strat = Clamp::new(Rgb8::new(0, 0, 0), Rgb8::new(255, 255, 255));
+        let strat = Clamp::try_new(Rgb8::new(0, 0, 0), Rgb8::new(255, 255, 255)).unwrap();
         assert_eq!(
             strat.convert(&Rgb8::new(128, 64, 32)),
             Rgb8::new(128, 64, 32)
@@ -9381,7 +9347,7 @@ mod tests {
 
     #[test]
     fn clamp_mono8_basic() {
-        let strat = Clamp::new(Mono8::new(20), Mono8::new(235));
+        let strat = Clamp::try_new(Mono8::new(20), Mono8::new(235)).unwrap();
         // Inside range — unchanged.
         assert_eq!(strat.convert(&Mono8::new(100)), Mono8::new(100));
         // Below lo — clamped up.
@@ -9395,7 +9361,7 @@ mod tests {
 
     #[test]
     fn clamp_mono8_lo_equals_hi_collapses_to_constant() {
-        let strat = Clamp::new(Mono8::new(128), Mono8::new(128));
+        let strat = Clamp::try_new(Mono8::new(128), Mono8::new(128)).unwrap();
         for v in [0u8, 50, 128, 200, 255] {
             assert_eq!(strat.convert(&Mono8::new(v)), Mono8::new(128));
         }
@@ -9405,7 +9371,7 @@ mod tests {
     fn clamp_mono8_full_range_is_identity() {
         // lo = 0, hi = MAX — no channel can fall outside, so the strategy
         // is the identity.
-        let strat = Clamp::new(Mono8::new(0), Mono8::new(255));
+        let strat = Clamp::try_new(Mono8::new(0), Mono8::new(255)).unwrap();
         for v in 0u8..=255 {
             assert_eq!(strat.convert(&Mono8::new(v)), Mono8::new(v));
         }
@@ -9413,7 +9379,7 @@ mod tests {
 
     #[test]
     fn clamp_rgb8_per_channel_ranges() {
-        let strat = Clamp::new(Rgb8::new(16, 16, 16), Rgb8::new(235, 240, 235));
+        let strat = Clamp::try_new(Rgb8::new(16, 16, 16), Rgb8::new(235, 240, 235)).unwrap();
         assert_eq!(
             strat.convert(&Rgb8::new(5, 250, 100)),
             Rgb8::new(16, 240, 100)
@@ -9426,7 +9392,7 @@ mod tests {
 
     #[test]
     fn clamp_mono16() {
-        let strat = Clamp::new(Mono16::new(1000), Mono16::new(50000));
+        let strat = Clamp::try_new(Mono16::new(1000), Mono16::new(50000)).unwrap();
         assert_eq!(strat.convert(&Mono16::new(500)), Mono16::new(1000));
         assert_eq!(strat.convert(&Mono16::new(60000)), Mono16::new(50000));
         assert_eq!(strat.convert(&Mono16::new(25000)), Mono16::new(25000));
@@ -9435,7 +9401,8 @@ mod tests {
     #[test]
     fn clamp_rgba8_includes_alpha_channel() {
         // Alpha is a channel; Clamp restricts it along with the rest.
-        let strat = Clamp::new(Rgba8::new(10, 10, 10, 10), Rgba8::new(200, 200, 200, 200));
+        let strat =
+            Clamp::try_new(Rgba8::new(10, 10, 10, 10), Rgba8::new(200, 200, 200, 200)).unwrap();
         assert_eq!(
             strat.convert(&Rgba8::new(5, 150, 220, 255)),
             Rgba8::new(10, 150, 200, 200)
@@ -9446,7 +9413,8 @@ mod tests {
     fn convert_image_clamp_mono8() {
         use crate::image::{Image, ImageView};
         let img: Image<Mono8> = Image::generate(4, 4, |x, y| Mono8::new((x * 30 + y * 20) as u8));
-        let out: Image<Mono8> = convert_image(&img, Clamp::new(Mono8::new(30), Mono8::new(70)));
+        let clamp = Clamp::try_new(Mono8::new(30), Mono8::new(70)).unwrap();
+        let out: Image<Mono8> = convert_image(&img, clamp);
         for y in 0..4 {
             for x in 0..4 {
                 let v = (x * 30 + y * 20) as u8;
@@ -9625,7 +9593,7 @@ mod tests {
             brightness: 10.0f32,
             contrast: 2.0f32,
         }
-        .then::<Mono8, _>(Clamp::new(Mono8::new(50), Mono8::new(200)));
+        .then::<Mono8, _>(Clamp::try_new(Mono8::new(50), Mono8::new(200)).unwrap());
         // 100 * 2 + 10 = 210 → clamped to 200
         assert_eq!(method.convert(&Mono8::new(100)), Mono8::new(200));
         // 10 * 2 + 10 = 30 → clamped up to 50
@@ -9638,7 +9606,8 @@ mod tests {
     fn clamp_then_binary_threshold_pipeline() {
         // Clamp to a lower band, then threshold — demonstrates that Phase 1
         // and Phase 2 strategies compose naturally through `.then()`.
-        let method = Clamp::new(Mono8::new(0), Mono8::new(100)).then::<Mono8, _>(BinaryThreshold {
+        let clamp = Clamp::try_new(Mono8::new(0), Mono8::new(100)).unwrap();
+        let method = clamp.then::<Mono8, _>(BinaryThreshold {
             thresh: Mono8::new(50),
         });
         // 200 → clamped to 100 → above 50 → 255

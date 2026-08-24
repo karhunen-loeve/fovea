@@ -93,7 +93,7 @@ use fovea::transform::{BayerGains, MalvarHeCutler, demosaic, white_balance};
 
 let raw = Image::fill(64, 48, BayerRggb12::new(2048));
 
-let balanced = white_balance(&raw, BayerGains::new(1.9, 1.0, 1.6));
+let balanced = white_balance(&raw, BayerGains::new(1.9, 1.0, 1.6).unwrap());
 let rgb: Image<Rgb12> = demosaic(&balanced, MalvarHeCutler);
 ```
 

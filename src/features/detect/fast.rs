@@ -8,7 +8,7 @@ use crate::error::Error;
 use crate::features::Corner;
 use crate::image::{Decimated, Image, ImageView, RasterImage, RasterImageMut};
 use crate::pixel::{LinearPixel, MonoF32, SingleChannel};
-use crate::{CoordinateF64, Rectangle, Size};
+use crate::{CoordinateF64, Offset, Rectangle, Size};
 
 use super::peaks::{corner_peaks, scan_peaks};
 
@@ -24,8 +24,8 @@ use super::peaks::{corner_peaks, scan_peaks};
 /// (see [`SegmentTest`]).
 pub const FAST_RING_RADIUS: usize = 3;
 
-/// The 16 ring offsets `(dx, dy)`, in clockwise order starting from directly
-/// above the centre.
+/// The 16 ring offsets, in clockwise order starting from directly above the
+/// centre.
 ///
 /// The Bresenham circle of radius [`FAST_RING_RADIUS`]. Public because the
 /// ring is the detector's whole geometry: drawing it over an image is how
@@ -36,36 +36,38 @@ pub const FAST_RING_RADIUS: usize = 3;
 /// # Example
 ///
 /// ```
+/// use fovea::Offset;
 /// use fovea::features::detect::{FAST_RING, FAST_RING_RADIUS};
 ///
+/// let radius = FAST_RING_RADIUS as i32;
 /// assert_eq!(FAST_RING.len(), 16);
-/// assert_eq!(FAST_RING[0], (0, -(FAST_RING_RADIUS as isize))); // straight up
-/// assert_eq!(FAST_RING[4], (FAST_RING_RADIUS as isize, 0)); // a quarter turn on
+/// assert_eq!(FAST_RING[0], Offset::new(0, -radius)); // straight up
+/// assert_eq!(FAST_RING[4], Offset::new(radius, 0)); // a quarter turn on
 ///
 /// // Every offset lies on the circle, and consecutive offsets are adjacent.
-/// for (i, &(dx, dy)) in FAST_RING.iter().enumerate() {
-///     assert!(dx.abs() <= 3 && dy.abs() <= 3);
-///     let (nx, ny) = FAST_RING[(i + 1) % 16];
-///     assert!((nx - dx).abs() <= 1 && (ny - dy).abs() <= 1);
+/// for (i, &offset) in FAST_RING.iter().enumerate() {
+///     assert!(offset.dx.abs() <= 3 && offset.dy.abs() <= 3);
+///     let next = FAST_RING[(i + 1) % 16];
+///     assert!((next.dx - offset.dx).abs() <= 1 && (next.dy - offset.dy).abs() <= 1);
 /// }
 /// ```
-pub const FAST_RING: [(isize, isize); 16] = [
-    (0, -3),
-    (1, -3),
-    (2, -2),
-    (3, -1),
-    (3, 0),
-    (3, 1),
-    (2, 2),
-    (1, 3),
-    (0, 3),
-    (-1, 3),
-    (-2, 2),
-    (-3, 1),
-    (-3, 0),
-    (-3, -1),
-    (-2, -2),
-    (-1, -3),
+pub const FAST_RING: [Offset; 16] = [
+    Offset::new(0, -3),
+    Offset::new(1, -3),
+    Offset::new(2, -2),
+    Offset::new(3, -1),
+    Offset::new(3, 0),
+    Offset::new(3, 1),
+    Offset::new(2, 2),
+    Offset::new(1, 3),
+    Offset::new(0, 3),
+    Offset::new(-1, 3),
+    Offset::new(-2, 2),
+    Offset::new(-3, 1),
+    Offset::new(-3, 0),
+    Offset::new(-3, -1),
+    Offset::new(-2, -2),
+    Offset::new(-1, -3),
 ];
 
 /// The footprint the ring occupies: `(2·radius + 1)²`, the "kernel size" the
@@ -82,8 +84,11 @@ const FAST_RING_ROWS: [(usize, isize); 16] = {
     let mut table = [(0usize, 0isize); 16];
     let mut index = 0;
     while index < 16 {
-        let (dx, dy) = FAST_RING[index];
-        table[index] = ((dy + FAST_RING_RADIUS as isize) as usize, dx);
+        let offset = FAST_RING[index];
+        table[index] = (
+            (offset.dy + FAST_RING_RADIUS as i32) as usize,
+            offset.dx as isize,
+        );
         index += 1;
     }
     table
@@ -142,7 +147,7 @@ const FAST_RING_ROWS: [(usize, isize); 16] = {
 /// use fovea::features::detect::SegmentTest;
 ///
 /// // FAST-9 on a MonoF32 image in 0.0..=1.0: 8 % contrast.
-/// const FAST9: SegmentTest = SegmentTest::new(0.08, 9);
+/// const FAST9: SegmentTest = SegmentTest::new(0.08, 9).unwrap();
 /// assert_eq!(FAST9.arc_length(), 9);
 ///
 /// // A threshold derived from a noise estimate is checked where it is computed.
@@ -163,29 +168,28 @@ pub struct SegmentTest {
 }
 
 impl SegmentTest {
-    /// Creates a segment test from literals or otherwise proven-valid values.
+    /// Creates a segment test, returning `None` unless `threshold` is
+    /// finite and strictly positive and `9 <= arc_length <= 16` (see the
+    /// type documentation for why those are the bounds).
     ///
-    /// # Panics
-    ///
-    /// Panics unless `threshold` is finite and strictly positive and
-    /// `9 <= arc_length <= 16` (see the type documentation for why those are
-    /// the bounds). As a `const fn`, both are **compile errors** when
-    /// evaluated in a `const` context. For values computed from data, use
-    /// [`try_new`](Self::try_new).
+    /// `const`, so binding the result to a `const` item checks a pair of
+    /// literals at compile time. There is deliberately no literal macro:
+    /// the two arguments are not interchangeable and their names are the
+    /// information, so `SegmentTest::new(0.08, 9).unwrap()` is the more
+    /// readable form. For values computed from data use
+    /// [`try_new`](Self::try_new), which reports which bound failed.
     #[must_use]
-    pub const fn new(threshold: f32, arc_length: usize) -> Self {
-        assert!(
-            threshold.is_finite() && threshold > 0.0,
-            "SegmentTest::new: threshold must be finite and strictly positive"
-        );
-        assert!(
-            arc_length >= 9 && arc_length <= 16,
-            "SegmentTest::new: arc_length must satisfy 9 <= n <= 16"
-        );
-        Self {
+    pub const fn new(threshold: f32, arc_length: usize) -> Option<Self> {
+        if !(threshold.is_finite() && threshold > 0.0) {
+            return None;
+        }
+        if arc_length < 9 || arc_length > 16 {
+            return None;
+        }
+        Some(Self {
             threshold,
             arc_length,
-        }
+        })
     }
 
     /// Creates a segment test from computed values, validating them.
@@ -250,11 +254,11 @@ impl SegmentTest {
 /// ```
 /// use fovea::features::detect::{FastParams, SegmentTest};
 ///
-/// const PARAMS: FastParams = FastParams::new(SegmentTest::new(0.08, 9), 3);
+/// const PARAMS: FastParams = FastParams::new(SegmentTest::new(0.08, 9).unwrap(), 3).unwrap();
 /// assert_eq!(PARAMS.nms_radius(), 3);
 /// assert_eq!(PARAMS.test().arc_length(), 9);
 ///
-/// assert!(FastParams::try_new(SegmentTest::new(0.08, 9), 0).is_err());
+/// assert!(FastParams::try_new(SegmentTest::new(0.08, 9).unwrap(), 0).is_err());
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FastParams {
@@ -263,21 +267,18 @@ pub struct FastParams {
 }
 
 impl FastParams {
-    /// Creates detection parameters from a literal or otherwise proven-valid
-    /// radius.
+    /// Creates detection parameters, returning `None` if
+    /// `nms_radius == 0`.
     ///
-    /// # Panics
-    ///
-    /// Panics if `nms_radius == 0`. As a `const fn`, this is a **compile
-    /// error** when evaluated in a `const` context. For a computed radius,
-    /// use [`try_new`](Self::try_new).
+    /// `const`, so binding the result to a `const` item checks the radius
+    /// at compile time. For a computed radius use
+    /// [`try_new`](Self::try_new).
     #[must_use]
-    pub const fn new(test: SegmentTest, nms_radius: usize) -> Self {
-        assert!(
-            nms_radius > 0,
-            "FastParams::new: nms_radius must be at least 1"
-        );
-        Self { test, nms_radius }
+    pub const fn new(test: SegmentTest, nms_radius: usize) -> Option<Self> {
+        if nms_radius == 0 {
+            return None;
+        }
+        Some(Self { test, nms_radius })
     }
 
     /// Creates detection parameters from a computed radius, validating it.
@@ -349,7 +350,7 @@ impl FastParams {
 /// let image: Image<MonoF32> = Image::generate(24, 24, |x, y| {
 ///     MonoF32::new(if x >= 8 && y >= 8 { 1.0 } else { 0.0 })
 /// });
-/// let test = SegmentTest::new(0.1, 9);
+/// let test = SegmentTest::new(0.1, 9).unwrap();
 ///
 /// // The corner scores the full contrast: it is a corner up to t = 1.0.
 /// let corner = fast_score_at(&image, 8, 8, test, &Skip).expect("well inside");
@@ -425,7 +426,7 @@ where
 ///     Mono8::new(if (10..22).contains(&x) && (10..22).contains(&y) { 255 } else { 0 })
 /// });
 ///
-/// let scores: Image<MonoF32> = fast_score_map(&image, SegmentTest::new(20.0, 9), &Skip);
+/// let scores: Image<MonoF32> = fast_score_map(&image, SegmentTest::new(20.0, 9).unwrap(), &Skip);
 /// assert_eq!(scores.size(), image.size());
 ///
 /// // A corner of the square scores the full 255 levels of contrast; the
@@ -454,10 +455,7 @@ where
     // image narrower than the ring, `Clamp` still scores every column, so
     // `region.right()` can be below `FAST_RING_RADIUS` and an unclamped
     // `hot_left` would index past the row.
-    let hot_left = region
-        .left()
-        .max(FAST_RING_RADIUS)
-        .min(region.right());
+    let hot_left = region.left().max(FAST_RING_RADIUS).min(region.right());
     let hot_right = region
         .right()
         .min(width.saturating_sub(FAST_RING_RADIUS))
@@ -473,9 +471,8 @@ where
 
         // The seven scan lines the ring spans, fetched once for the whole
         // hot span instead of once per sample.
-        let rows: Option<[&[P]; FOOTPRINT]> = rows_fit.then(|| {
-            core::array::from_fn(|offset| image.row(y - FAST_RING_RADIUS + offset))
-        });
+        let rows: Option<[&[P]; FOOTPRINT]> = rows_fit
+            .then(|| core::array::from_fn(|offset| image.row(y - FAST_RING_RADIUS + offset)));
 
         let row = out.row_mut(y);
         let cold = |slots: &mut [MonoF32], from: usize| {
@@ -533,7 +530,7 @@ where
 /// });
 ///
 /// // 8 % contrast, FAST-9, corners at least 3 px apart.
-/// let params = FastParams::new(SegmentTest::new(0.08, 9), 3);
+/// let params = FastParams::new(SegmentTest::new(0.08, 9).unwrap(), 3).unwrap();
 /// let mut corners = fast(&image, params, &Skip);
 /// assert_eq!(corners.len(), 8); // four per square
 ///
@@ -575,12 +572,13 @@ where
 /// # Example
 ///
 /// ```
-/// use fovea::{CoordinateF64, PixelDistance, Sigma};
+/// use fovea::CoordinateF64;
 /// use fovea::border::Skip;
 /// use fovea::features::HasPosition;
 /// use fovea::features::detect::{fast_in_level, FastParams, SegmentTest};
 /// use fovea::image::{Image, ScaledImage};
 /// use fovea::pixel::MonoF32;
+/// use fovea::{pixel_distance, sigma};
 /// use fovea::transform::pyr_down;
 ///
 /// let base: Image<MonoF32> = Image::generate(64, 64, |x, y| {
@@ -590,12 +588,12 @@ where
 /// // Octave 1: pyr_down keeps even samples — distance 2, origin unshifted.
 /// let level = ScaledImage::new(
 ///     pyr_down(&base),
-///     PixelDistance::new(2.0),
+///     pixel_distance!(2.0),
 ///     CoordinateF64::new(0.0, 0.0),
-///     Sigma::new(1.0),
+///     sigma!(1.0),
 /// );
 ///
-/// let params = FastParams::new(SegmentTest::new(0.15, 9), 2);
+/// let params = FastParams::new(SegmentTest::new(0.15, 9).unwrap(), 2).unwrap();
 /// let corners = fast_in_level(&level, params, &Skip);
 ///
 /// // Found on a 32×32 level, reported in the 64×64 base frame.
@@ -691,8 +689,11 @@ where
 {
     let (w, h) = (image.width() as isize, image.height() as isize);
     let sample = |index: usize| {
-        let (dx, dy) = FAST_RING[index];
-        let (nx, ny) = (x as isize + dx, y as isize + dy);
+        let offset = FAST_RING[index];
+        let (nx, ny) = (
+            x as isize + offset.dx as isize,
+            y as isize + offset.dy as isize,
+        );
         // In bounds is a direct read; only genuinely outside positions reach
         // the policy — which matters because `Skip` *panics* rather than
         // inventing a sample, and must never be asked inside its own region.
@@ -726,11 +727,7 @@ where
         intensity::<P, Acc>(rows[row][x.wrapping_add_signed(dx)])
     };
 
-    score_ring(
-        intensity::<P, Acc>(rows[FAST_RING_RADIUS][x]),
-        test,
-        sample,
-    )
+    score_ring(intensity::<P, Acc>(rows[FAST_RING_RADIUS][x]), test, sample)
 }
 
 /// The centre-relative intensity of one pixel, in the accumulator's units.
@@ -771,7 +768,11 @@ fn score_ring(centre: f64, test: SegmentTest, sample: impl Fn(usize) -> f64) -> 
     }
 
     let score = segment_score(centre, &ring, test.arc_length());
-    if score >= threshold { score as f32 } else { 0.0 }
+    if score >= threshold {
+        score as f32
+    } else {
+        0.0
+    }
 }
 
 /// The four ring positions at the compass points: indices 0, 4, 8 and 12 of
@@ -886,12 +887,13 @@ fn segment_score(centre: f64, ring: &[f64; 16], arc_length: usize) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Coordinate;
     use crate::border::{Clamp, Constant, Mirror, Skip};
     use crate::features::{HasPosition, HasResponse, retain_top_n};
     use crate::image::{Pyramid, ScaledImage};
     use crate::pixel::{Mono8, Mono16, MonoF64};
     use crate::transform::{pyr_down, rotate_90};
-    use crate::{CoordinateF64, PixelDistance, Sigma};
+    use crate::{pixel_distance, sigma};
 
     // ── Fixtures ────────────────────────────────────────────────────────
 
@@ -936,7 +938,10 @@ mod tests {
                     ((p.x - tx).powi(2) + (p.y - ty).powi(2)).sqrt()
                 })
                 .fold(f64::INFINITY, f64::min);
-            assert!(nearest <= tolerance, "({tx}, {ty}) unmatched in {corners:?}");
+            assert!(
+                nearest <= tolerance,
+                "({tx}, {ty}) unmatched in {corners:?}"
+            );
         }
     }
 
@@ -965,17 +970,17 @@ mod tests {
         assert_eq!(FAST_RING.len(), 16);
         assert_eq!(FAST_RING_RADIUS, 3);
 
-        for (i, &(dx, dy)) in FAST_RING.iter().enumerate() {
+        for (i, &offset) in FAST_RING.iter().enumerate() {
             // On the circle: the Bresenham rasterisation of radius 3 puts
             // every offset at squared distance 8, 9 or 10 — the diagonals
             // (±2, ±2) sit at 2.83, not 3.
-            let squared = dx * dx + dy * dy;
+            let squared = offset.dx * offset.dx + offset.dy * offset.dy;
             assert!((8..=10).contains(&squared), "offset {i} is off the ring");
             // Consecutive offsets are 8-neighbours, so "contiguous" means
             // what the arc test assumes — including 15 → 0.
-            let (nx, ny) = FAST_RING[(i + 1) % 16];
+            let next = FAST_RING[(i + 1) % 16];
             assert!(
-                (nx - dx).abs() <= 1 && (ny - dy).abs() <= 1,
+                (next.dx - offset.dx).abs() <= 1 && (next.dy - offset.dy).abs() <= 1,
                 "offsets {i} and {} are not adjacent",
                 (i + 1) % 16
             );
@@ -985,8 +990,12 @@ mod tests {
     #[test]
     fn the_ring_is_symmetric_under_a_quarter_turn() {
         // Index i + 4 is index i rotated 90° clockwise: (x, y) ↦ (−y, x).
-        for (i, &(dx, dy)) in FAST_RING.iter().enumerate() {
-            assert_eq!(FAST_RING[(i + 4) % 16], (-dy, dx), "at index {i}");
+        for (i, &offset) in FAST_RING.iter().enumerate() {
+            assert_eq!(
+                FAST_RING[(i + 4) % 16],
+                Offset::new(-offset.dy, offset.dx),
+                "at index {i}"
+            );
         }
     }
 
@@ -997,7 +1006,7 @@ mod tests {
         for n in 9..=16 {
             assert_eq!(SegmentTest::try_new(0.1, n).unwrap().arc_length(), n);
         }
-        const FAST9: SegmentTest = SegmentTest::new(0.08, 9);
+        const FAST9: SegmentTest = SegmentTest::new(0.08, 9).unwrap();
         assert_eq!(FAST9.threshold(), 0.08);
         assert_eq!(FAST9.arc_length(), 9);
     }
@@ -1029,29 +1038,28 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "finite and strictly positive")]
-    fn segment_test_new_panics_on_a_zero_threshold_literal() {
-        let _ = SegmentTest::new(0.0, 9);
+    fn segment_test_new_rejects_a_zero_threshold() {
+        assert!(SegmentTest::new(0.0, 9).is_none());
     }
 
     #[test]
-    #[should_panic(expected = "9 <= n <= 16")]
-    fn segment_test_new_panics_on_an_edge_admitting_literal() {
-        let _ = SegmentTest::new(0.1, 8);
+    fn segment_test_new_rejects_an_edge_admitting_arc() {
+        assert!(SegmentTest::new(0.1, 8).is_none());
+        assert!(SegmentTest::new(0.1, 17).is_none());
     }
 
     #[test]
     fn fast_params_round_trip_and_reject_a_zero_radius() {
-        const PARAMS: FastParams = FastParams::new(SegmentTest::new(0.08, 12), 4);
+        const PARAMS: FastParams = FastParams::new(SegmentTest::new(0.08, 12).unwrap(), 4).unwrap();
         assert_eq!(PARAMS.nms_radius(), 4);
-        assert_eq!(PARAMS.test(), SegmentTest::new(0.08, 12));
+        assert_eq!(PARAMS.test(), SegmentTest::new(0.08, 12).unwrap());
 
-        match FastParams::try_new(SegmentTest::new(0.08, 9), 0).unwrap_err() {
+        match FastParams::try_new(SegmentTest::new(0.08, 9).unwrap(), 0).unwrap_err() {
             Error::InvalidParameter(reason) => assert!(reason.contains("nms_radius")),
             other => panic!("expected InvalidParameter, got {other:?}"),
         }
         assert_eq!(
-            FastParams::try_new(SegmentTest::new(0.08, 9), 2)
+            FastParams::try_new(SegmentTest::new(0.08, 9).unwrap(), 2)
                 .unwrap()
                 .nms_radius(),
             2
@@ -1059,9 +1067,8 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "nms_radius must be at least 1")]
-    fn fast_params_new_panics_on_a_zero_radius_literal() {
-        let _ = FastParams::new(SegmentTest::new(0.08, 9), 0);
+    fn fast_params_new_rejects_a_zero_radius() {
+        assert!(FastParams::new(SegmentTest::new(0.08, 9).unwrap(), 0).is_none());
     }
 
     // ── segment_score: the specification ────────────────────────────────
@@ -1134,10 +1141,7 @@ mod tests {
         // Monotone in n: FAST-12 is strictly more selective than FAST-9.
         let mut ring = arc_ring(12, 1.0);
         ring[10] = 0.3;
-        let (nine, twelve) = (
-            segment_score(0.0, &ring, 9),
-            segment_score(0.0, &ring, 12),
-        );
+        let (nine, twelve) = (segment_score(0.0, &ring, 9), segment_score(0.0, &ring, 12));
         assert!(nine >= twelve, "{nine} < {twelve}");
         assert!((nine - 1.0).abs() < 1e-12);
         assert!((twelve - 0.3).abs() < 1e-12);
@@ -1195,21 +1199,22 @@ mod tests {
 
         for arc_length in [9usize, 12, 16] {
             for &threshold in &[0.05f32, 0.2, 0.5] {
-                let test = SegmentTest::new(threshold, arc_length);
+                let test = SegmentTest::new(threshold, arc_length).unwrap();
                 let scores = fast_score_map(&image, test, &Skip);
 
                 for y in FAST_RING_RADIUS..64 - FAST_RING_RADIUS {
                     for x in FAST_RING_RADIUS..64 - FAST_RING_RADIUS {
                         let ring: [f64; 16] = core::array::from_fn(|i| {
-                            let (dx, dy) = FAST_RING[i];
-                            f64::from(
-                                image
-                                    .pixel_at((x as isize + dx) as usize, (y as isize + dy) as usize)
-                                    .value(),
-                            )
+                            let at = Coordinate::new(x, y)
+                                .checked_add(FAST_RING[i])
+                                .expect("the ring fits inside the scored margin");
+                            f64::from(image.pixel_at(at.x, at.y).value())
                         });
-                        let plain =
-                            segment_score(f64::from(image.pixel_at(x, y).value()), &ring, arc_length);
+                        let plain = segment_score(
+                            f64::from(image.pixel_at(x, y).value()),
+                            &ring,
+                            arc_length,
+                        );
                         let expected = if plain >= f64::from(threshold) {
                             plain as f32
                         } else {
@@ -1239,7 +1244,7 @@ mod tests {
         });
 
         for arc_length in [9usize, 12, 16] {
-            let test = SegmentTest::new(0.05, arc_length);
+            let test = SegmentTest::new(0.05, arc_length).unwrap();
             let clamped = fast_score_map(&image, test, &Clamp);
             let skipped = fast_score_map(&image, test, &Skip);
             for y in 0..image.height() {
@@ -1249,8 +1254,7 @@ mod tests {
                         fast_score_at(&image, x, y, test, &Clamp).unwrap(),
                         "clamp, n = {arc_length}, at ({x}, {y})"
                     );
-                    let expected =
-                        fast_score_at(&image, x, y, test, &Skip).unwrap_or(0.0);
+                    let expected = fast_score_at(&image, x, y, test, &Skip).unwrap_or(0.0);
                     assert_eq!(
                         skipped.pixel_at(x, y).value(),
                         expected,
@@ -1272,7 +1276,7 @@ mod tests {
             let image: Image<MonoF32> =
                 Image::generate(w, h, |x, y| MonoF32::new(((x * 3 + y) % 5) as f32 * 0.2));
             for arc_length in [9usize, 16] {
-                let test = SegmentTest::new(0.05, arc_length);
+                let test = SegmentTest::new(0.05, arc_length).unwrap();
                 for &clamped in &[true, false] {
                     let scores = if clamped {
                         fast_score_map(&image, test, &Clamp)
@@ -1307,10 +1311,10 @@ mod tests {
         let faint: Image<MonoF32> = Image::generate(32, 32, |x, y| {
             MonoF32::new(if x >= 16 && y >= 16 { 0.1 } else { 0.0 })
         });
-        let coarse = fast_score_map(&faint, SegmentTest::new(0.3, 9), &Skip);
+        let coarse = fast_score_map(&faint, SegmentTest::new(0.3, 9).unwrap(), &Skip);
         assert_eq!(coarse.pixel_at(16, 16).value(), 0.0);
 
-        let fine = fast_score_map(&faint, SegmentTest::new(0.05, 9), &Skip);
+        let fine = fast_score_map(&faint, SegmentTest::new(0.05, 9).unwrap(), &Skip);
         assert!((fine.pixel_at(16, 16).value() - 0.1).abs() < 1e-6);
     }
 
@@ -1319,11 +1323,12 @@ mod tests {
         // The half of the contract that survives the flooring: above the
         // test's own threshold, the map still answers every question exactly.
         let image = square(32, 10, 22);
-        let scores = fast_score_map(&image, SegmentTest::new(0.05, 9), &Skip);
+        let scores = fast_score_map(&image, SegmentTest::new(0.05, 9).unwrap(), &Skip);
         for step in 1..20 {
             let t = 0.05 * step as f32;
             let from_map = corner_peaks(&scores, t, 3);
-            let rebuilt = fast(&image, FastParams::new(SegmentTest::new(t, 9), 3), &Skip);
+            let params = FastParams::new(SegmentTest::new(t, 9).unwrap(), 3).unwrap();
+            let rebuilt = fast(&image, params, &Skip);
             assert_eq!(from_map, rebuilt, "at t = {t}");
         }
     }
@@ -1335,7 +1340,7 @@ mod tests {
         let image: Image<MonoF32> = Image::generate(24, 24, |x, y| {
             MonoF32::new(if x >= 8 && y >= 8 { 1.0 } else { 0.0 })
         });
-        let test = SegmentTest::new(0.1, 9);
+        let test = SegmentTest::new(0.1, 9).unwrap();
         let score = fast_score_at(&image, 8, 8, test, &Skip).unwrap();
         assert!((score - 1.0).abs() < 1e-6, "{score}");
     }
@@ -1345,7 +1350,7 @@ mod tests {
         // The deterministic negative case, and the reason arc_length >= 9.
         let image: Image<MonoF32> =
             Image::generate(24, 24, |x, _| MonoF32::new(if x < 12 { 0.0 } else { 1.0 }));
-        let scores = fast_score_map(&image, SegmentTest::new(0.05, 9), &Skip);
+        let scores = fast_score_map(&image, SegmentTest::new(0.05, 9).unwrap(), &Skip);
         for y in 0..24 {
             for x in 0..24 {
                 assert_eq!(scores.pixel_at(x, y).value(), 0.0, "at ({x}, {y})");
@@ -1357,7 +1362,7 @@ mod tests {
     fn a_diagonal_edge_scores_nothing_either() {
         let image: Image<MonoF32> =
             Image::generate(32, 32, |x, y| MonoF32::new(if x < y { 0.0 } else { 1.0 }));
-        let scores = fast_score_map(&image, SegmentTest::new(0.05, 9), &Skip);
+        let scores = fast_score_map(&image, SegmentTest::new(0.05, 9).unwrap(), &Skip);
         let peak = (3..29)
             .flat_map(|y| (3..29).map(move |x| (x, y)))
             .map(|(x, y)| scores.pixel_at(x, y).value())
@@ -1368,14 +1373,14 @@ mod tests {
     #[test]
     fn a_flat_field_scores_nothing() {
         let image = Image::fill(16, 16, MonoF32::new(0.5));
-        let scores = fast_score_map(&image, SegmentTest::new(0.01, 9), &Skip);
+        let scores = fast_score_map(&image, SegmentTest::new(0.01, 9).unwrap(), &Skip);
         assert_eq!(scores.pixel_at(8, 8).value(), 0.0);
     }
 
     #[test]
     fn the_score_map_keeps_the_input_size_under_every_policy() {
         let image = square(24, 8, 16);
-        let test = SegmentTest::new(0.1, 9);
+        let test = SegmentTest::new(0.1, 9).unwrap();
         for size in [
             fast_score_map(&image, test, &Skip).size(),
             fast_score_map(&image, test, &Clamp).size(),
@@ -1392,7 +1397,7 @@ mod tests {
         let image: Image<MonoF32> = Image::generate(24, 24, |x, y| {
             MonoF32::new(if x >= 2 && y >= 2 { 1.0 } else { 0.0 })
         });
-        let test = SegmentTest::new(0.1, 9);
+        let test = SegmentTest::new(0.1, 9).unwrap();
 
         for d in 0..FAST_RING_RADIUS {
             assert_eq!(fast_score_at(&image, d, d, test, &Skip), None, "at {d}");
@@ -1412,7 +1417,7 @@ mod tests {
     #[test]
     fn fast_score_at_declines_positions_outside_the_image() {
         let image = square(24, 8, 16);
-        let test = SegmentTest::new(0.1, 9);
+        let test = SegmentTest::new(0.1, 9).unwrap();
         assert_eq!(fast_score_at(&image, 24, 0, test, &Clamp), None);
         assert_eq!(fast_score_at(&image, 0, 24, test, &Clamp), None);
         assert_eq!(fast_score_at(&image, 999, 999, test, &Skip), None);
@@ -1423,7 +1428,7 @@ mod tests {
         // The footprint does not fit at all: Skip scores nothing, and the map
         // is still the input's size rather than a zero-sized surprise.
         let image = Image::fill(5, 5, MonoF32::new(0.5));
-        let test = SegmentTest::new(0.1, 9);
+        let test = SegmentTest::new(0.1, 9).unwrap();
         let scores = fast_score_map(&image, test, &Skip);
         assert_eq!(scores.size(), image.size());
         assert_eq!(fast_score_at(&image, 2, 2, test, &Skip), None);
@@ -1436,7 +1441,7 @@ mod tests {
         // The map must be exactly `fast_score_at` applied everywhere, with a
         // declined position written as zero.
         let image = square(24, 8, 16);
-        let test = SegmentTest::new(0.1, 9);
+        let test = SegmentTest::new(0.1, 9).unwrap();
         let scores = fast_score_map(&image, test, &Skip);
         for y in 0..24 {
             for x in 0..24 {
@@ -1451,7 +1456,7 @@ mod tests {
     #[test]
     fn a_square_has_four_corners() {
         let image = square(32, 10, 22);
-        let params = FastParams::new(SegmentTest::new(0.1, 9), 3);
+        let params = FastParams::new(SegmentTest::new(0.1, 9).unwrap(), 3).unwrap();
         let corners = fast(&image, params, &Skip);
 
         assert_one_per_corner(&corners, square_corner_pixels(10, 22), 2.0);
@@ -1470,7 +1475,7 @@ mod tests {
         // raster-first member, which is the geometric corner only where the
         // cluster opens down and to the right.
         let image = square(32, 10, 22);
-        let scores = fast_score_map(&image, SegmentTest::new(0.1, 9), &Skip);
+        let scores = fast_score_map(&image, SegmentTest::new(0.1, 9).unwrap(), &Skip);
 
         let cluster: Vec<(usize, usize)> = (9..14)
             .flat_map(|y| (9..14).map(move |x| (x, y)))
@@ -1488,7 +1493,8 @@ mod tests {
 
         // Top-left: the raster-first member *is* the corner. Top-right: it is
         // two pixels along the edge, and no threshold or radius moves it.
-        let corners = fast(&image, FastParams::new(SegmentTest::new(0.1, 9), 3), &Skip);
+        let params = FastParams::new(SegmentTest::new(0.1, 9).unwrap(), 3).unwrap();
+        let corners = fast(&image, params, &Skip);
         assert_eq!(
             positions(&corners),
             [(10.0, 10.0), (19.0, 10.0), (10.0, 19.0), (21.0, 19.0)]
@@ -1503,11 +1509,11 @@ mod tests {
         let image = square(32, 10, 22);
         let reference = positions(&fast(
             &image,
-            FastParams::new(SegmentTest::new(0.05, 9), 3),
+            FastParams::new(SegmentTest::new(0.05, 9).unwrap(), 3).unwrap(),
             &Skip,
         ));
         for threshold in [0.2f32, 0.5, 0.9, 1.0] {
-            let params = FastParams::new(SegmentTest::new(threshold, 9), 3);
+            let params = FastParams::new(SegmentTest::new(threshold, 9).unwrap(), 3).unwrap();
             assert_eq!(
                 positions(&fast(&image, params, &Skip)),
                 reference,
@@ -1523,7 +1529,7 @@ mod tests {
         // passes and exactly one pixel is reported — the dot itself.
         let image = dot(16, (8, 8));
         for n in 9..=16 {
-            let params = FastParams::new(SegmentTest::new(0.1, n), 3);
+            let params = FastParams::new(SegmentTest::new(0.1, n).unwrap(), 3).unwrap();
             let corners = fast(&image, params, &Skip);
             assert_eq!(positions(&corners), [(8.0, 8.0)], "n = {n}");
             assert_eq!(corners[0].response(), 1.0);
@@ -1538,11 +1544,11 @@ mod tests {
         // means, and why 12 is not simply a better 9.
         let image = square(32, 10, 22);
         for n in [9, 10, 11] {
-            let params = FastParams::new(SegmentTest::new(0.1, n), 3);
+            let params = FastParams::new(SegmentTest::new(0.1, n).unwrap(), 3).unwrap();
             assert_eq!(fast(&image, params, &Skip).len(), 4, "n = {n}");
         }
         for n in [12, 16] {
-            let params = FastParams::new(SegmentTest::new(0.1, n), 3);
+            let params = FastParams::new(SegmentTest::new(0.1, n).unwrap(), 3).unwrap();
             assert!(fast(&image, params, &Skip).is_empty(), "n = {n}");
         }
     }
@@ -1552,7 +1558,7 @@ mod tests {
         let image: Image<MonoF32> = Image::generate(24, 24, |x, y| {
             MonoF32::new(if x >= 12 && y >= 12 { 1.0 } else { 0.0 })
         });
-        let params = FastParams::new(SegmentTest::new(0.1, 9), 4);
+        let params = FastParams::new(SegmentTest::new(0.1, 9).unwrap(), 4).unwrap();
         assert_eq!(positions(&fast(&image, params, &Skip)), [(12.0, 12.0)]);
     }
 
@@ -1561,9 +1567,10 @@ mod tests {
         // The dark half of the test is not a second code path, and the
         // inverted image must give the identical answer.
         let bright = square(32, 10, 22);
-        let dark: Image<MonoF32> =
-            Image::generate(32, 32, |x, y| MonoF32::new(1.0 - bright.pixel_at(x, y).value()));
-        let params = FastParams::new(SegmentTest::new(0.1, 9), 3);
+        let dark: Image<MonoF32> = Image::generate(32, 32, |x, y| {
+            MonoF32::new(1.0 - bright.pixel_at(x, y).value())
+        });
+        let params = FastParams::new(SegmentTest::new(0.1, 9).unwrap(), 3).unwrap();
         assert_eq!(
             positions(&fast(&dark, params, &Skip)),
             positions(&fast(&bright, params, &Skip))
@@ -1572,7 +1579,7 @@ mod tests {
 
     #[test]
     fn a_flat_field_and_a_straight_edge_have_no_corners() {
-        let params = FastParams::new(SegmentTest::new(0.01, 9), 2);
+        let params = FastParams::new(SegmentTest::new(0.01, 9).unwrap(), 2).unwrap();
         assert!(fast(&Image::fill(16, 16, MonoF32::new(0.5)), params, &Skip).is_empty());
 
         let edge: Image<MonoF32> =
@@ -1598,7 +1605,10 @@ mod tests {
         // Each square is 8 px wide, so at radius 3 its four tied corner
         // clusters chain into one detection — one corner per square, which is
         // all this test needs.
-        let count = |t: f32| fast(&image, FastParams::new(SegmentTest::new(t, 9), 3), &Skip).len();
+        let count = |t: f32| {
+            let params = FastParams::new(SegmentTest::new(t, 9).unwrap(), 3).unwrap();
+            fast(&image, params, &Skip).len()
+        };
         assert_eq!(count(0.1), 3);
         assert_eq!(count(0.3), 2);
         assert_eq!(count(0.6), 1);
@@ -1611,7 +1621,7 @@ mod tests {
         // too — exactly, not approximately: no filtering is involved.
         let image = square(24, 7, 17);
         let rotated: Image<MonoF32> = rotate_90(&image);
-        let test = SegmentTest::new(0.1, 9);
+        let test = SegmentTest::new(0.1, 9).unwrap();
 
         let scores = fast_score_map(&image, test, &Skip);
         let rotated_scores = fast_score_map(&rotated, test, &Skip);
@@ -1634,13 +1644,16 @@ mod tests {
         // radius 2 keeps them separate. The radius is a minimum separation,
         // and here it is doing exactly that — visibly.
         let image = square(24, 8, 16);
-        let at = |r: usize| fast(&image, FastParams::new(SegmentTest::new(0.1, 9), r), &Skip);
+        let at = |r: usize| {
+            let params = FastParams::new(SegmentTest::new(0.1, 9).unwrap(), r).unwrap();
+            fast(&image, params, &Skip)
+        };
         assert_eq!(at(2).len(), 4);
         assert_eq!(positions(&at(3)), [(8.0, 8.0)]);
 
         // Widening the gap by widening the square separates them again.
         let wider = square(32, 10, 22);
-        let params = FastParams::new(SegmentTest::new(0.1, 9), 3);
+        let params = FastParams::new(SegmentTest::new(0.1, 9).unwrap(), 3).unwrap();
         assert_eq!(fast(&wider, params, &Skip).len(), 4);
     }
 
@@ -1649,7 +1662,7 @@ mod tests {
         // The orchestrator must be exactly score map + peaks at the test's own
         // threshold, so rebuilding it by hand is not a different detector.
         let image = square(24, 8, 16);
-        let params = FastParams::new(SegmentTest::new(0.1, 9), 3);
+        let params = FastParams::new(SegmentTest::new(0.1, 9).unwrap(), 3).unwrap();
 
         let staged = {
             let scores = fast_score_map(&image, params.test(), &Skip);
@@ -1664,10 +1677,11 @@ mod tests {
         // The invariant that makes one number serve both stages, checked
         // through the public API on a real image.
         let image = square(24, 8, 16);
-        let scores = fast_score_map(&image, SegmentTest::new(0.05, 9), &Skip);
+        let scores = fast_score_map(&image, SegmentTest::new(0.05, 9).unwrap(), &Skip);
         for step in 1..20 {
             let t = 0.05 * step as f32;
-            let detected = fast(&image, FastParams::new(SegmentTest::new(t, 9), 3), &Skip);
+            let params = FastParams::new(SegmentTest::new(t, 9).unwrap(), 3).unwrap();
+            let detected = fast(&image, params, &Skip);
             let above = (0..24)
                 .flat_map(|y| (0..24).map(move |x| (x, y)))
                 .filter(|&(x, y)| scores.pixel_at(x, y).value() >= t)
@@ -1689,7 +1703,8 @@ mod tests {
             let inside = (10..22).contains(&x) && (10..22).contains(&y);
             Mono8::new(if inside { 255 } else { 0 })
         });
-        let corners = fast(&image, FastParams::new(SegmentTest::new(20.0, 9), 3), &Skip);
+        let params = FastParams::new(SegmentTest::new(20.0, 9).unwrap(), 3).unwrap();
+        let corners = fast(&image, params, &Skip);
         assert_one_per_corner(&corners, square_corner_pixels(10, 22), 2.0);
         // `to_accumulator` widens without rescaling, so the score is in grey
         // levels too — 255, not 1.0.
@@ -1704,7 +1719,7 @@ mod tests {
         });
         let corners = fast(
             &image,
-            FastParams::new(SegmentTest::new(5000.0, 9), 3),
+            FastParams::new(SegmentTest::new(5000.0, 9).unwrap(), 3).unwrap(),
             &Skip,
         );
         assert_one_per_corner(&corners, square_corner_pixels(10, 22), 2.0);
@@ -1718,8 +1733,12 @@ mod tests {
             let inside = (10..22).contains(&x) && (10..22).contains(&y);
             MonoF64::new(if inside { 1.0 } else { 0.0 })
         });
-        let params = FastParams::new(SegmentTest::new(0.1, 9), 3);
-        assert_one_per_corner(&fast(&image, params, &Skip), square_corner_pixels(10, 22), 2.0);
+        let params = FastParams::new(SegmentTest::new(0.1, 9).unwrap(), 3).unwrap();
+        assert_one_per_corner(
+            &fast(&image, params, &Skip),
+            square_corner_pixels(10, 22),
+            2.0,
+        );
     }
 
     #[test]
@@ -1730,8 +1749,8 @@ mod tests {
         let lifted: Image<MonoF32> = Image::generate(32, 32, |x, y| {
             MonoF32::new(base.pixel_at(x, y).value() * 0.5 + 0.25)
         });
-        let test = SegmentTest::new(0.1, 9);
-        let params = FastParams::new(test, 3);
+        let test = SegmentTest::new(0.1, 9).unwrap();
+        let params = FastParams::new(test, 3).unwrap();
         assert_eq!(
             positions(&fast(&base, params, &Skip)),
             positions(&fast(&lifted, params, &Skip))
@@ -1749,11 +1768,11 @@ mod tests {
         let image = square(24, 8, 16);
         let level = ScaledImage::new(
             image.clone(),
-            PixelDistance::new(1.0),
+            pixel_distance!(1.0),
             CoordinateF64::new(0.0, 0.0),
-            Sigma::new(0.5),
+            sigma!(0.5),
         );
-        let params = FastParams::new(SegmentTest::new(0.1, 9), 3);
+        let params = FastParams::new(SegmentTest::new(0.1, 9).unwrap(), 3).unwrap();
         assert_eq!(
             fast_in_level(&level, params, &Skip),
             fast(&image, params, &Skip)
@@ -1765,11 +1784,11 @@ mod tests {
         let base = square(48, 16, 32);
         let level = ScaledImage::new(
             pyr_down(&base),
-            PixelDistance::new(2.0),
+            pixel_distance!(2.0),
             CoordinateF64::new(0.0, 0.0),
-            Sigma::new(1.0),
+            sigma!(1.0),
         );
-        let params = FastParams::new(SegmentTest::new(0.1, 9), 2);
+        let params = FastParams::new(SegmentTest::new(0.1, 9).unwrap(), 2).unwrap();
         let corners = fast_in_level(&level, params, &Skip);
         assert_eq!(corners.len(), 4, "{corners:?}");
 
@@ -1786,19 +1805,19 @@ mod tests {
     fn a_level_with_an_origin_offset_lifts_through_it() {
         let base = square(48, 16, 32);
         let coarse = pyr_down(&base);
-        let params = FastParams::new(SegmentTest::new(0.1, 9), 2);
+        let params = FastParams::new(SegmentTest::new(0.1, 9).unwrap(), 2).unwrap();
 
         let unshifted = ScaledImage::new(
             coarse.clone(),
-            PixelDistance::new(2.0),
+            pixel_distance!(2.0),
             CoordinateF64::new(0.0, 0.0),
-            Sigma::new(1.0),
+            sigma!(1.0),
         );
         let shifted = ScaledImage::new(
             coarse,
-            PixelDistance::new(2.0),
+            pixel_distance!(2.0),
             CoordinateF64::new(0.5, 0.5),
-            Sigma::new(1.0),
+            sigma!(1.0),
         );
 
         let a = fast_in_level(&unshifted, params, &Skip);
@@ -1817,19 +1836,19 @@ mod tests {
         let levels = vec![
             ScaledImage::new(
                 base.clone(),
-                PixelDistance::new(1.0),
+                pixel_distance!(1.0),
                 CoordinateF64::new(0.0, 0.0),
-                Sigma::new(0.5),
+                sigma!(0.5),
             ),
             ScaledImage::new(
                 pyr_down(&base),
-                PixelDistance::new(2.0),
+                pixel_distance!(2.0),
                 CoordinateF64::new(0.0, 0.0),
-                Sigma::new(1.0),
+                sigma!(1.0),
             ),
         ];
         let pyramid = Pyramid::try_from_levels(levels).unwrap();
-        let params = FastParams::new(SegmentTest::new(0.1, 9), 2);
+        let params = FastParams::new(SegmentTest::new(0.1, 9).unwrap(), 2).unwrap();
 
         let mut corners: Vec<Corner> = pyramid
             .iter()
@@ -1855,9 +1874,10 @@ mod tests {
         let tensor = detect_corners(
             &image,
             &ShiTomasi,
-            CornerParams::new(Sigma::new(1.0), 0.5, 3),
+            CornerParams::new(sigma!(1.0), 0.5, 3).unwrap(),
         );
-        let segment = fast(&image, FastParams::new(SegmentTest::new(0.1, 9), 3), &Skip);
+        let params = FastParams::new(SegmentTest::new(0.1, 9).unwrap(), 3).unwrap();
+        let segment = fast(&image, params, &Skip);
 
         assert_one_per_corner(&tensor, truth, 2.0);
         assert_one_per_corner(&segment, truth, 2.0);

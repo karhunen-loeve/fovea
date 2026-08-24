@@ -152,12 +152,12 @@ const RANK_EPSILON: f64 = 1e-12;
 /// # Example
 ///
 /// ```
-/// use fovea::Sigma;
 /// use fovea::border::Clamp;
 /// use fovea::features::HasPosition;
 /// use fovea::features::detect::{detect_corners, refine_corners, CornerParams, ShiTomasi};
 /// use fovea::image::Image;
 /// use fovea::pixel::MonoF32;
+/// use fovea::sigma;
 /// use fovea::transform::{sobel_x, sobel_y};
 ///
 /// // A white square whose top-left geometric corner is at (7.5, 7.5).
@@ -167,8 +167,8 @@ const RANK_EPSILON: f64 = 1e-12;
 ///
 /// // At this window σ the detected peak has drifted inward, to (9, 9), and
 /// // no amount of response-map interpolation can bring it back.
-/// let sigma = Sigma::new(1.6);
-/// let mut corners = detect_corners(&image, &ShiTomasi, CornerParams::new(sigma, 0.05, 3));
+/// let sigma = sigma!(1.6);
+/// let mut corners = detect_corners(&image, &ShiTomasi, CornerParams::new(sigma, 0.05, 3).unwrap());
 /// assert_eq!(corners[0].position().x, 9.0);
 ///
 /// // Refinement reads the gradient field instead and recovers the corner.
@@ -318,6 +318,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sigma;
     use crate::Sigma;
     use crate::border::{Clamp, Skip};
     use crate::features::detect::{
@@ -400,7 +401,7 @@ mod tests {
         let truth = square_corners(8, 16);
 
         for sigma in [0.8f32, 1.0, 1.2, 1.6, 2.0] {
-            let window = Sigma::new(sigma);
+            let window = Sigma::new(sigma).unwrap();
             let map: Image<MonoF32> = corner_response_map(&image, &ShiTomasi, window);
             let params =
                 CornerParams::try_new(window, 0.3 * max_response(&map), 3).unwrap();
@@ -433,7 +434,7 @@ mod tests {
         // map, still more than a pixel from the corner; refinement reads
         // the gradients instead and lands on it.
         let image = square(24, 8, 16);
-        let window = Sigma::new(1.6);
+        let window = sigma!(1.6);
         let map: Image<MonoF32> = corner_response_map(&image, &ShiTomasi, window);
         let params = CornerParams::try_new(window, 0.3 * max_response(&map), 3).unwrap();
         let corners = detect_corners(&image, &ShiTomasi, params);
@@ -470,7 +471,8 @@ mod tests {
         // (15.5, 7.5). The segment test never computes a gradient, so the
         // caller takes the same Sobel pair from the image.
         let image = square(24, 8, 16);
-        let mut corners = fast(&image, FastParams::new(SegmentTest::new(0.5, 9), 2), &Skip);
+        let params = FastParams::new(SegmentTest::new(0.5, 9).unwrap(), 2).unwrap();
+        let mut corners = fast(&image, params, &Skip);
         assert_eq!(corners.len(), 4, "{corners:?}");
         let truth = square_corners(8, 16);
         let bias = corners

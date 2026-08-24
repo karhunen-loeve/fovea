@@ -86,10 +86,11 @@
 //! strongest:
 //!
 //! ```
-//! use fovea::{CoordinateF64, PixelDistance, Sigma};
+//! use fovea::CoordinateF64;
 //! use fovea::features::{retain_top_n, Corner, HasPosition};
 //! use fovea::image::{Image, ImageView, ScaledImage};
 //! use fovea::pixel::MonoF32;
+//! use fovea::{pixel_distance, sigma};
 //! use fovea::transform::pyr_down;
 //!
 //! let base: Image<MonoF32> = Image::fill(16, 16, MonoF32::new(0.5));
@@ -98,9 +99,9 @@
 //! // pyr_down keeps even samples: distance 2, origin unshifted, σ = 1.
 //! let level = ScaledImage::new(
 //!     coarse,
-//!     PixelDistance::new(2.0),
+//!     pixel_distance!(2.0),
 //!     CoordinateF64::new(0.0, 0.0),
-//!     Sigma::new(1.0),
+//!     sigma!(1.0),
 //! );
 //! assert_eq!(level.size().width, 8);
 //!

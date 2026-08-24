@@ -76,10 +76,11 @@ pub trait HasResponse {
 /// # Example
 ///
 /// ```
-/// use fovea::{CoordinateF64, Sigma};
+/// use fovea::CoordinateF64;
 /// use fovea::features::{HasScale, ScaleKeypoint};
+/// use fovea::sigma;
 ///
-/// let kp = ScaleKeypoint::new(CoordinateF64::new(8.0, 2.5), 0.4, Sigma::new(1.6));
+/// let kp = ScaleKeypoint::new(CoordinateF64::new(8.0, 2.5), 0.4, sigma!(1.6));
 /// assert_eq!(kp.scale().get(), 1.6);
 /// ```
 pub trait HasScale {
@@ -215,17 +216,18 @@ impl Corner {
     /// # Example
     ///
     /// ```
-    /// use fovea::{CoordinateF64, PixelDistance, Sigma};
+    /// use fovea::CoordinateF64;
     /// use fovea::features::{Corner, HasPosition};
     /// use fovea::image::{Image, ScaledImage};
     /// use fovea::pixel::MonoF32;
+    /// use fovea::{pixel_distance, sigma};
     ///
     /// // Level 1 of a 2× pyramid built by even-sample decimation.
     /// let level = ScaledImage::new(
     ///     Image::<MonoF32>::zero(8, 8),
-    ///     PixelDistance::new(2.0),
+    ///     pixel_distance!(2.0),
     ///     CoordinateF64::new(0.0, 0.0),
-    ///     Sigma::new(1.0),
+    ///     sigma!(1.0),
     /// );
     ///
     /// // Detected at (3.5, 2.0) on the level → (7.0, 4.0) in the base image.
@@ -267,11 +269,12 @@ impl HasResponse for Corner {
 /// # Example
 ///
 /// ```
-/// use fovea::{CoordinateF64, Sigma};
+/// use fovea::CoordinateF64;
 /// use fovea::features::{HasScale, ScaleKeypoint};
+/// use fovea::sigma;
 ///
-/// let kp = ScaleKeypoint::new(CoordinateF64::new(4.0, 9.5), 0.2, Sigma::new(2.4));
-/// assert_eq!(kp.scale(), Sigma::new(2.4));
+/// let kp = ScaleKeypoint::new(CoordinateF64::new(4.0, 9.5), 0.2, sigma!(2.4));
+/// assert_eq!(kp.scale(), sigma!(2.4));
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ScaleKeypoint {
@@ -316,21 +319,22 @@ impl ScaleKeypoint {
     /// # Example
     ///
     /// ```
-    /// use fovea::{CoordinateF64, PixelDistance, Sigma};
+    /// use fovea::CoordinateF64;
     /// use fovea::features::{HasPosition, HasScale, ScaleKeypoint};
     /// use fovea::image::{Image, ScaledImage};
     /// use fovea::pixel::MonoF32;
+    /// use fovea::{pixel_distance, sigma};
     ///
     /// let level = ScaledImage::new(
     ///     Image::<MonoF32>::zero(8, 8),
-    ///     PixelDistance::new(2.0),
+    ///     pixel_distance!(2.0),
     ///     CoordinateF64::new(0.0, 0.0),
-    ///     Sigma::new(1.6),
+    ///     sigma!(1.6),
     /// );
     ///
     /// let kp = ScaleKeypoint::from_level(&level, CoordinateF64::new(1.0, 2.5), 0.5);
     /// assert_eq!(kp.position(), CoordinateF64::new(2.0, 5.0));
-    /// assert_eq!(kp.scale(), Sigma::new(1.6));
+    /// assert_eq!(kp.scale(), sigma!(1.6));
     /// ```
     pub fn from_level<L>(level: &L, local: CoordinateF64, response: f32) -> Self
     where
@@ -479,6 +483,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sigma;
     use crate::PixelDistance;
     use crate::image::{Image, ScaledImage};
     use crate::pixel::MonoF32;
@@ -486,9 +491,9 @@ mod tests {
     fn level(distance: f64, offset: (f64, f64), sigma: f32) -> ScaledImage<MonoF32> {
         ScaledImage::new(
             Image::<MonoF32>::zero(4, 4),
-            PixelDistance::new(distance),
+            PixelDistance::new(distance).unwrap(),
             CoordinateF64::new(offset.0, offset.1),
-            Sigma::new(sigma),
+            Sigma::new(sigma).unwrap(),
         )
     }
 
@@ -561,10 +566,10 @@ mod tests {
 
     #[test]
     fn scale_keypoint_new_reports_its_fields() {
-        let kp = ScaleKeypoint::new(CoordinateF64::new(2.0, 3.0), 0.4, Sigma::new(1.6));
+        let kp = ScaleKeypoint::new(CoordinateF64::new(2.0, 3.0), 0.4, sigma!(1.6));
         assert_eq!(kp.position(), CoordinateF64::new(2.0, 3.0));
         assert_eq!(kp.response(), 0.4);
-        assert_eq!(kp.scale(), Sigma::new(1.6));
+        assert_eq!(kp.scale(), sigma!(1.6));
     }
 
     #[test]
@@ -575,7 +580,7 @@ mod tests {
             0.5,
         );
         assert_eq!(kp.position(), CoordinateF64::new(2.0, 5.0));
-        assert_eq!(kp.scale(), Sigma::new(1.6));
+        assert_eq!(kp.scale(), sigma!(1.6));
         assert_eq!(kp.response(), 0.5);
     }
 
@@ -588,17 +593,17 @@ mod tests {
             CoordinateF64::new(0.0, 0.0),
             1.0,
         );
-        assert_eq!(coarse.scale(), Sigma::new(3.2));
+        assert_eq!(coarse.scale(), sigma!(3.2));
     }
 
     #[test]
     fn scale_keypoint_is_copy_and_comparable() {
-        let a = ScaleKeypoint::new(CoordinateF64::new(1.0, 1.0), 0.5, Sigma::new(1.0));
+        let a = ScaleKeypoint::new(CoordinateF64::new(1.0, 1.0), 0.5, sigma!(1.0));
         let b = a;
         assert_eq!(a, b);
         assert_ne!(
             a,
-            ScaleKeypoint::new(CoordinateF64::new(1.0, 1.0), 0.5, Sigma::new(2.0))
+            ScaleKeypoint::new(CoordinateF64::new(1.0, 1.0), 0.5, sigma!(2.0))
         );
     }
 
@@ -698,19 +703,19 @@ mod tests {
     fn sort_works_for_scale_keypoints_too() {
         // The ordering binds on the capabilities, not on a concrete type.
         let mut kps = vec![
-            ScaleKeypoint::new(CoordinateF64::new(0.0, 0.0), 0.1, Sigma::new(1.0)),
-            ScaleKeypoint::new(CoordinateF64::new(0.0, 0.0), 0.8, Sigma::new(2.0)),
+            ScaleKeypoint::new(CoordinateF64::new(0.0, 0.0), 0.1, sigma!(1.0)),
+            ScaleKeypoint::new(CoordinateF64::new(0.0, 0.0), 0.8, sigma!(2.0)),
         ];
         sort_by_response(&mut kps);
-        assert_eq!(kps[0].scale(), Sigma::new(2.0));
+        assert_eq!(kps[0].scale(), sigma!(2.0));
     }
 
     #[test]
     fn sort_is_stable_for_fully_tied_keypoints() {
         // Same response and same position, different scale: the detector's
         // order is preserved rather than being arbitrary.
-        let coarse = ScaleKeypoint::new(CoordinateF64::new(1.0, 1.0), 0.5, Sigma::new(3.2));
-        let fine = ScaleKeypoint::new(CoordinateF64::new(1.0, 1.0), 0.5, Sigma::new(1.6));
+        let coarse = ScaleKeypoint::new(CoordinateF64::new(1.0, 1.0), 0.5, sigma!(3.2));
+        let fine = ScaleKeypoint::new(CoordinateF64::new(1.0, 1.0), 0.5, sigma!(1.6));
         let mut kps = vec![coarse, fine];
         sort_by_response(&mut kps);
         assert_eq!(kps, vec![coarse, fine]);
@@ -782,7 +787,7 @@ mod tests {
         }
 
         let corner = Corner::new(CoordinateF64::new(2.0, 4.0), 0.5);
-        let kp = ScaleKeypoint::new(CoordinateF64::new(2.0, 4.0), 0.5, Sigma::new(2.0));
+        let kp = ScaleKeypoint::new(CoordinateF64::new(2.0, 4.0), 0.5, sigma!(2.0));
         assert_eq!(patch_center(&corner), (2.0, 4.0));
         assert_eq!(patch_center(&kp), (2.0, 4.0));
         assert_eq!(patch_radius(&kp), 6.0);

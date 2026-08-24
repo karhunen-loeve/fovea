@@ -12,14 +12,14 @@
 use std::hint::black_box;
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use fovea::Sigma;
 use fovea::border::Skip;
 use fovea::features::detect::{
-    CornerParams, FastParams, Harris, SegmentTest, ShiTomasi, corner_response_map, detect_corners,
-    fast, fast_score_map,
+    CornerParams, FastParams, SegmentTest, ShiTomasi, corner_response_map, detect_corners, fast,
+    fast_score_map,
 };
 use fovea::image::Image;
 use fovea::pixel::{Mono8, MonoF32};
+use fovea::{harris, sigma};
 
 /// A deterministic pseudo-texture: enough structure that the detectors have
 /// real work to do, and no dependence on a random-number generator.
@@ -41,7 +41,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     // arithmetic: 9..=11 need two of the four cardinal samples, 12..=15 need
     // three, 16 needs all four.
     for n in [9usize, 12, 16] {
-        let test = SegmentTest::new(20.0, n);
+        let test = SegmentTest::new(20.0, n).unwrap();
         group.bench_function(format!("fast-{n} score map 512x512 Mono8"), |b| {
             b.iter(|| fast_score_map(black_box(&image), test, &Skip))
         });
@@ -54,8 +54,8 @@ fn criterion_benchmark(c: &mut Criterion) {
         b.iter(|| {
             corner_response_map::<_, _, _, MonoF32>(
                 black_box(&image),
-                &Harris::new(0.04),
-                Sigma::new(1.4),
+                &harris!(0.04),
+                sigma!(1.4),
             )
         })
     });
@@ -64,20 +64,20 @@ fn criterion_benchmark(c: &mut Criterion) {
             corner_response_map::<_, _, _, MonoF32>(
                 black_box(&image),
                 &ShiTomasi,
-                Sigma::new(1.4),
+                sigma!(1.4),
             )
         })
     });
 
     // The whole detector, so the peak stage is included in the comparison.
-    let fast_params = FastParams::new(SegmentTest::new(20.0, 9), 3);
+    let fast_params = FastParams::new(SegmentTest::new(20.0, 9).unwrap(), 3).unwrap();
     group.bench_function("fast-9 detect 512x512 Mono8", |b| {
         b.iter(|| fast(black_box(&image), fast_params, &Skip))
     });
 
-    let corner_params = CornerParams::new(Sigma::new(1.4), 1e7, 3);
+    let corner_params = CornerParams::new(sigma!(1.4), 1e7, 3).unwrap();
     group.bench_function("harris detect 512x512 Mono8", |b| {
-        b.iter(|| detect_corners(black_box(&image), &Harris::new(0.04), corner_params))
+        b.iter(|| detect_corners(black_box(&image), &harris!(0.04), corner_params))
     });
     group.bench_function("shi-tomasi detect 512x512 Mono8", |b| {
         b.iter(|| detect_corners(black_box(&image), &ShiTomasi, corner_params))

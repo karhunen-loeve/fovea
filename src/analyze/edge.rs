@@ -12,11 +12,11 @@
 //! the angle map so you can look at it.
 //!
 //! ```
-//! use fovea::Sigma;
 //! use fovea::analyze::threshold::{HysteresisThresholds, hysteresis_threshold};
 //! use fovea::border::Clamp;
 //! use fovea::image::{BinaryImage, Image};
 //! use fovea::pixel::MonoF32;
+//! use fovea::sigma;
 //! use fovea::transform::{
 //!     gaussian_blur, gradient_direction, gradient_magnitude, non_maximum_suppression,
 //!     scharr_x, scharr_y,
@@ -24,8 +24,8 @@
 //!
 //! // A hand-built Canny, equivalent to `canny(&image, thresholds, sigma)`.
 //! let image = Image::fill(16, 16, MonoF32::new(0.5));
-//! let thresholds = HysteresisThresholds::new(0.05_f32, 0.15);
-//! let sigma = Sigma::new(1.4);
+//! let thresholds = HysteresisThresholds::try_new(0.05_f32, 0.15).unwrap();
+//! let sigma = sigma!(1.4);
 //!
 //! let blurred: Image<MonoF32> = gaussian_blur(&image, sigma, &Clamp);
 //! let gx = scharr_x(&blurred, &Clamp);
@@ -90,10 +90,10 @@ use crate::analyze::threshold::{HysteresisThresholds, hysteresis_threshold};
 /// or to inspect an intermediate — compose the public stage functions
 /// directly; see the [module documentation](self).
 ///
-/// Both parameters are invariant-carrying types: literals use `Sigma::new`
-/// and [`HysteresisThresholds::new`], values computed from data the
-/// matching `try_new`, so an invalid σ or a misordered threshold pair is
-/// caught where it is produced, not here.
+/// Both parameters are invariant-carrying types: a σ literal uses
+/// [`sigma!`](crate::sigma), which checks it at compile time, and every
+/// other value uses the matching `try_new`, so an invalid σ or a misordered
+/// threshold pair is caught where it is produced, not here.
 ///
 /// # Panics
 ///
@@ -105,19 +105,19 @@ use crate::analyze::threshold::{HysteresisThresholds, hysteresis_threshold};
 /// # Example
 ///
 /// ```
-/// use fovea::Sigma;
 /// use fovea::analyze::edge::canny;
 /// use fovea::analyze::threshold::HysteresisThresholds;
 /// use fovea::image::{Image, ImageView};
 /// use fovea::pixel::MonoF32;
+/// use fovea::sigma;
 ///
 /// // A vertical black/white step edge in a 6×4 image.
 /// let image = Image::generate(6, 4, |x, _| {
 ///     MonoF32::new(if x < 3 { 0.0 } else { 1.0 })
 /// });
 ///
-/// let thresholds = HysteresisThresholds::new(0.10_f32, 0.30);
-/// let edges = canny(&image, thresholds, Sigma::new(1.0));
+/// let thresholds = HysteresisThresholds::try_new(0.10_f32, 0.30).unwrap();
+/// let edges = canny(&image, thresholds, sigma!(1.0));
 ///
 /// // The response is a thin edge at the boundary (the step sits between
 /// // columns 2 and 3, so the kept ridge is one or two columns wide there).
@@ -210,12 +210,12 @@ where
 /// # Example
 ///
 /// ```
-/// use fovea::Sigma;
 /// use fovea::analyze::edge::{canny, interpolate_edge_points};
 /// use fovea::analyze::threshold::HysteresisThresholds;
 /// use fovea::border::Clamp;
 /// use fovea::image::Image;
 /// use fovea::pixel::MonoF32;
+/// use fovea::sigma;
 /// use fovea::transform::{gaussian_blur, gradient_magnitude, scharr_x, scharr_y};
 ///
 /// // A step from black to white between columns 5 and 6, so the edge is
@@ -223,8 +223,8 @@ where
 /// let image: Image<MonoF32> =
 ///     Image::generate(12, 6, |x, _| MonoF32::new(if x < 6 { 0.0 } else { 1.0 }));
 ///
-/// let sigma = Sigma::new(1.0);
-/// let thresholds = HysteresisThresholds::new(0.10_f32, 0.30);
+/// let sigma = sigma!(1.0);
+/// let thresholds = HysteresisThresholds::try_new(0.10_f32, 0.30).unwrap();
 /// let mask = canny(&image, thresholds, sigma);
 ///
 /// // The same gradient stages `canny` runs internally.
@@ -277,14 +277,14 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::sigma;
     use super::{HysteresisThresholds, canny, interpolate_edge_points};
-    use crate::Sigma;
     use crate::image::{Image, ImageView, RasterImage};
     use crate::pixel::{Mono8, MonoF32, MonoF64};
 
     /// The `(low, high)` pair as one argument, so the call sites stay short.
     fn t(low: f32, high: f32) -> HysteresisThresholds<f32> {
-        HysteresisThresholds::new(low, high)
+        HysteresisThresholds::try_new(low, high).unwrap()
     }
 
     /// Number of `true` pixels in a binary mask.
@@ -320,14 +320,14 @@ mod tests {
         // A vertical step between x = 3 and x = 4 in an 8×6 image ⇒ a thin
         // edge confined to that boundary.
         let image = Image::generate(8, 6, |x, _| MonoF32::new(if x < 4 { 0.0 } else { 1.0 }));
-        let edges = canny(&image, t(0.10, 0.30), Sigma::new(1.0));
+        let edges = canny(&image, t(0.10, 0.30), sigma!(1.0));
         assert_thin_edge(&edges, &[3, 4]);
     }
 
     #[test]
     fn uniform_image_no_edges() {
         let image = Image::fill(12, 12, MonoF32::new(0.5));
-        let edges = canny(&image, t(0.05, 0.15), Sigma::new(1.2));
+        let edges = canny(&image, t(0.05, 0.15), sigma!(1.2));
         assert_eq!(count_true(&edges), 0);
     }
 
@@ -337,7 +337,7 @@ mod tests {
         let image = Image::generate(16, 16, |x, y| {
             MonoF32::new(if (x + y) % 2 == 0 { 0.50 } else { 0.502 })
         });
-        let edges = canny(&image, t(0.10, 0.30), Sigma::new(1.0));
+        let edges = canny(&image, t(0.10, 0.30), sigma!(1.0));
         assert_eq!(count_true(&edges), 0);
     }
 
@@ -354,7 +354,7 @@ mod tests {
         });
         // Thresholds chosen so the weak step alone is below `high` but above
         // `low`, and the strong step is above `high`.
-        let edges = canny(&image, t(0.02, 0.20), Sigma::new(1.0));
+        let edges = canny(&image, t(0.02, 0.20), sigma!(1.0));
         let cols = edge_columns(&edges);
         assert!(cols.contains(&5), "edge column present: {cols:?}");
         // The weak rows (lower half) are linked through the boundary column.
@@ -366,7 +366,7 @@ mod tests {
     fn accepts_integer_input() {
         // `Mono8` accumulates in `MonoF32`; canny accepts it directly.
         let image = Image::generate(8, 6, |x, _| Mono8::new(if x < 4 { 0 } else { 255 }));
-        let edges = canny(&image, t(8.0, 30.0), Sigma::new(1.0));
+        let edges = canny(&image, t(8.0, 30.0), sigma!(1.0));
         assert_thin_edge(&edges, &[3, 4]);
     }
 
@@ -374,7 +374,7 @@ mod tests {
     fn generic_over_mono_f64() {
         // The pipeline runs end to end on a 64-bit float accumulator.
         let image = Image::generate(8, 6, |x, _| MonoF64::new(if x < 4 { 0.0 } else { 1.0 }));
-        let edges = canny(&image, t(0.10, 0.30), Sigma::new(1.0));
+        let edges = canny(&image, t(0.10, 0.30), sigma!(1.0));
         assert_thin_edge(&edges, &[3, 4]);
     }
 
@@ -406,7 +406,7 @@ mod tests {
             MonoF32::new(v)
         });
         let thresholds = t(0.02, 0.08);
-        let sigma = Sigma::new(1.2);
+        let sigma = sigma!(1.2);
 
         let fused = canny(&image, thresholds, sigma);
 
@@ -453,7 +453,7 @@ mod tests {
         Image<MonoF32>,
         Image<MonoF32>,
     ) {
-        let sigma = Sigma::new(1.0);
+        let sigma = sigma!(1.0);
         let image: Image<MonoF32> =
             Image::generate(w, h, |x, _| MonoF32::new(if x < edge_x { 0.0 } else { 1.0 }));
         let mask = canny(&image, t(0.10, 0.30), sigma);
@@ -483,7 +483,7 @@ mod tests {
         // ridge is then symmetric about column 6, so the fit reports the
         // pixel centre it started from: interpolation is not a
         // perturbation, and an edge that really is on a pixel stays there.
-        let sigma = Sigma::new(1.0);
+        let sigma = sigma!(1.0);
         let image: Image<MonoF32> = Image::generate(13, 5, |x, _| {
             MonoF32::new(match x.cmp(&6) {
                 core::cmp::Ordering::Less => 0.0,
@@ -529,7 +529,7 @@ mod tests {
         // records it.
         use crate::transform::non_maximum_suppression;
 
-        let sigma = Sigma::new(1.0);
+        let sigma = sigma!(1.0);
         let image: Image<MonoF32> =
             Image::generate(12, 6, |x, _| MonoF32::new(if x < 6 { 0.0 } else { 1.0 }));
         let mask = canny(&image, t(0.10, 0.30), sigma);

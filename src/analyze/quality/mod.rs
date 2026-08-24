@@ -30,7 +30,7 @@
 //! the type, and reads `1023`, not `65535`, for `Mono<10>`. Float pixels have
 //! no intrinsic full scale in this crate, so they do not implement
 //! [`WhiteChannel`] and cannot use that
-//! constructor; a float caller names the peak with [`PeakValue::new`] and owns
+//! constructor; a float caller names the peak with [`peak!`](crate::peak) and owns
 //! the assumption.
 //!
 //! # Example
@@ -96,10 +96,12 @@ use crate::pixel::WhiteChannel;
 /// - [`of_pixel`](Self::of_pixel) reads the pixel type's own saturated value.
 ///   Correct by construction, and correct for reduced-range pixels: `Mono<10>`
 ///   reports `1023`.
-/// - [`new`](Self::new) takes a literal, checked at compile time in a `const`
-///   context.
+/// - [`peak!`](crate::peak) takes a literal and checks it at compile time.
 /// - [`try_new`](Self::try_new) takes a computed value and reports
 ///   [`Error::InvalidParameter`].
+///
+/// [`new`](Self::new) is the checked `const fn` under the macro; it returns
+/// [`Option`], so reaching for it by name cannot abort.
 ///
 /// # This is a range, not a maximum sample
 ///
@@ -123,7 +125,8 @@ use crate::pixel::WhiteChannel;
 /// assert_eq!(PeakValue::of_pixel::<Mono<10>>().get(), 1023.0);
 ///
 /// // Float pixels have no intrinsic full scale, so the caller names it.
-/// const UNIT: PeakValue = PeakValue::new(1.0);
+/// use fovea::peak;
+/// const UNIT: PeakValue = peak!(1.0);
 /// assert_eq!(UNIT.get(), 1.0);
 /// ```
 ///
@@ -140,20 +143,19 @@ use crate::pixel::WhiteChannel;
 pub struct PeakValue(f64);
 
 impl PeakValue {
-    /// Creates a `PeakValue` from a literal or otherwise proven-valid value.
+    /// Creates a `PeakValue`, returning `None` if the value is not finite
+    /// and strictly positive.
     ///
-    /// # Panics
-    ///
-    /// Panics if `value` is not finite and strictly positive. As a `const fn`,
-    /// this is a **compile error** when evaluated in a `const` context. For
-    /// values computed from data, use [`Self::try_new`].
+    /// This is the `const fn` the [`peak!`](crate::peak) macro wraps. Prefer
+    /// the macro for literals and [`Self::try_new`] for values computed from
+    /// data.
     #[must_use]
-    pub const fn new(value: f64) -> Self {
-        assert!(
-            value.is_finite() && value > 0.0,
-            "PeakValue::new: peak value must be finite and positive"
-        );
-        Self(value)
+    pub const fn new(value: f64) -> Option<Self> {
+        if value.is_finite() && value > 0.0 {
+            Some(Self(value))
+        } else {
+            None
+        }
     }
 
     /// Creates a `PeakValue` from a computed value, validating it.
@@ -180,7 +182,7 @@ impl PeakValue {
     /// `1023` instead of `65535`. Float-channel pixels do not implement
     /// `WhiteChannel` and therefore cannot reach this constructor at all: the
     /// `[0.0, 1.0]` convention is a call-site assumption, so it is named at
-    /// the call site with [`new`](Self::new).
+    /// the call site with [`peak!`](crate::peak).
     ///
     /// # Panics
     ///
@@ -208,6 +210,48 @@ impl PeakValue {
     }
 }
 
+/// A [`PeakValue`](crate::analyze::quality::PeakValue) literal, checked at
+/// compile time.
+///
+/// For integer pixel types prefer
+/// [`PeakValue::of_pixel`](crate::analyze::quality::PeakValue::of_pixel),
+/// which reads the full scale off the type and cannot disagree with it. This
+/// macro is for the float case, where the range is a call-site convention and
+/// somebody has to name it.
+///
+/// The [`sigma!`](crate::sigma) macro's counterpart for full-scale values; see
+/// it for why this is a macro and not a `const fn`. A value that is not a
+/// constant expression does not compile (`error[E0435]`); use
+/// [`PeakValue::try_new`](crate::analyze::quality::PeakValue::try_new) there.
+///
+/// # Example
+///
+/// ```
+/// use fovea::analyze::quality::PeakValue;
+/// use fovea::peak;
+///
+/// const UNIT: PeakValue = peak!(1.0); // the usual float convention
+/// assert_eq!(UNIT.get(), 1.0);
+/// ```
+///
+/// A full scale of zero makes every metric degenerate, so it does not build:
+///
+/// ```compile_fail
+/// use fovea::peak;
+/// // ERROR: evaluation panicked: peak value must be finite and strictly
+/// // positive
+/// let _ = peak!(0.0);
+/// ```
+#[macro_export]
+macro_rules! peak {
+    ($value:expr) => {
+        const {
+            $crate::analyze::quality::PeakValue::new($value)
+                .expect("peak value must be finite and strictly positive")
+        }
+    };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -232,7 +276,7 @@ mod tests {
 
     #[test]
     fn a_literal_peak_is_checked_at_compile_time() {
-        const UNIT: PeakValue = PeakValue::new(1.0);
+        const UNIT: PeakValue = peak!(1.0);
         assert_eq!(UNIT.get(), 1.0);
     }
 
@@ -246,8 +290,9 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "finite and positive")]
-    fn a_non_positive_literal_panics() {
-        let _ = PeakValue::new(0.0);
+    fn a_non_positive_value_is_rejected() {
+        assert!(PeakValue::new(0.0).is_none());
+        assert!(PeakValue::new(-1.0).is_none());
+        assert!(PeakValue::new(f64::NAN).is_none());
     }
 }

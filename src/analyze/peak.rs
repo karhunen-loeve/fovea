@@ -76,7 +76,7 @@ use crate::error::Error;
 use crate::image::RasterImage;
 use crate::pixel::SingleChannel;
 use crate::transform::{nms_sector, nms_sector_from_gradient};
-use crate::{Coordinate, CoordinateF64, Orientation};
+use crate::{Coordinate, CoordinateF64, Offset, Orientation};
 
 /// Which kind of stationary point the samples are expected to describe.
 ///
@@ -513,11 +513,7 @@ where
 /// from. `step` is a signed pixel displacement; the offset the fit returns
 /// is in units of it, so a diagonal step scales the reported displacement
 /// by the square root of two without any special case here.
-fn fit_along_step<I, P>(
-    magnitude: &I,
-    at: Coordinate,
-    step: (isize, isize),
-) -> Option<CoordinateF64>
+fn fit_along_step<I, P>(magnitude: &I, at: Coordinate, step: Offset) -> Option<CoordinateF64>
 where
     I: RasterImage<Pixel = P>,
     P: SingleChannel,
@@ -531,14 +527,12 @@ where
         return None;
     }
 
-    let (dx, dy) = step;
-    let sample = |sign: isize| -> Option<f64> {
-        let x = at.x.checked_add_signed(sign * dx)?;
-        let y = at.y.checked_add_signed(sign * dy)?;
-        if x >= magnitude.width() || y >= magnitude.height() {
+    let sample = |sign: i32| -> Option<f64> {
+        let n = at.checked_add(Offset::new(sign * step.dx, sign * step.dy))?;
+        if n.x >= magnitude.width() || n.y >= magnitude.height() {
             return None;
         }
-        Some(f64::from(magnitude.row(y)[x].channel(0)))
+        Some(f64::from(magnitude.row(n.y)[n.x].channel(0)))
     };
 
     let before = sample(-1)?;
@@ -546,8 +540,8 @@ where
     let centre = f64::from(magnitude.row(at.y)[at.x].channel(0));
     let offset = parabola_vertex(before, centre, after, Extremum::Maximum)?;
     Some(CoordinateF64::new(
-        at.x as f64 + offset * dx as f64,
-        at.y as f64 + offset * dy as f64,
+        at.x as f64 + offset * step.dx as f64,
+        at.y as f64 + offset * step.dy as f64,
     ))
 }
 
@@ -558,6 +552,7 @@ mod tests {
     use super::*;
     use crate::image::Image;
     use crate::pixel::{MonoF32, MonoF64};
+    use crate::sigma;
 
     /// A paraboloid with its crest at `(cx, cy)` and no cross term.
     fn paraboloid(w: usize, h: usize, cx: f64, cy: f64) -> Image<MonoF64> {
@@ -947,9 +942,9 @@ mod tests {
         // that vertex's own gradient.
         use crate::analyze::contours::{Connectivity8, extract_contours};
         use crate::border::Clamp;
+        use crate::image::BinaryImage;
         use crate::pixel::Label32;
         use crate::transform::{gaussian_blur, gradient_magnitude, scharr_x, scharr_y};
-        use crate::{Sigma, image::BinaryImage};
 
         const LO: usize = 10;
         const HI: usize = 25;
@@ -960,7 +955,7 @@ mod tests {
         });
         let mask: BinaryImage = Image::generate(36, 36, |x, y| inside(x) && inside(y));
 
-        let blurred: Image<MonoF32> = gaussian_blur(&image, Sigma::new(1.0), &Clamp);
+        let blurred: Image<MonoF32> = gaussian_blur(&image, sigma!(1.0), &Clamp);
         let gx = scharr_x(&blurred, &Clamp);
         let gy = scharr_y(&blurred, &Clamp);
         let magnitude = gradient_magnitude(&gx, &gy).unwrap();

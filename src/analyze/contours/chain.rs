@@ -6,7 +6,7 @@
 //! (consecutive traced pixels are always 8-adjacent), and
 //! [`ChainCode::to_points`] round-trips exactly.
 
-use crate::Coordinate;
+use crate::{Coordinate, Offset};
 
 use super::Contour;
 
@@ -50,26 +50,26 @@ impl ChainDirection {
         Self::SouthEast,
     ];
 
-    /// The `(dx, dy)` step this direction takes, y growing downward.
+    /// The step this direction takes, y growing downward.
     #[must_use]
-    pub const fn offset(self) -> (i32, i32) {
+    pub const fn offset(self) -> Offset {
         match self {
-            Self::East => (1, 0),
-            Self::NorthEast => (1, -1),
-            Self::North => (0, -1),
-            Self::NorthWest => (-1, -1),
-            Self::West => (-1, 0),
-            Self::SouthWest => (-1, 1),
-            Self::South => (0, 1),
-            Self::SouthEast => (1, 1),
+            Self::East => Offset::new(1, 0),
+            Self::NorthEast => Offset::new(1, -1),
+            Self::North => Offset::new(0, -1),
+            Self::NorthWest => Offset::new(-1, -1),
+            Self::West => Offset::new(-1, 0),
+            Self::SouthWest => Offset::new(-1, 1),
+            Self::South => Offset::new(0, 1),
+            Self::SouthEast => Offset::new(1, 1),
         }
     }
 
-    /// The direction with the given step, or `None` if `(dx, dy)` is not
-    /// one of the eight unit king moves.
+    /// The direction with the given step, or `None` if `offset` is not one
+    /// of the eight unit king moves.
     #[must_use]
-    pub const fn from_offset(dx: i32, dy: i32) -> Option<Self> {
-        match (dx, dy) {
+    pub const fn from_offset(offset: Offset) -> Option<Self> {
+        match (offset.dx, offset.dy) {
             (1, 0) => Some(Self::East),
             (1, -1) => Some(Self::NorthEast),
             (0, -1) => Some(Self::North),
@@ -132,9 +132,7 @@ impl ChainCode {
                 .map(|i| {
                     let a = points[i];
                     let b = points[(i + 1) % points.len()];
-                    let dx = (b.x as i64 - a.x as i64) as i32;
-                    let dy = (b.y as i64 - a.y as i64) as i32;
-                    ChainDirection::from_offset(dx, dy)
+                    ChainDirection::from_offset(a.offset_to(b))
                         .expect("traced contour points are 8-adjacent")
                 })
                 .collect()
@@ -162,14 +160,13 @@ impl ChainCode {
     #[must_use]
     pub fn to_points(&self) -> Vec<Coordinate> {
         let mut points = Vec::with_capacity(self.moves.len().max(1));
-        let (mut x, mut y) = (self.start.x as i64, self.start.y as i64);
-        points.push(self.start);
+        let mut at = self.start;
+        points.push(at);
         for step in self.moves.iter().take(self.moves.len().saturating_sub(1)) {
-            let (dx, dy) = step.offset();
-            x += dx as i64;
-            y += dy as i64;
-            debug_assert!(x >= 0 && y >= 0, "chain code left the image quadrant");
-            points.push(Coordinate::new(x as usize, y as usize));
+            at = at
+                .checked_add(step.offset())
+                .expect("chain code left the image quadrant");
+            points.push(at);
         }
         points
     }
@@ -182,12 +179,11 @@ mod tests {
     #[test]
     fn offsets_round_trip() {
         for dir in ChainDirection::ALL {
-            let (dx, dy) = dir.offset();
-            assert_eq!(ChainDirection::from_offset(dx, dy), Some(dir));
+            assert_eq!(ChainDirection::from_offset(dir.offset()), Some(dir));
         }
-        assert_eq!(ChainDirection::from_offset(0, 0), None);
-        assert_eq!(ChainDirection::from_offset(2, 0), None);
-        assert_eq!(ChainDirection::from_offset(-1, 2), None);
+        assert_eq!(ChainDirection::from_offset(Offset::ZERO), None);
+        assert_eq!(ChainDirection::from_offset(Offset::new(2, 0)), None);
+        assert_eq!(ChainDirection::from_offset(Offset::new(-1, 2)), None);
     }
 
     #[test]

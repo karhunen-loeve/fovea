@@ -13,10 +13,10 @@
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
-use fovea::Sigma;
 use fovea::border::{Clamp, Skip};
 use fovea::image::{Image, SeparableKernel};
 use fovea::pixel::{Mono8, MonoF32};
+use fovea::sigma;
 use fovea::transform::{SeparableScratch, gaussian_blur_into};
 
 thread_local! {
@@ -85,7 +85,7 @@ fn one_shot_blur_allocates_its_working_set() {
     // intermediate plus the engine's two working buffers per pass.
     let src = Image::generate(64, 64, |x, y| Mono8::new(((x * 3 + y) % 256) as u8));
     let mut out = Image::<Mono8>::zero(64, 64);
-    let sigma = Sigma::new(1.5);
+    let sigma = sigma!(1.5);
 
     // Warm up first, so the count reflects steady state rather than any
     // one-time initialisation elsewhere in the call graph.
@@ -108,7 +108,7 @@ fn second_same_size_blur_allocates_nothing() {
     let src = Image::generate(64, 64, |x, y| Mono8::new(((x + y * 7) % 256) as u8));
     let mut out = Image::<Mono8>::zero(64, 64);
     let mut scratch = SeparableScratch::<MonoF32>::new();
-    let sigma = Sigma::new(1.5);
+    let sigma = sigma!(1.5);
 
     // First call sizes the buffers.
     scratch.gaussian_blur_into(&src, sigma, &Clamp, &mut out);
@@ -135,7 +135,7 @@ fn shrinking_pyramid_of_blurs_allocates_only_on_the_first_level() {
         .collect();
     let mut outputs: Vec<Image<Mono8>> = sizes.iter().map(|&n| Image::zero(n, n)).collect();
     let mut scratch = SeparableScratch::<MonoF32>::new();
-    let sigma = Sigma::new(1.0);
+    let sigma = sigma!(1.0);
 
     // Level 0 warms the buffers up.
     scratch.gaussian_blur_into(&sources[0], sigma, &Clamp, &mut outputs[0]);

@@ -26,15 +26,18 @@ use crate::pixel::{Label32, LabelPixel, SingleChannel};
 /// every comparison against NaN is false. A NaN low threshold would
 /// otherwise pass every pixel silently.
 ///
-/// Construction follows the crate's parameter-type discipline
-/// ([`Sigma`](crate::Sigma), [`OddWindow`](crate::OddWindow)):
-/// [`new`](Self::new) for literals and [`try_new`](Self::try_new) for
-/// values computed from data, such as a percentile of a magnitude
-/// histogram or a fraction of an image maximum. Unlike those types `new`
-/// is **not** `const`: the comparison is `PartialOrd` on a generic
-/// channel, and trait methods cannot be called in a `const fn` on stable
-/// Rust, so an invalid literal panics on first execution rather than
-/// failing to compile.
+/// # One constructor, and why
+///
+/// [`try_new`](Self::try_new) is the only way in. The other parameter
+/// types in the crate ([`Sigma`](crate::Sigma),
+/// [`OddWindowSide`](crate::OddWindowSide)) also offer a `const fn new`
+/// returning [`Option`], which is what lets a literal be checked at
+/// compile time behind a macro such as [`sigma!`](crate::sigma). That is
+/// impossible here: the check is `PartialOrd` on a generic channel, and
+/// trait methods cannot be called in a `const fn` on stable Rust. With no
+/// compile-time tier to preserve, an `Option`-returning `new` would differ
+/// from `try_new` only by discarding the reason, so it does not exist.
+/// Literals and computed values take the same road.
 ///
 /// `low == high` is deliberately valid. It degenerates to a single
 /// global threshold (every kept pixel is strong, so nothing propagates),
@@ -46,13 +49,14 @@ use crate::pixel::{Label32, LabelPixel, SingleChannel};
 /// use fovea::analyze::threshold::HysteresisThresholds;
 /// use std::num::Saturating;
 ///
-/// let t = HysteresisThresholds::new(Saturating(100u8), Saturating(200u8));
+/// let t = HysteresisThresholds::try_new(Saturating(100u8), Saturating(200u8))?;
 /// assert_eq!(t.low(), Saturating(100u8));
 /// assert_eq!(t.high(), Saturating(200u8));
 ///
-/// // Misordered and NaN pairs are rejected where they are computed.
+/// // Misordered and NaN pairs are rejected where they are born.
 /// assert!(HysteresisThresholds::try_new(0.3_f32, 0.1).is_err());
 /// assert!(HysteresisThresholds::try_new(f32::NAN, 0.1).is_err());
+/// # Ok::<(), fovea::Error>(())
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct HysteresisThresholds<C> {
@@ -64,23 +68,10 @@ impl<C> HysteresisThresholds<C>
 where
     C: PartialOrd + Copy + core::fmt::Debug,
 {
-    /// Creates a threshold pair from literals or otherwise proven-valid
-    /// values.
+    /// Creates a threshold pair, validating the `low <= high` relation.
     ///
-    /// # Panics
-    ///
-    /// Panics if `!(low <= high)`, which includes either value being NaN.
-    /// For values computed from data, use [`Self::try_new`].
-    #[must_use]
-    pub fn new(low: C, high: C) -> Self {
-        assert!(
-            low <= high,
-            "HysteresisThresholds::new: low ({low:?}) must be <= high ({high:?})"
-        );
-        Self { low, high }
-    }
-
-    /// Creates a threshold pair from computed values, validating them.
+    /// The only constructor; see the type documentation for why there is no
+    /// `const` sibling.
     ///
     /// # Errors
     ///
@@ -167,8 +158,8 @@ impl<C: Copy> HysteresisThresholds<C> {
 ///
 /// The `low <= high` relation lives in [`HysteresisThresholds`], so this
 /// function has no threshold precondition to violate and does not panic.
-/// Build the pair with `HysteresisThresholds::new` for literals or
-/// `try_new` for values derived from the data.
+/// Build the pair with [`HysteresisThresholds::try_new`], whether the two
+/// numbers are literals or derived from the data.
 ///
 /// # Examples
 ///
@@ -184,7 +175,7 @@ impl<C: Copy> HysteresisThresholds<C> {
 ///     4, 1,
 ///     vec![Mono8::new(255), Mono8::new(128), Mono8::new(0), Mono8::new(128)],
 /// ).unwrap();
-/// let thresholds = HysteresisThresholds::new(Saturating(100u8), Saturating(200u8));
+/// let thresholds = HysteresisThresholds::try_new(Saturating(100u8), Saturating(200u8)).unwrap();
 /// let mask = hysteresis_threshold(&img, thresholds);
 /// assert!(mask.pixel_at(0, 0));  // strong
 /// assert!(mask.pixel_at(1, 0));  // weak, bridged to the strong pixel
@@ -323,10 +314,10 @@ mod tests {
 
     /// The `(100, 200)` pair every ASCII fixture is written against.
     ///
-    /// A `fn` and not a `const`: `HysteresisThresholds::new` compares
-    /// through `PartialOrd`, which a `const fn` cannot call.
+    /// A `fn` and not a `const`: the constructor compares through
+    /// `PartialOrd`, which a `const fn` cannot call.
     fn pair() -> HysteresisThresholds<Saturating<u8>> {
-        HysteresisThresholds::new(LOW, HIGH)
+        HysteresisThresholds::try_new(LOW, HIGH).unwrap()
     }
 
     /// Collect the `true` pixel coordinates of a mask into a sorted set.
@@ -412,7 +403,7 @@ mod tests {
         // pixel, so the whole row would drop to false.
         let img =
             Image::from_vec(3, 1, vec![Mono8::new(127), Mono8::new(128), Mono8::new(200)]).unwrap();
-        let t = HysteresisThresholds::new(Saturating(128), Saturating(200));
+        let t = HysteresisThresholds::try_new(Saturating(128), Saturating(200)).unwrap();
         let out = hysteresis_threshold(&img, t);
         assert!(!out.pixel_at(0, 0), "127 < low → non-edge");
         assert!(out.pixel_at(1, 0), "128 == low → weak, bridged to strong");
@@ -428,7 +419,8 @@ mod tests {
             vec![MonoF32::new(0.1), MonoF32::new(0.3), MonoF32::new(0.6)],
         )
         .unwrap();
-        let out = hysteresis_threshold(&img, HysteresisThresholds::new(0.2f32, 0.5f32));
+        let t = HysteresisThresholds::try_new(0.2f32, 0.5f32).unwrap();
+        let out = hysteresis_threshold(&img, t);
         assert!(!out.pixel_at(0, 0), "0.1 < low → non-edge");
         assert!(out.pixel_at(1, 0), "0.3 weak, bridged to the strong 0.6");
         assert!(out.pixel_at(2, 0), "0.6 >= high → strong");
@@ -451,7 +443,7 @@ mod tests {
             ],
         )
         .unwrap();
-        let t = HysteresisThresholds::new(Saturating(200), Saturating(200));
+        let t = HysteresisThresholds::try_new(Saturating(200), Saturating(200)).unwrap();
         let out = hysteresis_threshold(&img, t);
         assert!(!out.pixel_at(0, 0), "0 < high");
         assert!(!out.pixel_at(1, 0), "199 < high, and there is no weak band");
@@ -486,9 +478,10 @@ mod tests {
     // it cannot be handed one. The rejection is tested where it now happens.
 
     #[test]
-    #[should_panic(expected = "must be <= high")]
     fn misordered_pair_is_rejected_at_construction() {
-        let _ = HysteresisThresholds::new(HIGH, LOW);
+        // Literals go through the same road as computed values, so the
+        // rejection is an error rather than an abort.
+        assert!(HysteresisThresholds::try_new(HIGH, LOW).is_err());
     }
 
     #[test]
@@ -533,7 +526,7 @@ mod tests {
     fn map_monotone_re_types_without_re_validating() {
         // The internal hook `canny` uses to widen `f32` thresholds into its
         // accumulator channel. Order-preserving conversion in, valid pair out.
-        let t = HysteresisThresholds::new(0.1_f32, 0.3);
+        let t = HysteresisThresholds::try_new(0.1_f32, 0.3).unwrap();
         let widened: HysteresisThresholds<f64> = t.map_monotone(f64::from);
         assert_eq!(widened.low(), 0.1_f32 as f64);
         assert_eq!(widened.high(), 0.3_f32 as f64);

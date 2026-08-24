@@ -143,12 +143,13 @@ pub trait CornerResponse<C> {
 /// (and more edges), larger values fewer. `0.04` is the conventional
 /// starting point, `0.04..=0.06` the usual range.
 ///
-/// This type *is* the invariant-carrying parameter type for `k` — the same
+/// This type *is* the invariant-carrying parameter type for `k`, the same
 /// discipline as [`Sigma`](crate::Sigma) and `std::num::NonZeroUsize`, with
 /// the strategy that consumes the value also owning its validation, so
 /// there is no separate newtype to thread through the API. Literals use the
-/// `const fn` [`new`](Self::new); values computed from data use
-/// [`try_new`](Self::try_new).
+/// [`harris!`](crate::harris) macro, which checks them at compile time;
+/// values computed from data use [`try_new`](Self::try_new).
+/// [`new`](Self::new) is the checked `const fn` under the macro.
 ///
 /// # Why `0 < k < 0.25`
 ///
@@ -166,8 +167,9 @@ pub trait CornerResponse<C> {
 ///
 /// ```
 /// use fovea::features::detect::Harris;
+/// use fovea::harris;
 ///
-/// const CLASSIC: Harris = Harris::new(0.04); // checked at compile time
+/// const CLASSIC: Harris = harris!(0.04); // checked at compile time
 /// assert_eq!(CLASSIC.k(), 0.04);
 ///
 /// // A value from a tuning sweep is checked where it is computed.
@@ -182,22 +184,20 @@ pub trait CornerResponse<C> {
 pub struct Harris(f32);
 
 impl Harris {
-    /// Creates a `Harris` response from a literal or otherwise proven-valid
-    /// sensitivity.
+    /// Creates a `Harris` response, returning `None` unless
+    /// `0.0 < k < 0.25` (see the type documentation for why those are the
+    /// bounds).
     ///
-    /// # Panics
-    ///
-    /// Panics unless `0.0 < k < 0.25` (see the type documentation for why
-    /// those are the bounds). As a `const fn`, this is a **compile error**
-    /// when evaluated in a `const` context. For values computed from data,
-    /// use [`try_new`](Self::try_new).
+    /// This is the `const fn` the [`harris!`](crate::harris) macro wraps.
+    /// Prefer the macro for literals and [`try_new`](Self::try_new) for
+    /// values computed from data.
     #[must_use]
-    pub const fn new(k: f32) -> Self {
-        assert!(
-            k.is_finite() && k > 0.0 && k < 0.25,
-            "Harris::new: k must satisfy 0 < k < 0.25"
-        );
-        Self(k)
+    pub const fn new(k: f32) -> Option<Self> {
+        if k.is_finite() && k > 0.0 && k < 0.25 {
+            Some(Self(k))
+        } else {
+            None
+        }
     }
 
     /// Creates a `Harris` response from a computed sensitivity, validating
@@ -221,6 +221,49 @@ impl Harris {
     pub const fn k(self) -> f32 {
         self.0
     }
+}
+
+/// A [`Harris`](crate::features::detect::Harris) literal, checked at compile
+/// time.
+///
+/// `Harris` is a strategy that happens to wrap a single validated scalar, so
+/// it takes a literal macro for the same reason [`Sigma`](crate::Sigma) does:
+/// the response strategy is almost always written inline, as an argument, and
+/// that is the position where a `const fn` gives no compile-time check at
+/// all. See [`sigma!`](crate::sigma) for the mechanism. A value that is not a
+/// constant expression does not compile (`error[E0435]`); use
+/// [`Harris::try_new`](crate::features::detect::Harris::try_new) there.
+///
+/// # Example
+///
+/// ```
+/// use fovea::features::detect::{CornerResponse, Harris};
+/// use fovea::harris;
+///
+/// // In argument position, where the macro earns its keep.
+/// let response = harris!(0.04).response(4.0f32, 0.0, 1.0);
+/// assert!(response > 0.0);
+///
+/// const CLASSIC: Harris = harris!(0.04);
+/// assert_eq!(CLASSIC.k(), 0.04);
+/// ```
+///
+/// At `k >= 0.25` the response is non-positive for every tensor, so the
+/// detector could never fire and the literal does not build:
+///
+/// ```compile_fail
+/// use fovea::harris;
+/// // ERROR: evaluation panicked: Harris k must satisfy 0 < k < 0.25
+/// let _ = harris!(0.25);
+/// ```
+#[macro_export]
+macro_rules! harris {
+    ($k:expr) => {
+        const {
+            $crate::features::detect::Harris::new($k)
+                .expect("Harris k must satisfy 0 < k < 0.25")
+        }
+    };
 }
 
 impl<C: CornerResponseChannel> CornerResponse<C> for Harris {
@@ -289,9 +332,9 @@ impl<C: CornerResponseChannel> CornerResponse<C> for ShiTomasi {
 /// # Example
 ///
 /// ```
-/// use fovea::Sigma;
 /// use fovea::border::Clamp;
 /// use fovea::features::detect::{Harris, StructureTensor};
+/// use fovea::{harris, sigma};
 /// use fovea::image::{Image, ImageView};
 /// use fovea::pixel::MonoF32;
 /// use fovea::transform::{sobel_x, sobel_y};
@@ -303,13 +346,13 @@ impl<C: CornerResponseChannel> CornerResponse<C> for ShiTomasi {
 ///
 /// let gx = sobel_x(&image, &Clamp);
 /// let gy = sobel_y(&image, &Clamp);
-/// let tensor = StructureTensor::from_gradients(&gx, &gy, Sigma::new(1.0))?;
+/// let tensor = StructureTensor::from_gradients(&gx, &gy, sigma!(1.0))?;
 ///
 /// // On the edge, Sxx is large and Syy vanishes …
 /// assert!(tensor.xx().pixel_at(8, 8).value() > 1.0);
 /// assert!(tensor.yy().pixel_at(8, 8).value() < 1e-6);
 /// // … so the Harris response there is negative: an edge, not a corner.
-/// assert!(tensor.response(&Harris::new(0.04)).pixel_at(8, 8).value() < 0.0);
+/// assert!(tensor.response(&harris!(0.04)).pixel_at(8, 8).value() < 0.0);
 /// # Ok::<(), fovea::Error>(())
 /// ```
 #[derive(Clone, Debug)]
@@ -445,11 +488,11 @@ impl<P: Copy> StructureTensor<P> {
     /// # Example
     ///
     /// ```
-    /// use fovea::Sigma;
     /// use fovea::border::Clamp;
     /// use fovea::features::detect::{ShiTomasi, StructureTensor};
     /// use fovea::image::{Image, ImageView};
     /// use fovea::pixel::MonoF32;
+    /// use fovea::sigma;
     /// use fovea::transform::{sobel_x, sobel_y};
     ///
     /// // A flat field has no gradient, so every response is zero.
@@ -457,7 +500,7 @@ impl<P: Copy> StructureTensor<P> {
     /// let tensor = StructureTensor::from_gradients(
     ///     &sobel_x(&flat, &Clamp),
     ///     &sobel_y(&flat, &Clamp),
-    ///     Sigma::new(1.0),
+    ///     sigma!(1.0),
     /// )?;
     /// assert!(tensor.response(&ShiTomasi).pixel_at(6, 6).value().abs() < 1e-6);
     /// # Ok::<(), fovea::Error>(())
@@ -512,20 +555,20 @@ impl<P: Copy> StructureTensor<P> {
 /// # Example
 ///
 /// ```
-/// use fovea::Sigma;
 /// use fovea::features::detect::CornerParams;
+/// use fovea::sigma;
 ///
 /// // Literals: checked at compile time in a const context.
-/// const PARAMS: CornerParams = CornerParams::new(Sigma::new(1.4), 0.01, 3);
+/// const PARAMS: CornerParams = CornerParams::new(sigma!(1.4), 0.01, 3).unwrap();
 /// assert_eq!(PARAMS.nms_radius(), 3);
 ///
 /// // Computed: checked where the computation happened.
 /// let calibrated = 0.05 * 0.2;
-/// let params = CornerParams::try_new(Sigma::new(1.4), calibrated, 3)?;
+/// let params = CornerParams::try_new(sigma!(1.4), calibrated, 3)?;
 /// assert!((params.threshold() - 0.01).abs() < 1e-9);
 ///
-/// assert!(CornerParams::try_new(Sigma::new(1.0), f32::NAN, 3).is_err());
-/// assert!(CornerParams::try_new(Sigma::new(1.0), 0.01, 0).is_err());
+/// assert!(CornerParams::try_new(sigma!(1.0), f32::NAN, 3).is_err());
+/// assert!(CornerParams::try_new(sigma!(1.0), 0.01, 0).is_err());
 /// # Ok::<(), fovea::Error>(())
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -536,29 +579,27 @@ pub struct CornerParams {
 }
 
 impl CornerParams {
-    /// Creates parameters from literals or otherwise proven-valid values.
+    /// Creates parameters, returning `None` if `threshold` is not finite or
+    /// `nms_radius == 0`.
     ///
-    /// # Panics
-    ///
-    /// Panics if `threshold` is not finite, or if `nms_radius == 0`. As a
-    /// `const fn`, both are **compile errors** when evaluated in a `const`
-    /// context. For values computed from data, use
-    /// [`try_new`](Self::try_new).
+    /// `const`, so binding the result to a `const` item checks the literals
+    /// at compile time. There is deliberately no literal macro: the three
+    /// arguments are not interchangeable and their names are the
+    /// information. For values computed from data use
+    /// [`try_new`](Self::try_new), which reports which one failed.
     #[must_use]
-    pub const fn new(window: Sigma, threshold: f32, nms_radius: usize) -> Self {
-        assert!(
-            threshold.is_finite(),
-            "CornerParams::new: threshold must be finite"
-        );
-        assert!(
-            nms_radius > 0,
-            "CornerParams::new: nms_radius must be at least 1"
-        );
-        Self {
+    pub const fn new(window: Sigma, threshold: f32, nms_radius: usize) -> Option<Self> {
+        if !threshold.is_finite() {
+            return None;
+        }
+        if nms_radius == 0 {
+            return None;
+        }
+        Some(Self {
             window,
             threshold,
             nms_radius,
-        }
+        })
     }
 
     /// Creates parameters from computed values, validating them.
@@ -634,17 +675,17 @@ impl CornerParams {
 /// # Example
 ///
 /// ```
-/// use fovea::Sigma;
 /// use fovea::features::detect::{corner_response_map, ShiTomasi};
 /// use fovea::image::{Image, ImageView};
 /// use fovea::pixel::{Mono8, MonoF32};
+/// use fovea::sigma;
 ///
 /// // A white square on black: corners at its four corners.
 /// let image: Image<Mono8> = Image::generate(24, 24, |x, y| {
 ///     Mono8::new(if (8..16).contains(&x) && (8..16).contains(&y) { 255 } else { 0 })
 /// });
 ///
-/// let response: Image<MonoF32> = corner_response_map(&image, &ShiTomasi, Sigma::new(1.2));
+/// let response: Image<MonoF32> = corner_response_map(&image, &ShiTomasi, sigma!(1.2));
 /// assert_eq!(response.size(), image.size());
 ///
 /// // Stronger at a corner of the square than in the middle of its edge.
@@ -686,9 +727,9 @@ where
 /// Ranking and top-N selection are also separate and already exist:
 ///
 /// ```
-/// use fovea::Sigma;
-/// use fovea::features::retain_top_n;
 /// use fovea::features::detect::{corner_response_map, detect_corners, CornerParams, Harris};
+/// use fovea::features::retain_top_n;
+/// use fovea::{harris, sigma};
 /// use fovea::image::{Image, ImageView};
 /// use fovea::pixel::MonoF32;
 ///
@@ -699,7 +740,7 @@ where
 /// });
 ///
 /// // Calibrate the threshold against the map's own maximum.
-/// let map: Image<MonoF32> = corner_response_map(&image, &Harris::new(0.04), Sigma::new(1.2));
+/// let map: Image<MonoF32> = corner_response_map(&image, &harris!(0.04), sigma!(1.2));
 /// let peak = (0..map.height())
 ///     .flat_map(|y| (0..map.width()).map(move |x| (x, y)))
 ///     .map(|(x, y)| map.pixel_at(x, y).value())
@@ -708,8 +749,8 @@ where
 /// // 0.1 % of the peak, not 10 %: the faint square's contrast is 0.3 of the
 /// // bright one's, and a Harris response is a *fourth* power — so its
 /// // corners score 0.3⁴ ≈ 1/120 as strongly.
-/// let params = CornerParams::try_new(Sigma::new(1.2), 0.001 * peak, 3)?;
-/// let mut corners = detect_corners(&image, &Harris::new(0.04), params);
+/// let params = CornerParams::try_new(sigma!(1.2), 0.001 * peak, 3)?;
+/// let mut corners = detect_corners(&image, &harris!(0.04), params);
 /// assert_eq!(corners.len(), 8); // four per square
 ///
 /// // The strongest four are the full-contrast square's.
@@ -768,12 +809,12 @@ where
 /// concatenating levels then needs, which is the caller's policy to set:
 ///
 /// ```
-/// use fovea::Sigma;
+/// use fovea::CoordinateF64;
 /// use fovea::features::detect::{detect_corners_in_level, CornerParams, ShiTomasi};
 /// use fovea::features::sort_by_response;
 /// use fovea::image::{Image, Pyramid, ScaledImage};
 /// use fovea::pixel::MonoF32;
-/// use fovea::{CoordinateF64, PixelDistance};
+/// use fovea::{pixel_distance, sigma};
 /// use fovea::transform::pyr_down;
 ///
 /// let base: Image<MonoF32> = Image::generate(32, 32, |x, y| {
@@ -784,20 +825,20 @@ where
 /// let levels = vec![
 ///     ScaledImage::new(
 ///         base.clone(),
-///         PixelDistance::new(1.0),
+///         pixel_distance!(1.0),
 ///         CoordinateF64::new(0.0, 0.0),
-///         Sigma::new(0.5),
+///         sigma!(0.5),
 ///     ),
 ///     ScaledImage::new(
 ///         pyr_down(&base),
-///         PixelDistance::new(2.0),
+///         pixel_distance!(2.0),
 ///         CoordinateF64::new(0.0, 0.0),
-///         Sigma::new(1.0),
+///         sigma!(1.0),
 ///     ),
 /// ];
 /// let pyramid = Pyramid::try_from_levels(levels)?;
 ///
-/// let params = CornerParams::try_new(Sigma::new(1.0), 0.02, 2)?;
+/// let params = CornerParams::try_new(sigma!(1.0), 0.02, 2)?;
 /// let mut corners: Vec<_> = pyramid
 ///     .iter()
 ///     .flat_map(|level| detect_corners_in_level(level, &ShiTomasi, params))
@@ -847,11 +888,12 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{pixel_distance, sigma};
     use crate::features::HasPosition;
     use crate::image::{ImageView, Pyramid, PyramidLevel, ScaledImage};
     use crate::pixel::{Mono8, Mono16, MonoF32, MonoF64};
     use crate::transform::{pyr_down, rotate_90};
-    use crate::{CoordinateF64, PixelDistance};
+    use crate::CoordinateF64;
 
     // ── Fixtures ────────────────────────────────────────────────────────
 
@@ -916,7 +958,7 @@ mod tests {
         for k in [0.01, 0.04, 0.06, 0.2, 0.249] {
             assert_eq!(Harris::try_new(k).unwrap().k(), k);
         }
-        const CLASSIC: Harris = Harris::new(0.04);
+        const CLASSIC: Harris = harris!(0.04);
         assert_eq!(CLASSIC.k(), 0.04);
     }
 
@@ -937,9 +979,10 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "0 < k < 0.25")]
-    fn harris_new_panics_on_an_invalid_literal() {
-        let _ = Harris::new(0.3);
+    fn harris_new_rejects_an_invalid_k() {
+        assert!(Harris::new(0.3).is_none());
+        assert!(Harris::new(0.25).is_none());
+        assert!(Harris::new(0.0).is_none());
     }
 
     #[test]
@@ -949,7 +992,7 @@ mod tests {
         let (sxx, sxy, syy) = (1.0f32, 0.0, 1.0);
         let at_bound = CornerResponseChannel::harris(sxx, sxy, syy, 0.25);
         assert!(at_bound.abs() < 1e-6, "{at_bound}");
-        assert!(Harris::new(0.249).response(sxx, sxy, syy) > 0.0);
+        assert!(harris!(0.249).response(sxx, sxy, syy) > 0.0);
     }
 
     // ── Response formulas ───────────────────────────────────────────────
@@ -958,7 +1001,7 @@ mod tests {
     fn harris_response_matches_the_formula() {
         let (sxx, sxy, syy) = (5.0f32, 2.0, 3.0);
         let expected = (5.0 * 3.0 - 2.0 * 2.0) - 0.04 * (5.0 + 3.0) * (5.0 + 3.0);
-        assert!((Harris::new(0.04).response(sxx, sxy, syy) - expected).abs() < 1e-6);
+        assert!((harris!(0.04).response(sxx, sxy, syy) - expected).abs() < 1e-6);
     }
 
     #[test]
@@ -980,7 +1023,7 @@ mod tests {
         // however large the surviving eigenvalue is.
         for strength in [1.0f32, 100.0, 1e6] {
             assert!(ShiTomasi.response(strength, 0.0, 0.0).abs() <= 1e-3 * strength);
-            assert!(Harris::new(0.04).response(strength, 0.0, 0.0) < 0.0);
+            assert!(harris!(0.04).response(strength, 0.0, 0.0) < 0.0);
         }
     }
 
@@ -990,7 +1033,7 @@ mod tests {
         // accumulate in.
         // `k` is an f32 constant widened into the f64 formula, so the
         // agreement is to f32 precision in `k`, not to f64 in the result.
-        assert!((Harris::new(0.04).response(5.0f64, 2.0, 3.0) - 8.44).abs() < 1e-6);
+        assert!((harris!(0.04).response(5.0f64, 2.0, 3.0) - 8.44).abs() < 1e-6);
         assert!((ShiTomasi.response(2.0f64, 1.0, 2.0) - 1.0).abs() < 1e-12);
     }
 
@@ -1020,7 +1063,7 @@ mod tests {
         }
 
         let image = square(24, 8, 16);
-        let map: Image<MonoF32> = corner_response_map(&image, &Noble, Sigma::new(1.2));
+        let map: Image<MonoF32> = corner_response_map(&image, &Noble, sigma!(1.2));
         let peak = max_response(&map);
         assert_eq!(corner_peaks(&map, 0.3 * peak, 3).len(), 4);
     }
@@ -1029,12 +1072,12 @@ mod tests {
 
     #[test]
     fn corner_params_round_trip() {
-        const PARAMS: CornerParams = CornerParams::new(Sigma::new(1.4), 0.01, 3);
-        assert_eq!(PARAMS.window(), Sigma::new(1.4));
+        const PARAMS: CornerParams = CornerParams::new(sigma!(1.4), 0.01, 3).unwrap();
+        assert_eq!(PARAMS.window(), sigma!(1.4));
         assert_eq!(PARAMS.threshold(), 0.01);
         assert_eq!(PARAMS.nms_radius(), 3);
 
-        let computed = CornerParams::try_new(Sigma::new(2.0), -1.5, 1).unwrap();
+        let computed = CornerParams::try_new(sigma!(2.0), -1.5, 1).unwrap();
         // A negative threshold is legitimate: the Harris response is signed.
         assert_eq!(computed.threshold(), -1.5);
     }
@@ -1042,7 +1085,7 @@ mod tests {
     #[test]
     fn corner_params_try_new_rejects_a_non_finite_threshold() {
         for threshold in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
-            let err = CornerParams::try_new(Sigma::new(1.0), threshold, 2).unwrap_err();
+            let err = CornerParams::try_new(sigma!(1.0), threshold, 2).unwrap_err();
             match err {
                 Error::InvalidParameter(reason) => assert!(
                     reason.contains("threshold"),
@@ -1055,7 +1098,7 @@ mod tests {
 
     #[test]
     fn corner_params_try_new_rejects_a_zero_radius() {
-        let err = CornerParams::try_new(Sigma::new(1.0), 0.01, 0).unwrap_err();
+        let err = CornerParams::try_new(sigma!(1.0), 0.01, 0).unwrap_err();
         match err {
             Error::InvalidParameter(reason) => assert!(
                 reason.contains("nms_radius"),
@@ -1066,15 +1109,10 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "threshold must be finite")]
-    fn corner_params_new_panics_on_a_nan_literal() {
-        let _ = CornerParams::new(Sigma::new(1.0), f32::NAN, 2);
-    }
-
-    #[test]
-    #[should_panic(expected = "nms_radius must be at least 1")]
-    fn corner_params_new_panics_on_a_zero_radius_literal() {
-        let _ = CornerParams::new(Sigma::new(1.0), 0.01, 0);
+    fn corner_params_new_rejects_an_invalid_threshold_or_radius() {
+        assert!(CornerParams::new(sigma!(1.0), f32::NAN, 2).is_none());
+        assert!(CornerParams::new(sigma!(1.0), f32::INFINITY, 2).is_none());
+        assert!(CornerParams::new(sigma!(1.0), 0.01, 0).is_none());
     }
 
     // ── StructureTensor ─────────────────────────────────────────────────
@@ -1086,7 +1124,7 @@ mod tests {
         let tensor = StructureTensor::from_gradients(
             &sobel_x(&image, &Clamp),
             &sobel_y(&image, &Clamp),
-            Sigma::new(1.0),
+            sigma!(1.0),
         )
         .unwrap();
 
@@ -1105,7 +1143,7 @@ mod tests {
         let tensor = StructureTensor::from_gradients(
             &sobel_x(&image, &Clamp),
             &sobel_y(&image, &Clamp),
-            Sigma::new(1.0),
+            sigma!(1.0),
         )
         .unwrap();
         // Gx and Gy have opposite signs along this edge, so Sxy < 0 — the
@@ -1117,7 +1155,7 @@ mod tests {
     fn structure_tensor_reports_a_gradient_size_mismatch() {
         let gx: Image<MonoF32> = Image::zero(8, 8);
         let gy: Image<MonoF32> = Image::zero(8, 4);
-        let err = StructureTensor::from_gradients(&gx, &gy, Sigma::new(1.0)).unwrap_err();
+        let err = StructureTensor::from_gradients(&gx, &gy, sigma!(1.0)).unwrap_err();
         assert_eq!(
             err,
             Error::SizeMismatch {
@@ -1165,9 +1203,9 @@ mod tests {
     #[test]
     fn a_square_has_four_corners() {
         let image = square(24, 8, 16);
-        let method = Harris::new(0.04);
-        let map: Image<MonoF32> = corner_response_map(&image, &method, Sigma::new(1.0));
-        let params = CornerParams::try_new(Sigma::new(1.0), 0.2 * max_response(&map), 3).unwrap();
+        let method = harris!(0.04);
+        let map: Image<MonoF32> = corner_response_map(&image, &method, sigma!(1.0));
+        let params = CornerParams::try_new(sigma!(1.0), 0.2 * max_response(&map), 3).unwrap();
 
         // Exactly the four corner pixels, in raster order, and nothing along
         // the four edges between them.
@@ -1189,18 +1227,18 @@ mod tests {
         // Same geometry, same answer: the two measures disagree on how
         // strongly to score a corner, not on where it is.
         let image = square(24, 8, 16);
-        let map: Image<MonoF32> = corner_response_map(&image, &ShiTomasi, Sigma::new(1.0));
-        let params = CornerParams::try_new(Sigma::new(1.0), 0.3 * max_response(&map), 3).unwrap();
+        let map: Image<MonoF32> = corner_response_map(&image, &ShiTomasi, sigma!(1.0));
+        let params = CornerParams::try_new(sigma!(1.0), 0.3 * max_response(&map), 3).unwrap();
 
         let corners = detect_corners(&image, &ShiTomasi, params);
         assert_eq!(positions(&corners), square_corner_pixels(8, 16));
 
         let harris_map: Image<MonoF32> =
-            corner_response_map(&image, &Harris::new(0.04), Sigma::new(1.0));
+            corner_response_map(&image, &harris!(0.04), sigma!(1.0));
         let harris_params =
-            CornerParams::try_new(Sigma::new(1.0), 0.2 * max_response(&harris_map), 3).unwrap();
+            CornerParams::try_new(sigma!(1.0), 0.2 * max_response(&harris_map), 3).unwrap();
         assert_eq!(
-            positions(&detect_corners(&image, &Harris::new(0.04), harris_params)),
+            positions(&detect_corners(&image, &harris!(0.04), harris_params)),
             positions(&corners)
         );
     }
@@ -1221,9 +1259,9 @@ mod tests {
             positions(&detect_corners(&image, &ShiTomasi, params))
         };
 
-        assert_eq!(corners_of(Sigma::new(1.0)), square_corner_pixels(8, 16));
+        assert_eq!(corners_of(sigma!(1.0)), square_corner_pixels(8, 16));
         assert_eq!(
-            corners_of(Sigma::new(1.6)),
+            corners_of(sigma!(1.6)),
             vec![(9.0, 9.0), (14.0, 9.0), (9.0, 14.0), (14.0, 14.0)]
         );
     }
@@ -1234,16 +1272,16 @@ mod tests {
         // gradient-magnitude "corner" detector fires hardest.
         let image: Image<MonoF32> =
             Image::generate(24, 24, |x, _| MonoF32::new(if x < 12 { 0.0 } else { 1.0 }));
-        let params = CornerParams::new(Sigma::new(1.2), 1e-4, 3);
-        assert!(detect_corners(&image, &Harris::new(0.04), params).is_empty());
+        let params = CornerParams::new(sigma!(1.2), 1e-4, 3).unwrap();
+        assert!(detect_corners(&image, &harris!(0.04), params).is_empty());
         assert!(detect_corners(&image, &ShiTomasi, params).is_empty());
     }
 
     #[test]
     fn a_flat_field_has_no_corners() {
         let image = Image::fill(16, 16, MonoF32::new(0.5));
-        let params = CornerParams::new(Sigma::new(1.0), 1e-6, 2);
-        assert!(detect_corners(&image, &Harris::new(0.04), params).is_empty());
+        let params = CornerParams::new(sigma!(1.0), 1e-6, 2).unwrap();
+        assert!(detect_corners(&image, &harris!(0.04), params).is_empty());
     }
 
     #[test]
@@ -1253,8 +1291,8 @@ mod tests {
         let image: Image<MonoF32> = Image::generate(24, 24, |x, y| {
             MonoF32::new(if x >= 12 && y >= 12 { 1.0 } else { 0.0 })
         });
-        let map: Image<MonoF32> = corner_response_map(&image, &ShiTomasi, Sigma::new(1.0));
-        let params = CornerParams::try_new(Sigma::new(1.0), 0.4 * max_response(&map), 4).unwrap();
+        let map: Image<MonoF32> = corner_response_map(&image, &ShiTomasi, sigma!(1.0));
+        let params = CornerParams::try_new(sigma!(1.0), 0.4 * max_response(&map), 4).unwrap();
 
         let corners = detect_corners(&image, &ShiTomasi, params);
         assert_eq!(positions(&corners), [(12.0, 12.0)], "{corners:?}");
@@ -1269,9 +1307,9 @@ mod tests {
         let image = square(24, 7, 17);
         let rotated: Image<MonoF32> = rotate_90(&image);
 
-        let map: Image<MonoF32> = corner_response_map(&image, &Harris::new(0.04), Sigma::new(1.2));
+        let map: Image<MonoF32> = corner_response_map(&image, &harris!(0.04), sigma!(1.2));
         let rotated_map: Image<MonoF32> =
-            corner_response_map(&rotated, &Harris::new(0.04), Sigma::new(1.2));
+            corner_response_map(&rotated, &harris!(0.04), sigma!(1.2));
 
         let scale = max_response(&map);
         assert!(scale > 0.0);
@@ -1293,8 +1331,8 @@ mod tests {
         // The orchestrator must be exactly response map + peaks, so that
         // rebuilding it by hand is not a different detector.
         let image = square(24, 8, 16);
-        let method = Harris::new(0.05);
-        let params = CornerParams::new(Sigma::new(1.1), 1.0, 3);
+        let method = harris!(0.05);
+        let params = CornerParams::new(sigma!(1.1), 1.0, 3).unwrap();
 
         let staged = {
             let map: Image<MonoF32> = corner_response_map(&image, &method, params.window());
@@ -1315,8 +1353,8 @@ mod tests {
             let inside = (8..16).contains(&x) && (8..16).contains(&y);
             Mono8::new(if inside { 255 } else { 0 })
         });
-        let map: Image<MonoF32> = corner_response_map(&image, &ShiTomasi, Sigma::new(1.2));
-        let params = CornerParams::try_new(Sigma::new(1.2), 0.3 * max_response(&map), 3).unwrap();
+        let map: Image<MonoF32> = corner_response_map(&image, &ShiTomasi, sigma!(1.2));
+        let params = CornerParams::try_new(sigma!(1.2), 0.3 * max_response(&map), 3).unwrap();
         assert_eq!(detect_corners(&image, &ShiTomasi, params).len(), 4);
     }
 
@@ -1330,9 +1368,9 @@ mod tests {
             let inside = (8..16).contains(&x) && (8..16).contains(&y);
             Mono16::new(if inside { 65535 } else { 0 })
         });
-        let map: Image<MonoF32> = corner_response_map(&image, &Harris::new(0.04), Sigma::new(1.2));
-        let params = CornerParams::try_new(Sigma::new(1.2), 0.2 * max_response(&map), 3).unwrap();
-        assert_eq!(detect_corners(&image, &Harris::new(0.04), params).len(), 4);
+        let map: Image<MonoF32> = corner_response_map(&image, &harris!(0.04), sigma!(1.2));
+        let params = CornerParams::try_new(sigma!(1.2), 0.2 * max_response(&map), 3).unwrap();
+        assert_eq!(detect_corners(&image, &harris!(0.04), params).len(), 4);
     }
 
     #[test]
@@ -1341,8 +1379,8 @@ mod tests {
             let inside = (8..16).contains(&x) && (8..16).contains(&y);
             MonoF64::new(if inside { 1.0 } else { 0.0 })
         });
-        let map: Image<MonoF64> = corner_response_map(&image, &ShiTomasi, Sigma::new(1.2));
-        let params = CornerParams::try_new(Sigma::new(1.2), 0.3 * max_response(&map), 3).unwrap();
+        let map: Image<MonoF64> = corner_response_map(&image, &ShiTomasi, sigma!(1.2));
+        let params = CornerParams::try_new(sigma!(1.2), 0.3 * max_response(&map), 3).unwrap();
         assert_eq!(detect_corners(&image, &ShiTomasi, params).len(), 4);
     }
 
@@ -1353,11 +1391,11 @@ mod tests {
         let image = square(24, 8, 16);
         let level = ScaledImage::new(
             image.clone(),
-            PixelDistance::new(1.0),
+            pixel_distance!(1.0),
             CoordinateF64::new(0.0, 0.0),
-            Sigma::new(0.5),
+            sigma!(0.5),
         );
-        let params = CornerParams::new(Sigma::new(1.2), 1.0, 3);
+        let params = CornerParams::new(sigma!(1.2), 1.0, 3).unwrap();
 
         assert_eq!(
             detect_corners_in_level(&level, &ShiTomasi, params),
@@ -1370,13 +1408,13 @@ mod tests {
         let base = square(48, 16, 32);
         let level = ScaledImage::new(
             pyr_down(&base),
-            PixelDistance::new(2.0),
+            pixel_distance!(2.0),
             CoordinateF64::new(0.0, 0.0),
-            Sigma::new(1.0),
+            sigma!(1.0),
         );
         let map: Image<MonoF32> =
-            corner_response_map(level.as_image(), &ShiTomasi, Sigma::new(1.0));
-        let params = CornerParams::try_new(Sigma::new(1.0), 0.3 * max_response(&map), 2).unwrap();
+            corner_response_map(level.as_image(), &ShiTomasi, sigma!(1.0));
+        let params = CornerParams::try_new(sigma!(1.0), 0.3 * max_response(&map), 2).unwrap();
 
         let corners = detect_corners_in_level(&level, &ShiTomasi, params);
         assert_eq!(corners.len(), 4, "{corners:?}");
@@ -1401,19 +1439,19 @@ mod tests {
         let levels = vec![
             ScaledImage::new(
                 base.clone(),
-                PixelDistance::new(1.0),
+                pixel_distance!(1.0),
                 CoordinateF64::new(0.0, 0.0),
-                Sigma::new(0.5),
+                sigma!(0.5),
             ),
             ScaledImage::new(
                 pyr_down(&base),
-                PixelDistance::new(2.0),
+                pixel_distance!(2.0),
                 CoordinateF64::new(0.0, 0.0),
-                Sigma::new(1.0),
+                sigma!(1.0),
             ),
         ];
         let pyramid = Pyramid::try_from_levels(levels).unwrap();
-        let params = CornerParams::new(Sigma::new(1.0), 0.5, 2);
+        let params = CornerParams::new(sigma!(1.0), 0.5, 2).unwrap();
 
         let corners: Vec<Corner> = pyramid
             .iter()
@@ -1438,19 +1476,19 @@ mod tests {
         // the lift must carry that term rather than just scaling.
         let base = square(48, 16, 32);
         let coarse = pyr_down(&base);
-        let params = CornerParams::new(Sigma::new(1.0), 0.5, 2);
+        let params = CornerParams::new(sigma!(1.0), 0.5, 2).unwrap();
 
         let unshifted = ScaledImage::new(
             coarse.clone(),
-            PixelDistance::new(2.0),
+            pixel_distance!(2.0),
             CoordinateF64::new(0.0, 0.0),
-            Sigma::new(1.0),
+            sigma!(1.0),
         );
         let shifted = ScaledImage::new(
             coarse,
-            PixelDistance::new(2.0),
+            pixel_distance!(2.0),
             CoordinateF64::new(0.5, 0.5),
-            Sigma::new(1.0),
+            sigma!(1.0),
         );
 
         let a = detect_corners_in_level(&unshifted, &ShiTomasi, params);

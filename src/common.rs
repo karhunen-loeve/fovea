@@ -72,6 +72,64 @@ impl Coordinate {
     pub fn new(x: usize, y: usize) -> Self {
         Self { x, y }
     }
+
+    /// Applies an [`Offset`], returning `None` if the result would leave
+    /// the non-negative quadrant.
+    ///
+    /// This is the lower half of a neighbourhood bounds check, and it is
+    /// the only one the crate open-codes. The upper half needs no new
+    /// concept: [`ImageView::get`](crate::image::ImageView::get) already
+    /// returns `Option`, so the whole check composes from two operations
+    /// that each say what they mean.
+    ///
+    /// # Example
+    /// ```
+    /// # use fovea::{Coordinate, Offset};
+    /// let c = Coordinate::new(0, 4);
+    /// assert_eq!(c.checked_add(Offset::new(2, -1)), Some(Coordinate::new(2, 3)));
+    /// assert_eq!(c.checked_add(Offset::new(-1, 0)), None); // off the left edge
+    /// ```
+    #[inline]
+    #[must_use]
+    pub const fn checked_add(self, offset: Offset) -> Option<Self> {
+        match (
+            self.x.checked_add_signed(offset.dx as isize),
+            self.y.checked_add_signed(offset.dy as isize),
+        ) {
+            (Some(x), Some(y)) => Some(Self { x, y }),
+            _ => None,
+        }
+    }
+
+    /// The [`Offset`] that carries `self` to `other`.
+    ///
+    /// The inverse of [`checked_add`](Self::checked_add) for any pair
+    /// whose separation fits an `i32`, which is every pair of positions in
+    /// an image this crate can hold in memory. Components beyond that
+    /// range **saturate** rather than wrapping, so a nonsensical input
+    /// stays ordered instead of changing sign.
+    ///
+    /// # Example
+    /// ```
+    /// # use fovea::{Coordinate, Offset};
+    /// let a = Coordinate::new(4, 4);
+    /// let b = Coordinate::new(5, 3);
+    /// assert_eq!(a.offset_to(b), Offset::new(1, -1));
+    /// assert_eq!(a.checked_add(a.offset_to(b)), Some(b));
+    /// ```
+    #[inline]
+    #[must_use]
+    pub fn offset_to(self, other: Self) -> Offset {
+        #[inline]
+        fn delta(from: usize, to: usize) -> i32 {
+            if to >= from {
+                i32::try_from(to - from).unwrap_or(i32::MAX)
+            } else {
+                i32::try_from(from - to).map_or(i32::MIN, |d| -d)
+            }
+        }
+        Offset::new(delta(self.x, other.x), delta(self.y, other.y))
+    }
 }
 
 impl From<(usize, usize)> for Coordinate {
@@ -120,6 +178,73 @@ impl From<Coordinate> for CoordinateF64 {
     #[inline]
     fn from(value: Coordinate) -> Self {
         Self::new(value.x as f64, value.y as f64)
+    }
+}
+
+/// A signed step on the pixel grid: the displacement from one
+/// [`Coordinate`] to another.
+///
+/// `Offset` is the crate's vocabulary for "a neighbour is this way" —
+/// a connectivity neighbourhood, a detector's sampling ring, a chain-code
+/// direction, a filter tap. All of those are the same concept, and before
+/// this type existed they were spelled as bare tuples in four widths.
+///
+/// It is **not** an invariant-carrying parameter type like [`Sigma`]:
+/// every `(dx, dy)` pair is a meaningful step, so there is nothing to
+/// validate and no `try_new`. What it buys is the field names. A
+/// positional pair lets `from_offset(dy, dx)` compile and quietly answer
+/// the wrong question, and a transposed filter tap is a different kernel
+/// that still type-checks; neither survives named `dx` and `dy`.
+///
+/// Deliberately not an arithmetic type. There is no `Add`, no `Neg` and no
+/// `From<(i32, i32)>` — the last of those would hand the positional
+/// hazard straight back. The one operation is
+/// [`Coordinate::checked_add`], where the widening and the
+/// non-negative check happen together.
+///
+/// `i32` because ring and kernel radii are single digits, and because it
+/// was already the majority spelling of the four.
+///
+/// # Example
+/// ```
+/// # use fovea::{Coordinate, Offset};
+/// const NORTH: Offset = Offset::new(0, -1); // y grows downward
+/// assert_eq!(NORTH.dy, -1);
+///
+/// // Applying one is checked, so the image edge is not a special case.
+/// assert_eq!(Coordinate::new(3, 3).checked_add(NORTH), Some(Coordinate::new(3, 2)));
+/// assert_eq!(Coordinate::new(3, 0).checked_add(NORTH), None);
+/// ```
+///
+/// # What will not compile
+///
+/// There is no conversion from a pair, and that is the point: the pair is
+/// the shape a transposed step slips through.
+///
+/// ```compile_fail
+/// use fovea::{Coordinate, Offset};
+///
+/// // ERROR: the trait bound `Offset: From<(i32, i32)>` is not satisfied.
+/// let step: Offset = (0, -1).into();
+/// let _ = Coordinate::new(3, 3).checked_add(step);
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Offset {
+    /// Horizontal step, positive to the right.
+    pub dx: i32,
+    /// Vertical step, positive **downward** — image coordinates.
+    pub dy: i32,
+}
+
+impl Offset {
+    /// The zero step: the site itself.
+    pub const ZERO: Self = Self::new(0, 0);
+
+    /// Creates an `Offset` of `dx` columns and `dy` rows.
+    #[inline]
+    #[must_use]
+    pub const fn new(dx: i32, dy: i32) -> Self {
+        Self { dx, dy }
     }
 }
 
@@ -283,21 +408,23 @@ impl From<(usize, usize)> for Stride {
 ///
 /// `Sigma` is an invariant-carrying parameter type: the validation
 /// happens once, where the value is born, and every function taking a
-/// `Sigma` is total in it — the same idea as `std::num::NonZeroUsize`.
+/// `Sigma` is total in it, the same idea as `std::num::NonZeroUsize`.
 ///
-/// - Literals use [`Sigma::new`], a `const fn`: in a `const` context an
-///   invalid literal fails to **compile**; at runtime it panics on first
-///   execution (a deterministic programmer error, not a data condition).
+/// - Literals use the [`sigma!`](crate::sigma) macro. It is an inline
+///   `const` block, so an invalid literal is a **compile error** and a
+///   runtime value does not type-check at all.
 /// - Values computed from data (an estimator, a scale-space formula, an
 ///   image statistic) use [`Sigma::try_new`] and handle the error where
 ///   the computation produced the bad value.
+/// - [`Sigma::new`] is the checked `const fn` underneath the macro. It
+///   returns [`Option`], so reaching for it by name cannot abort.
 ///
 /// # Example
 ///
 /// ```
-/// use fovea::Sigma;
+/// use fovea::{Sigma, sigma};
 ///
-/// const BLUR: Sigma = Sigma::new(1.4); // checked at compile time
+/// const BLUR: Sigma = sigma!(1.4); // checked at compile time
 ///
 /// let estimated = 0.8_f32 * 2.0;
 /// let sigma = Sigma::try_new(estimated)?; // checked where it is computed
@@ -308,21 +435,20 @@ impl From<(usize, usize)> for Stride {
 pub struct Sigma(f32);
 
 impl Sigma {
-    /// Creates a `Sigma` from a literal or otherwise proven-valid value.
+    /// Creates a `Sigma`, returning `None` if the value is not finite and
+    /// strictly positive.
     ///
-    /// # Panics
-    ///
-    /// Panics if `value` is not finite and strictly positive. As a
-    /// `const fn`, this is a **compile error** when evaluated in a
-    /// `const` context. For values computed from data, use
-    /// [`Self::try_new`].
+    /// This is the `const fn` the [`sigma!`](crate::sigma) macro wraps.
+    /// Prefer the macro for literals, since it moves the check to compile
+    /// time, and [`Self::try_new`] for values computed from data, since it
+    /// reports a reason.
     #[must_use]
-    pub const fn new(value: f32) -> Self {
-        assert!(
-            value.is_finite() && value > 0.0,
-            "Sigma::new: sigma must be finite and positive"
-        );
-        Self(value)
+    pub const fn new(value: f32) -> Option<Self> {
+        if value.is_finite() && value > 0.0 {
+            Some(Self(value))
+        } else {
+            None
+        }
     }
 
     /// Creates a `Sigma` from a computed value, validating it.
@@ -348,44 +474,86 @@ impl Sigma {
     }
 }
 
-/// A validated sampling distance in base-image pixels: finite and
-/// strictly positive.
+/// A [`Sigma`] literal, checked at compile time.
 ///
-/// Carries the [`Decimated`](crate::image::Decimated) grid spacing —
-/// `2.0` for octave 1 of a 2× pyramid, `0.5` for an upsampled
-/// octave −1. Same construction discipline as [`Sigma`]:
-/// [`PixelDistance::new`] (const, panics — a compile error in `const`
-/// contexts) for literals, [`PixelDistance::try_new`] for values derived
-/// from a decimation chain.
+/// Expands to an inline `const` block, which has two consequences worth
+/// knowing before reaching for it:
+///
+/// - An invalid literal is a **compile error**, not a runtime abort. This
+///   is the reason the macro exists: a `const fn` would be checked at
+///   compile time only when the compiler happens to evaluate it there.
+/// - A value that is not a constant expression does not compile
+///   (`error[E0435]`). For those, use [`Sigma::try_new`], which reports a
+///   reason the caller can act on.
 ///
 /// # Example
 ///
 /// ```
-/// use fovea::PixelDistance;
+/// use fovea::{Sigma, sigma};
+/// use fovea::transform::gaussian_blur;
+/// # use fovea::border::Clamp;
+/// # use fovea::image::Image;
+/// # use fovea::pixel::MonoF32;
 ///
-/// const OCTAVE_1: PixelDistance = PixelDistance::new(2.0);
+/// // In argument position, where the macro is shortest.
+/// # let img: Image<MonoF32> = Image::fill(8, 8, MonoF32::new(0.5));
+/// let blurred: Image<MonoF32> = gaussian_blur(&img, sigma!(1.4), &Clamp);
+///
+/// // And in a `const` item.
+/// const BLUR: Sigma = sigma!(1.4);
+/// assert_eq!(BLUR.get(), 1.4);
+/// ```
+///
+/// A σ of zero is not a blur, so it does not build:
+///
+/// ```compile_fail
+/// use fovea::sigma;
+/// // ERROR: evaluation panicked: sigma must be finite and strictly positive
+/// let _ = sigma!(0.0);
+/// ```
+#[macro_export]
+macro_rules! sigma {
+    ($value:expr) => {
+        const { $crate::Sigma::new($value).expect("sigma must be finite and strictly positive") }
+    };
+}
+
+/// A validated sampling distance in base-image pixels: finite and
+/// strictly positive.
+///
+/// Carries the [`Decimated`](crate::image::Decimated) grid spacing:
+/// `2.0` for octave 1 of a 2× pyramid, `0.5` for an upsampled
+/// octave −1. Same construction discipline as [`Sigma`]: the
+/// [`pixel_distance!`](crate::pixel_distance) macro for literals,
+/// [`PixelDistance::try_new`] for values derived from a decimation chain,
+/// and [`PixelDistance::new`] as the checked `const fn` under the macro.
+///
+/// # Example
+///
+/// ```
+/// use fovea::{PixelDistance, pixel_distance};
+///
+/// const OCTAVE_1: PixelDistance = pixel_distance!(2.0);
 /// assert_eq!(OCTAVE_1.get(), 2.0);
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 pub struct PixelDistance(f64);
 
 impl PixelDistance {
-    /// Creates a `PixelDistance` from a literal or otherwise proven-valid
-    /// value.
+    /// Creates a `PixelDistance`, returning `None` if the value is not
+    /// finite and strictly positive.
     ///
-    /// # Panics
-    ///
-    /// Panics if `value` is not finite and strictly positive. As a
-    /// `const fn`, this is a **compile error** when evaluated in a
-    /// `const` context. For values computed from data, use
-    /// [`Self::try_new`].
+    /// This is the `const fn` the
+    /// [`pixel_distance!`](crate::pixel_distance) macro wraps. Prefer the
+    /// macro for literals and [`Self::try_new`] for values computed from
+    /// data.
     #[must_use]
-    pub const fn new(value: f64) -> Self {
-        assert!(
-            value.is_finite() && value > 0.0,
-            "PixelDistance::new: pixel distance must be finite and positive"
-        );
-        Self(value)
+    pub const fn new(value: f64) -> Option<Self> {
+        if value.is_finite() && value > 0.0 {
+            Some(Self(value))
+        } else {
+            None
+        }
     }
 
     /// Creates a `PixelDistance` from a computed value, validating it.
@@ -411,44 +579,78 @@ impl PixelDistance {
     }
 }
 
-/// A validated geometric tolerance in pixels: finite and non-negative.
+/// A [`PixelDistance`] literal, checked at compile time.
 ///
-/// The maximum deviation a caller is willing to accept, e.g. the ε of
-/// [`approximate_polygon`](crate::analyze::contours::approximate_polygon).
-/// Unlike [`Sigma`] and [`PixelDistance`], **zero is a valid value** — a
-/// tolerance of `0.0` accepts no deviation at all (for polygon
-/// approximation: only exactly collinear vertices are removed). Same
-/// construction discipline as the other parameter types:
-/// [`Tolerance::new`] (const, panics — a compile error in `const`
-/// contexts) for literals, [`Tolerance::try_new`] for computed values.
+/// The [`sigma!`](crate::sigma) macro's counterpart for grid spacings; see
+/// it for why this is a macro and not a `const fn`. A value that is not a
+/// constant expression does not compile (`error[E0435]`); use
+/// [`PixelDistance::try_new`] there.
 ///
 /// # Example
 ///
 /// ```
-/// use fovea::Tolerance;
+/// use fovea::{PixelDistance, pixel_distance};
 ///
-/// const HALF_PIXEL: Tolerance = Tolerance::new(0.5);
+/// const OCTAVE_1: PixelDistance = pixel_distance!(2.0);
+/// assert_eq!(OCTAVE_1.get(), 2.0);
+/// assert_eq!(pixel_distance!(0.5).get(), 0.5); // an upsampled octave
+/// ```
+///
+/// A spacing of zero would collapse the grid, so it does not build:
+///
+/// ```compile_fail
+/// use fovea::pixel_distance;
+/// // ERROR: evaluation panicked: pixel distance must be finite and
+/// // strictly positive
+/// let _ = pixel_distance!(0.0);
+/// ```
+#[macro_export]
+macro_rules! pixel_distance {
+    ($value:expr) => {
+        const {
+            $crate::PixelDistance::new($value)
+                .expect("pixel distance must be finite and strictly positive")
+        }
+    };
+}
+
+/// A validated geometric tolerance in pixels: finite and non-negative.
+///
+/// The maximum deviation a caller is willing to accept, e.g. the ε of
+/// [`approximate_polygon`](crate::analyze::contours::approximate_polygon).
+/// Unlike [`Sigma`] and [`PixelDistance`], **zero is a valid value**: a
+/// tolerance of `0.0` accepts no deviation at all (for polygon
+/// approximation, only exactly collinear vertices are removed). Same
+/// construction discipline as the other parameter types: the
+/// [`tolerance!`](crate::tolerance) macro for literals,
+/// [`Tolerance::try_new`] for computed values, and [`Tolerance::new`] as
+/// the checked `const fn` under the macro.
+///
+/// # Example
+///
+/// ```
+/// use fovea::{Tolerance, tolerance};
+///
+/// const HALF_PIXEL: Tolerance = tolerance!(0.5);
 /// assert_eq!(HALF_PIXEL.get(), 0.5);
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 pub struct Tolerance(f64);
 
 impl Tolerance {
-    /// Creates a `Tolerance` from a literal or otherwise proven-valid
-    /// value.
+    /// Creates a `Tolerance`, returning `None` if the value is NaN,
+    /// infinite, or negative.
     ///
-    /// # Panics
-    ///
-    /// Panics if `value` is NaN, infinite, or negative. As a `const fn`,
-    /// this is a **compile error** when evaluated in a `const` context.
-    /// For values computed from data, use [`Self::try_new`].
+    /// This is the `const fn` the [`tolerance!`](crate::tolerance) macro
+    /// wraps. Prefer the macro for literals and [`Self::try_new`] for
+    /// values computed from data.
     #[must_use]
-    pub const fn new(value: f64) -> Self {
-        assert!(
-            value.is_finite() && value >= 0.0,
-            "Tolerance::new: tolerance must be finite and non-negative"
-        );
-        Self(value)
+    pub const fn new(value: f64) -> Option<Self> {
+        if value.is_finite() && value >= 0.0 {
+            Some(Self(value))
+        } else {
+            None
+        }
     }
 
     /// Creates a `Tolerance` from a computed value, validating it.
@@ -474,6 +676,37 @@ impl Tolerance {
     }
 }
 
+/// A [`Tolerance`] literal, checked at compile time.
+///
+/// The [`sigma!`](crate::sigma) macro's counterpart for geometric
+/// tolerances; see it for why this is a macro and not a `const fn`. A
+/// value that is not a constant expression does not compile
+/// (`error[E0435]`); use [`Tolerance::try_new`] there.
+///
+/// # Example
+///
+/// ```
+/// use fovea::{Tolerance, tolerance};
+///
+/// const HALF_PIXEL: Tolerance = tolerance!(0.5);
+/// assert_eq!(HALF_PIXEL.get(), 0.5);
+/// assert_eq!(tolerance!(0.0).get(), 0.0); // zero accepts no deviation
+/// ```
+///
+/// A negative tolerance accepts nothing at all, so it does not build:
+///
+/// ```compile_fail
+/// use fovea::tolerance;
+/// // ERROR: evaluation panicked: tolerance must be finite and non-negative
+/// let _ = tolerance!(-0.5);
+/// ```
+#[macro_export]
+macro_rules! tolerance {
+    ($value:expr) => {
+        const { $crate::Tolerance::new($value).expect("tolerance must be finite and non-negative") }
+    };
+}
+
 /// A validated square-window side length: odd and non-zero.
 ///
 /// The side of a neighbourhood centred on the pixel being processed, in
@@ -492,9 +725,10 @@ impl Tolerance {
 /// Unlike [`Sigma`] and [`Tolerance`], whose invariants are inequalities
 /// on a float, this one is a *parity* property, which is why the name
 /// states it, the same choice `NonZeroUsize` makes. Same construction
-/// discipline as the other parameter types: [`OddWindowSide::new`] (const,
-/// panics, and so a compile error in `const` contexts) for literals,
-/// [`OddWindowSide::try_new`] for values computed from data.
+/// discipline as the other parameter types: the
+/// [`window!`](crate::window) macro for literals,
+/// [`OddWindowSide::try_new`] for values computed from data, and
+/// [`OddWindowSide::new`] as the checked `const fn` under the macro.
 ///
 /// The side length rather than the radius is the wrapped quantity,
 /// matching OpenCV's `blockSize` and scikit-image's `block_size`, so a
@@ -505,9 +739,9 @@ impl Tolerance {
 /// # Example
 ///
 /// ```
-/// use fovea::OddWindowSide;
+/// use fovea::{OddWindowSide, window};
 ///
-/// const LOCAL: OddWindowSide = OddWindowSide::new(15);
+/// const LOCAL: OddWindowSide = window!(15);
 /// assert_eq!(LOCAL.get(), 15);
 /// assert_eq!(LOCAL.radius(), 7);
 ///
@@ -516,34 +750,31 @@ impl Tolerance {
 /// assert!(OddWindowSide::try_new(from_data).is_err());
 /// ```
 ///
-/// In a `const` context an invalid literal does not compile at all, which
-/// is the point of the `const fn`:
+/// An invalid literal does not compile at all, which is the point of the
+/// macro:
 ///
 /// ```compile_fail
-/// use fovea::OddWindowSide;
-/// // ERROR: evaluation of constant value failed. The window side must be
-/// // odd and non-zero.
-/// const WINDOW: OddWindowSide = OddWindowSide::new(16);
+/// use fovea::window;
+/// // ERROR: evaluation panicked: window side must be odd and non-zero
+/// let _ = window!(16);
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct OddWindowSide(usize);
 
 impl OddWindowSide {
-    /// Creates an `OddWindowSide` from a literal or otherwise proven-valid
-    /// value.
+    /// Creates an `OddWindowSide`, returning `None` if `side` is zero or
+    /// even.
     ///
-    /// # Panics
-    ///
-    /// Panics if `side` is zero or even. As a `const fn`, this is a
-    /// **compile error** when evaluated in a `const` context. For values
-    /// computed from data, use [`Self::try_new`].
+    /// This is the `const fn` the [`window!`](crate::window) macro wraps.
+    /// Prefer the macro for literals and [`Self::try_new`] for values
+    /// computed from data.
     #[must_use]
-    pub const fn new(side: usize) -> Self {
-        assert!(
-            side != 0 && side % 2 == 1,
-            "OddWindowSide::new: window side must be odd and non-zero"
-        );
-        Self(side)
+    pub const fn new(side: usize) -> Option<Self> {
+        if side != 0 && side % 2 == 1 {
+            Some(Self(side))
+        } else {
+            None
+        }
     }
 
     /// Creates an `OddWindowSide` from a computed value, validating it.
@@ -576,6 +807,42 @@ impl OddWindowSide {
     pub const fn radius(self) -> usize {
         self.0 / 2
     }
+}
+
+/// An [`OddWindowSide`] literal, checked at compile time.
+///
+/// Named for the call site rather than the type: what a caller writes is a
+/// window size, and `window!(31)` beside a `bias` argument reads as one.
+/// The type keeps the longer name because it is *one axis*, which is the
+/// thing a reader of the signature has to know.
+///
+/// The [`sigma!`](crate::sigma) macro's counterpart for window sides; see
+/// it for why this is a macro and not a `const fn`. A value that is not a
+/// constant expression does not compile (`error[E0435]`); use
+/// [`OddWindowSide::try_new`] there.
+///
+/// # Example
+///
+/// ```
+/// use fovea::{OddWindowSide, window};
+///
+/// const LOCAL: OddWindowSide = window!(31);
+/// assert_eq!(LOCAL.radius(), 15);
+/// assert_eq!(window!(1).get(), 1); // valid and degenerate
+/// ```
+///
+/// An even side has no centre pixel, so it does not build:
+///
+/// ```compile_fail
+/// use fovea::window;
+/// // ERROR: evaluation panicked: window side must be odd and non-zero
+/// let _ = window!(16);
+/// ```
+#[macro_export]
+macro_rules! window {
+    ($side:expr) => {
+        const { $crate::OddWindowSide::new($side).expect("window side must be odd and non-zero") }
+    };
 }
 
 /// Canonicalizes a radian value into `(−π, π]`.
@@ -866,10 +1133,10 @@ mod tests {
 
     #[test]
     fn sigma_valid_values_round_trip() {
-        assert_eq!(Sigma::new(1.4).get(), 1.4);
+        assert_eq!(sigma!(1.4).get(), 1.4);
         assert_eq!(Sigma::try_new(0.5).unwrap().get(), 0.5);
         // Const construction: an invalid literal here would not compile.
-        const S: Sigma = Sigma::new(2.0);
+        const S: Sigma = sigma!(2.0);
         assert_eq!(S.get(), 2.0);
     }
 
@@ -890,16 +1157,21 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "finite and positive")]
-    fn sigma_new_panics_on_invalid_literal() {
-        let _ = Sigma::new(-1.5);
+    fn sigma_new_rejects_an_invalid_value() {
+        // `new` is checked and total, so no call site can abort. The
+        // `sigma!` macro turns the same rejection into a compile error,
+        // which a `compile_fail` doctest on the macro covers.
+        assert!(Sigma::new(-1.5).is_none());
+        assert!(Sigma::new(0.0).is_none());
+        assert!(Sigma::new(f32::NAN).is_none());
+        assert!(Sigma::new(f32::INFINITY).is_none());
     }
 
     #[test]
     fn pixel_distance_valid_values_round_trip() {
-        assert_eq!(PixelDistance::new(2.0).get(), 2.0);
+        assert_eq!(pixel_distance!(2.0).get(), 2.0);
         assert_eq!(PixelDistance::try_new(0.5).unwrap().get(), 0.5);
-        const D: PixelDistance = PixelDistance::new(0.5);
+        const D: PixelDistance = pixel_distance!(0.5);
         assert_eq!(D.get(), 0.5);
     }
 
@@ -918,20 +1190,21 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "finite and positive")]
-    fn pixel_distance_new_panics_on_invalid_literal() {
-        let _ = PixelDistance::new(0.0);
+    fn pixel_distance_new_rejects_an_invalid_value() {
+        assert!(PixelDistance::new(0.0).is_none());
+        assert!(PixelDistance::new(-2.0).is_none());
+        assert!(PixelDistance::new(f64::NAN).is_none());
     }
 
     #[test]
     fn odd_window_side_valid_values_round_trip() {
-        assert_eq!(OddWindowSide::new(31).get(), 31);
+        assert_eq!(window!(31).get(), 31);
         assert_eq!(OddWindowSide::try_new(3).unwrap().get(), 3);
         // Const construction: an even literal here would not compile.
-        const W: OddWindowSide = OddWindowSide::new(15);
+        const W: OddWindowSide = window!(15);
         assert_eq!(W.get(), 15);
         // A side of 1 is degenerate but valid: the window is the pixel.
-        assert_eq!(OddWindowSide::new(1).radius(), 0);
+        assert_eq!(window!(1).radius(), 0);
     }
 
     #[test]
@@ -952,9 +1225,9 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "odd and non-zero")]
-    fn odd_window_side_new_panics_on_even_literal() {
-        let _ = OddWindowSide::new(8);
+    fn odd_window_side_new_rejects_an_invalid_side() {
+        assert!(OddWindowSide::new(8).is_none());
+        assert!(OddWindowSide::new(0).is_none());
     }
 
     #[test]
@@ -963,7 +1236,7 @@ mod tests {
         // derived: for an odd side the two determine each other exactly, so
         // a consumer can take either without a rounding decision.
         for side in [1, 3, 5, 31, 101] {
-            let w = OddWindowSide::new(side);
+            let w = OddWindowSide::new(side).unwrap();
             assert_eq!(w.radius(), side / 2);
             assert_eq!(2 * w.radius() + 1, side);
         }
@@ -1423,5 +1696,61 @@ mod tests {
     fn rectangle_bottom_panics_on_overflow() {
         let r = Rectangle::new((0, usize::MAX - 1), (1, 10));
         let _ = r.bottom();
+    }
+
+    // ── Offset ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn checked_add_rejects_only_the_negative_half() {
+        let c = Coordinate::new(0, 0);
+        assert_eq!(c.checked_add(Offset::ZERO), Some(c));
+        assert_eq!(c.checked_add(Offset::new(-1, 0)), None);
+        assert_eq!(c.checked_add(Offset::new(0, -1)), None);
+        assert_eq!(
+            c.checked_add(Offset::new(3, 4)),
+            Some(Coordinate::new(3, 4))
+        );
+        // The far edge is not this operation's business: a position past
+        // the image is still a coordinate, and `ImageView::get` is what
+        // rejects it.
+        assert_eq!(
+            Coordinate::new(usize::MAX - 1, 0).checked_add(Offset::new(1, 0)),
+            Some(Coordinate::new(usize::MAX, 0))
+        );
+        assert_eq!(
+            Coordinate::new(usize::MAX, 0).checked_add(Offset::new(1, 0)),
+            None
+        );
+    }
+
+    #[test]
+    fn offset_to_inverts_checked_add() {
+        let corners = [
+            Coordinate::new(0, 0),
+            Coordinate::new(7, 0),
+            Coordinate::new(0, 5),
+            Coordinate::new(7, 5),
+        ];
+        for &a in &corners {
+            for &b in &corners {
+                assert_eq!(a.checked_add(a.offset_to(b)), Some(b), "{a:?} -> {b:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn offset_to_saturates_rather_than_wrapping() {
+        // Out of `i32` range, so the components clamp. The point is the
+        // sign: a wrapping cast would turn a step right into a step left.
+        let far = Coordinate::new(usize::MAX, 0).offset_to(Coordinate::new(0, usize::MAX));
+        assert_eq!(far, Offset::new(i32::MIN, i32::MAX));
+    }
+
+    #[test]
+    fn an_offset_is_transposition_sensitive() {
+        // The whole reason the type exists: the two field orders are
+        // distinguishable values, where a positional pair would have made
+        // the swap invisible.
+        assert_ne!(Offset::new(1, -1), Offset::new(-1, 1));
     }
 }

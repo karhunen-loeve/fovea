@@ -188,14 +188,14 @@ where
 /// `gaussian_blur_with_into` used to spell:
 ///
 /// ```
-/// use fovea::Sigma;
 /// use fovea::border::Clamp;
 /// use fovea::image::{Image, ImageView, gaussian_kernel_1d};
 /// use fovea::pixel::MonoF32;
+/// use fovea::sigma;
 /// use fovea::transform::convolve_separable_into;
 ///
 /// let src = Image::fill(16, 16, MonoF32(0.5));
-/// let kernel = gaussian_kernel_1d(Sigma::new(1.5), 3.0); // explicit truncate
+/// let kernel = gaussian_kernel_1d(sigma!(1.5), 3.0); // explicit truncate
 /// let mut out = Image::<MonoF32>::zero(16, 16);
 ///
 /// convolve_separable_into(&src, &kernel, &Clamp, &mut out);

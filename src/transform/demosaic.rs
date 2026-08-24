@@ -41,7 +41,6 @@
 //! assert_eq!(rgb.pixel_at(0, 0), Rgb8::new(200, 40, 150));
 //! ```
 
-use crate::Size;
 use crate::border::{BorderPolicy, Mirror, compute_interior_region};
 use crate::error::Error;
 use crate::image::{Image, ImageView, ImageViewMut};
@@ -49,6 +48,7 @@ use crate::pixel::{
     FromLinear, LinearPixel, MonoF32, RgbF32, ZeroablePixel,
     bayer::{BayerPixel, CfaColor},
 };
+use crate::{Coordinate, Offset, Size};
 
 // ═══════════════════════════════════════════════════════════════════════════
 // DemosaicMethod — the strategy trait
@@ -78,6 +78,7 @@ use crate::pixel::{
 /// # Implementing
 ///
 /// ```
+/// use fovea::{Coordinate, Offset};
 /// use fovea::image::{Image, ImageView};
 /// use fovea::pixel::{Rgb8, RgbF32, bayer::{BayerPixel, BayerRggb8, CfaColor}};
 /// use fovea::transform::{DemosaicMethod, demosaic};
@@ -90,14 +91,14 @@ use crate::pixel::{
 /// impl<B: BayerPixel> DemosaicMethod<B> for NearestSite {
 ///     const RADIUS: usize = 1;
 ///
-///     fn interpolate<S>(&self, x: usize, y: usize, sample: S) -> RgbF32
+///     fn interpolate<S>(&self, at: Coordinate, sample: S) -> RgbF32
 ///     where
-///         S: Fn(isize, isize) -> f32,
+///         S: Fn(Offset) -> f32,
 ///     {
 ///         let (mut r, mut g, mut b) = (0.0, 0.0, 0.0);
-///         for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
-///             let value = sample(dx, dy);
-///             match B::PATTERN.color_at(x + dx as usize, y + dy as usize) {
+///         for tap in [Offset::ZERO, Offset::new(1, 0), Offset::new(0, 1), Offset::new(1, 1)] {
+///             let value = sample(tap);
+///             match B::PATTERN.color_at(at.x + tap.dx as usize, at.y + tap.dy as usize) {
 ///                 CfaColor::Red => r = value,
 ///                 CfaColor::Green => g = value,
 ///                 CfaColor::Blue => b = value,
@@ -122,26 +123,33 @@ pub trait DemosaicMethod<B: BayerPixel> {
     /// sample.
     const RADIUS: usize;
 
-    /// Estimates the full RGB triple at the CFA site `(x, y)`.
+    /// Estimates the full RGB triple at the CFA site `at`.
     ///
-    /// `sample(dx, dy)` returns the raw sample at `(x + dx, y + dy)` as an
-    /// `f32`, already resolved against the frame border. The site's own
-    /// sample is `sample(0, 0)`, and its colour is
-    /// `B::PATTERN.color_at(x, y)`.
+    /// `sample(tap)` returns the raw sample at `at + tap` as an `f32`,
+    /// already resolved against the frame border. The site's own sample is
+    /// `sample(Offset::ZERO)`, and its colour is
+    /// `B::PATTERN.color_at(at.x, at.y)`.
+    ///
+    /// The tap is an [`Offset`] rather than a pair because a kernel that
+    /// reads `(dy, dx)` where it meant `(dx, dy)` is a *different* kernel
+    /// that still compiles — [`MalvarHeCutler`]'s row and column kernels
+    /// are each other's transpose, so nothing but a numeric test would
+    /// catch the swap.
     ///
     /// Coordinates are **image** coordinates, so parity is meaningful. Two
     /// consequences implementors may rely on:
     ///
     /// * Because the engine reflects without duplicating the edge sample,
-    ///   the tap at `(dx, dy)` has the colour
-    ///   `B::PATTERN.color_at(x + dx, y + dy)` even where that position lies
-    ///   outside the frame.
-    /// * `x + 1` and `y + 1` never overflow a `usize` for a real image, so
-    ///   the colour of a neighbouring site can be queried directly — which
-    ///   is how a green site tells a red row from a blue one.
-    fn interpolate<S>(&self, x: usize, y: usize, sample: S) -> RgbF32
+    ///   the tap has the colour
+    ///   `B::PATTERN.color_at(at.x + tap.dx, at.y + tap.dy)` even where that
+    ///   position lies outside the frame.
+    /// * `at.x + 1` and `at.y + 1` never overflow a `usize` for a real
+    ///   image, so the colour of a neighbouring site can be queried
+    ///   directly — which is how a green site tells a red row from a blue
+    ///   one.
+    fn interpolate<S>(&self, at: Coordinate, sample: S) -> RgbF32
     where
-        S: Fn(isize, isize) -> f32;
+        S: Fn(Offset) -> f32;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -328,9 +336,10 @@ where
     if let Some(interior) = interior {
         for y in interior.top()..interior.bottom() {
             for x in interior.left()..interior.right() {
-                let rgb = method.interpolate(x, y, |dx, dy| {
-                    let sx = (x as isize + dx) as usize;
-                    let sy = (y as isize + dy) as usize;
+                let site = Coordinate::new(x, y);
+                let rgb = method.interpolate(site, |tap| {
+                    let sx = (x as isize + tap.dx as isize) as usize;
+                    let sy = (y as isize + tap.dy as isize) as usize;
                     image.pixel_at(sx, sy).to_accumulator().0
                 });
                 *output.pixel_at_mut(x, y) = FromLinear::from_linear(rgb);
@@ -356,9 +365,13 @@ where
                 }
             }
 
-            let rgb = method.interpolate(x, y, |dx, dy| {
+            let rgb = method.interpolate(Coordinate::new(x, y), |tap| {
                 Mirror
-                    .pixel_at(image, x as isize + dx, y as isize + dy)
+                    .pixel_at(
+                        image,
+                        x as isize + tap.dx as isize,
+                        y as isize + tap.dy as isize,
+                    )
                     .to_accumulator()
                     .0
             });
@@ -418,18 +431,26 @@ impl<B: BayerPixel> DemosaicMethod<B> for BayerBilinear {
     const RADIUS: usize = 1;
 
     #[inline]
-    fn interpolate<S>(&self, x: usize, y: usize, sample: S) -> RgbF32
+    fn interpolate<S>(&self, at: Coordinate, sample: S) -> RgbF32
     where
-        S: Fn(isize, isize) -> f32,
+        S: Fn(Offset) -> f32,
     {
-        let center = sample(0, 0);
+        let center = sample(Offset::ZERO);
 
-        match B::PATTERN.color_at(x, y) {
+        match B::PATTERN.color_at(at.x, at.y) {
             // A red or blue site: the four edge-adjacent sites are green,
             // the four diagonal ones carry the third colour.
             color @ (CfaColor::Red | CfaColor::Blue) => {
-                let green = (sample(-1, 0) + sample(1, 0) + sample(0, -1) + sample(0, 1)) * 0.25;
-                let other = (sample(-1, -1) + sample(1, -1) + sample(-1, 1) + sample(1, 1)) * 0.25;
+                let green = (sample(Offset::new(-1, 0))
+                    + sample(Offset::new(1, 0))
+                    + sample(Offset::new(0, -1))
+                    + sample(Offset::new(0, 1)))
+                    * 0.25;
+                let other = (sample(Offset::new(-1, -1))
+                    + sample(Offset::new(1, -1))
+                    + sample(Offset::new(-1, 1))
+                    + sample(Offset::new(1, 1)))
+                    * 0.25;
                 if color == CfaColor::Red {
                     RgbF32::new(center, green, other)
                 } else {
@@ -441,9 +462,9 @@ impl<B: BayerPixel> DemosaicMethod<B> for BayerBilinear {
             // colour of the site to the right — only its parity matters,
             // so `x + 1` is safe at the last column.
             CfaColor::Green => {
-                let along_row = (sample(-1, 0) + sample(1, 0)) * 0.5;
-                let along_column = (sample(0, -1) + sample(0, 1)) * 0.5;
-                if B::PATTERN.color_at(x + 1, y) == CfaColor::Red {
+                let along_row = (sample(Offset::new(-1, 0)) + sample(Offset::new(1, 0))) * 0.5;
+                let along_column = (sample(Offset::new(0, -1)) + sample(Offset::new(0, 1))) * 0.5;
+                if B::PATTERN.color_at(at.x + 1, at.y) == CfaColor::Red {
                     RgbF32::new(along_row, center, along_column)
                 } else {
                     RgbF32::new(along_column, center, along_row)
@@ -524,11 +545,17 @@ impl MalvarHeCutler {
     #[inline(always)]
     fn green_at_red_or_blue<S>(sample: &S) -> f32
     where
-        S: Fn(isize, isize) -> f32,
+        S: Fn(Offset) -> f32,
     {
-        let adjacent = sample(-1, 0) + sample(1, 0) + sample(0, -1) + sample(0, 1);
-        let outer = sample(-2, 0) + sample(2, 0) + sample(0, -2) + sample(0, 2);
-        (4.0 * sample(0, 0) + 2.0 * adjacent - outer) * 0.125
+        let adjacent = sample(Offset::new(-1, 0))
+            + sample(Offset::new(1, 0))
+            + sample(Offset::new(0, -1))
+            + sample(Offset::new(0, 1));
+        let outer = sample(Offset::new(-2, 0))
+            + sample(Offset::new(2, 0))
+            + sample(Offset::new(0, -2))
+            + sample(Offset::new(0, 2));
+        (4.0 * sample(Offset::ZERO) + 2.0 * adjacent - outer) * 0.125
     }
 
     /// The colour whose sites lie along the row of a green site.
@@ -543,13 +570,17 @@ impl MalvarHeCutler {
     #[inline(always)]
     fn along_row<S>(sample: &S) -> f32
     where
-        S: Fn(isize, isize) -> f32,
+        S: Fn(Offset) -> f32,
     {
-        let row_adjacent = sample(-1, 0) + sample(1, 0);
-        let row_outer = sample(-2, 0) + sample(2, 0);
-        let diagonal = sample(-1, -1) + sample(1, -1) + sample(-1, 1) + sample(1, 1);
-        let column_outer = sample(0, -2) + sample(0, 2);
-        (5.0 * sample(0, 0) + 4.0 * row_adjacent - row_outer - diagonal + 0.5 * column_outer)
+        let row_adjacent = sample(Offset::new(-1, 0)) + sample(Offset::new(1, 0));
+        let row_outer = sample(Offset::new(-2, 0)) + sample(Offset::new(2, 0));
+        let diagonal = sample(Offset::new(-1, -1))
+            + sample(Offset::new(1, -1))
+            + sample(Offset::new(-1, 1))
+            + sample(Offset::new(1, 1));
+        let column_outer = sample(Offset::new(0, -2)) + sample(Offset::new(0, 2));
+        (5.0 * sample(Offset::ZERO) + 4.0 * row_adjacent - row_outer - diagonal
+            + 0.5 * column_outer)
             * 0.125
     }
 
@@ -558,13 +589,17 @@ impl MalvarHeCutler {
     #[inline(always)]
     fn along_column<S>(sample: &S) -> f32
     where
-        S: Fn(isize, isize) -> f32,
+        S: Fn(Offset) -> f32,
     {
-        let column_adjacent = sample(0, -1) + sample(0, 1);
-        let column_outer = sample(0, -2) + sample(0, 2);
-        let diagonal = sample(-1, -1) + sample(1, -1) + sample(-1, 1) + sample(1, 1);
-        let row_outer = sample(-2, 0) + sample(2, 0);
-        (5.0 * sample(0, 0) + 4.0 * column_adjacent - column_outer - diagonal + 0.5 * row_outer)
+        let column_adjacent = sample(Offset::new(0, -1)) + sample(Offset::new(0, 1));
+        let column_outer = sample(Offset::new(0, -2)) + sample(Offset::new(0, 2));
+        let diagonal = sample(Offset::new(-1, -1))
+            + sample(Offset::new(1, -1))
+            + sample(Offset::new(-1, 1))
+            + sample(Offset::new(1, 1));
+        let row_outer = sample(Offset::new(-2, 0)) + sample(Offset::new(2, 0));
+        (5.0 * sample(Offset::ZERO) + 4.0 * column_adjacent - column_outer - diagonal
+            + 0.5 * row_outer)
             * 0.125
     }
 
@@ -581,11 +616,17 @@ impl MalvarHeCutler {
     #[inline(always)]
     fn diagonal<S>(sample: &S) -> f32
     where
-        S: Fn(isize, isize) -> f32,
+        S: Fn(Offset) -> f32,
     {
-        let diagonal = sample(-1, -1) + sample(1, -1) + sample(-1, 1) + sample(1, 1);
-        let outer = sample(-2, 0) + sample(2, 0) + sample(0, -2) + sample(0, 2);
-        (6.0 * sample(0, 0) + 2.0 * diagonal - 1.5 * outer) * 0.125
+        let diagonal = sample(Offset::new(-1, -1))
+            + sample(Offset::new(1, -1))
+            + sample(Offset::new(-1, 1))
+            + sample(Offset::new(1, 1));
+        let outer = sample(Offset::new(-2, 0))
+            + sample(Offset::new(2, 0))
+            + sample(Offset::new(0, -2))
+            + sample(Offset::new(0, 2));
+        (6.0 * sample(Offset::ZERO) + 2.0 * diagonal - 1.5 * outer) * 0.125
     }
 }
 
@@ -593,13 +634,13 @@ impl<B: BayerPixel> DemosaicMethod<B> for MalvarHeCutler {
     const RADIUS: usize = 2;
 
     #[inline]
-    fn interpolate<S>(&self, x: usize, y: usize, sample: S) -> RgbF32
+    fn interpolate<S>(&self, at: Coordinate, sample: S) -> RgbF32
     where
-        S: Fn(isize, isize) -> f32,
+        S: Fn(Offset) -> f32,
     {
-        let center = sample(0, 0);
+        let center = sample(Offset::ZERO);
 
-        match B::PATTERN.color_at(x, y) {
+        match B::PATTERN.color_at(at.x, at.y) {
             CfaColor::Red => RgbF32::new(
                 center,
                 Self::green_at_red_or_blue(&sample),
@@ -613,7 +654,7 @@ impl<B: BayerPixel> DemosaicMethod<B> for MalvarHeCutler {
             // A green site: red lies along one axis and blue along the
             // other. The site to the right names which.
             CfaColor::Green => {
-                if B::PATTERN.color_at(x + 1, y) == CfaColor::Red {
+                if B::PATTERN.color_at(at.x + 1, at.y) == CfaColor::Red {
                     RgbF32::new(
                         Self::along_row(&sample),
                         center,
@@ -658,7 +699,7 @@ impl<B: BayerPixel> DemosaicMethod<B> for MalvarHeCutler {
 /// use fovea::transform::BayerGains;
 ///
 /// // Green is the reference; red and blue are lifted to match it.
-/// const DAYLIGHT: BayerGains = BayerGains::new(1.9, 1.0, 1.6);
+/// const DAYLIGHT: BayerGains = BayerGains::new(1.9, 1.0, 1.6).unwrap();
 /// assert_eq!(DAYLIGHT.gain(CfaColor::Blue), 1.6);
 ///
 /// // A ratio computed from a grey patch is checked where it is computed.
@@ -673,24 +714,23 @@ pub struct BayerGains {
 }
 
 impl BayerGains {
-    /// Creates gains from literal or otherwise proven-valid ratios.
+    /// Creates gains, returning `None` unless every gain is finite and
+    /// non-negative.
     ///
-    /// # Panics
-    ///
-    /// Panics unless every gain is finite and non-negative. As a `const fn`
-    /// this is a **compile error** when evaluated in a `const` context; for
-    /// ratios computed from data use [`try_new`](Self::try_new).
+    /// `const`, so binding the result to a `const` item checks the literals
+    /// at compile time. There is deliberately no literal macro: three
+    /// positional floats are exactly the case where the colour names carry
+    /// the meaning. For ratios computed from data use
+    /// [`try_new`](Self::try_new), which names the offending gain.
     #[must_use]
-    pub const fn new(red: f32, green: f32, blue: f32) -> Self {
-        assert!(
-            red.is_finite() && green.is_finite() && blue.is_finite(),
-            "BayerGains::new: gains must be finite"
-        );
-        assert!(
-            red >= 0.0 && green >= 0.0 && blue >= 0.0,
-            "BayerGains::new: gains must be non-negative"
-        );
-        Self { red, green, blue }
+    pub const fn new(red: f32, green: f32, blue: f32) -> Option<Self> {
+        if !(red.is_finite() && green.is_finite() && blue.is_finite()) {
+            return None;
+        }
+        if red < 0.0 || green < 0.0 || blue < 0.0 {
+            return None;
+        }
+        Some(Self { red, green, blue })
     }
 
     /// Creates gains from computed ratios, validating them.
@@ -781,7 +821,7 @@ impl BayerGains {
 /// use fovea::transform::{BayerGains, white_balance};
 ///
 /// let raw = Image::fill(4, 4, BayerRggb12::new(1000));
-/// let balanced = white_balance(&raw, BayerGains::new(1.5, 1.0, 1.25));
+/// let balanced = white_balance(&raw, BayerGains::new(1.5, 1.0, 1.25).unwrap());
 ///
 /// assert_eq!(balanced.pixel_at(0, 0).value(), 1500); // R site
 /// assert_eq!(balanced.pixel_at(1, 0).value(), 1000); // G site
@@ -818,7 +858,7 @@ where
 /// let raw = Image::fill(4, 4, BayerBggr8::new(100));
 /// let mut balanced = Image::<BayerBggr8>::zero(4, 4);
 ///
-/// white_balance_into(&raw, &mut balanced, BayerGains::new(2.0, 1.0, 1.0));
+/// white_balance_into(&raw, &mut balanced, BayerGains::new(2.0, 1.0, 1.0).unwrap());
 /// // A BGGR tile starts on blue, so (0, 0) keeps the unity blue gain …
 /// assert_eq!(balanced.pixel_at(0, 0).value(), 100);
 /// // … and the red site is the one that doubles.
@@ -1243,7 +1283,7 @@ mod tests {
     #[test]
     fn gains_apply_per_cfa_colour() {
         let raw = Image::fill(6, 6, BayerRggb12::new(1000));
-        let out = white_balance(&raw, BayerGains::new(1.5, 1.0, 0.5));
+        let out = white_balance(&raw, BayerGains::new(1.5, 1.0, 0.5).unwrap());
 
         for y in 0..6 {
             for x in 0..6 {
@@ -1263,11 +1303,11 @@ mod tests {
         // gains produce different images for different patterns.
         let rggb = white_balance(
             &Image::fill(4, 4, BayerRggb8::new(100)),
-            BayerGains::new(2.0, 1.0, 1.0),
+            BayerGains::new(2.0, 1.0, 1.0).unwrap(),
         );
         let bggr = white_balance(
             &Image::fill(4, 4, BayerBggr8::new(100)),
-            BayerGains::new(2.0, 1.0, 1.0),
+            BayerGains::new(2.0, 1.0, 1.0).unwrap(),
         );
 
         assert_eq!(rggb.pixel_at(0, 0).value(), 200); // R sits at (0, 0)
@@ -1292,7 +1332,7 @@ mod tests {
     #[test]
     fn gains_clip_at_the_sample_depth() {
         let raw = Image::fill(4, 4, BayerRggb12::new(3000));
-        let out = white_balance(&raw, BayerGains::new(4.0, 1.0, 1.0));
+        let out = white_balance(&raw, BayerGains::new(4.0, 1.0, 1.0).unwrap());
         // 3000 × 4 = 12000, well past the 12-bit maximum.
         assert_eq!(out.pixel_at(0, 0).value(), 4095);
     }
@@ -1300,7 +1340,7 @@ mod tests {
     #[test]
     fn a_zero_gain_empties_its_colour() {
         let raw = Image::fill(4, 4, BayerRggb8::new(200));
-        let out = white_balance(&raw, BayerGains::new(0.0, 1.0, 1.0));
+        let out = white_balance(&raw, BayerGains::new(0.0, 1.0, 1.0).unwrap());
         assert_eq!(out.pixel_at(0, 0).value(), 0);
         assert_eq!(out.pixel_at(1, 0).value(), 200);
     }
@@ -1315,14 +1355,14 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "must be non-negative")]
-    fn new_panics_on_a_negative_gain() {
-        let _ = BayerGains::new(1.0, -0.5, 1.0);
+    fn new_rejects_a_negative_gain() {
+        assert!(BayerGains::new(1.0, -0.5, 1.0).is_none());
+        assert!(BayerGains::new(f32::NAN, 1.0, 1.0).is_none());
     }
 
     #[test]
     fn accessors_report_what_was_given() {
-        let gains = BayerGains::new(1.9, 1.0, 1.6);
+        let gains = BayerGains::new(1.9, 1.0, 1.6).unwrap();
         assert_eq!(gains.red(), 1.9);
         assert_eq!(gains.green(), 1.0);
         assert_eq!(gains.blue(), 1.6);
@@ -1334,7 +1374,7 @@ mod tests {
     #[test]
     fn white_balance_into_agrees_with_the_allocating_form() {
         let raw = Image::fill(6, 4, BayerGrbg8::new(90));
-        let gains = BayerGains::new(1.4, 1.0, 1.2);
+        let gains = BayerGains::new(1.4, 1.0, 1.2).unwrap();
 
         let allocated = white_balance(&raw, gains);
         let mut written = Image::<BayerGrbg8>::zero(6, 4);
@@ -1363,7 +1403,7 @@ mod tests {
         // commute, which is why white balance belongs on the mosaic.
         let reference = scene(20, 16);
         let raw: Image<BayerRggb8> = mosaic(&reference);
-        let gains = BayerGains::new(1.25, 1.0, 0.75);
+        let gains = BayerGains::new(1.25, 1.0, 0.75).unwrap();
 
         let before: Image<Rgb8> = demosaic(&white_balance(&raw, gains), BayerBilinear);
         let after: Image<Rgb8> = demosaic(&raw, BayerBilinear);
