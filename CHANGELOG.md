@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The seven public parameter and angle newtypes (`Sigma`, `PixelDistance`,
+  `Tolerance`, `OddWindowSide`, `Orientation`, `AxialOrientation`,
+  `PeakValue`) and `NmsRadius` are `#[repr(transparent)]`, making the
+  wrapper-equals-inner layout a guarantee rather than an accident.
+- `Pyramid` and `ScaledImage` derive `Debug` (alongside their existing
+  `Clone`), matching the rest of the crate's types.
+- `Extremum` lives in the crate root as shared vocabulary: it always served
+  both `analyze::peak` and `transform`'s template matching, and now it is
+  defined beside `Coordinate` and `Sigma`. `analyze::peak::Extremum`
+  re-exports it, so existing imports keep compiling.
+- The docs.rs guide gained four FAQ entries covering the release's new
+  arcs: finding corners, getting geometry out of a binary mask, comparing
+  two images, and drawing results onto an image. The README module table
+  now lists `draw` and the new `analyze` and `pixel` members.
+
 - Image pyramids. `image::Pyramid<L>` is a multi-resolution container
   generic over its level type, never empty, with `depth`, `level`/`get`,
   `finest`/`coarsest`, `iter`, and a `try_from_levels` constructor for
@@ -231,7 +246,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   arc length — a window of `n` consecutive ring positions covers at least
   that many of the four, however it is placed. It cannot change an answer
   (a test asserts the shipped path matches the plain scan pixel for pixel),
-  and it is worth 1.6× at `n = 9`, 5.9× at 12 and 15× at 16 on a 512×512
+  and it is worth 1.61× at `n = 9`, 5.93× at 12 and 14.6× at 16 on a 512×512
   `Mono8` texture. Its one visible consequence is documented: the score map
   is floored at the test's own threshold, so a corner too faint for the test
   reads `0.0` rather than its true margin.
@@ -953,6 +968,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are errors, not panics; this was the one value-certifying constructor
   in the crate that still aborted. The full-array
   `Depalettize::new([P; 256])` is unchanged and total.
+- **Breaking** for implementors: `PyramidMethod::build` accepts any
+  `RasterImage` view (`fn build<I: RasterImage<Pixel = P>>(&self, image:
+  &I, ...)`) instead of binding concrete `&Image<P>`, so a pyramid can be
+  built straight from a borrowed buffer or ROI. Call sites are unaffected;
+  an owned `Image<P>` still satisfies the bound. Custom implementations add
+  the generic parameter.
+- **Breaking** in name only: `AdaptiveAccumulator::Offset` is renamed
+  `BiasValue`. The trait is sealed, so no downstream implementations exist;
+  the associated type was nameable, hence the label. The crate reserves
+  `Offset` for grid displacements, and this was the one surface where the
+  same name meant a signed brightness bias.
 - A `SeparableWeights` implementation returning an empty weight slice or
   an out-of-bounds anchor now fails at the engine's boundary with a
   message naming the trait and the offending method, instead of
@@ -1001,6 +1027,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   negative-zero `y` beside a negative `x` lands on the bottom endpoint.
   That single boundary value now folds to the top of the range, the same
   angle spelled canonically.
+- `pyr_up` doubled the brightness of a length-1 axis: the doubled-weight
+  interpolation kernel compensates for zero-inserted samples, and a
+  dimension-1 source upsampled to a dimension-1 target (the only case where
+  an axis stays its own length) has none, so a flat 1xN bar came back at
+  twice its value. Such an axis now takes the normalized weights, and a
+  flat field stays flat for every valid source/target pair. Found by the
+  degenerate-size fixtures the v0.4.0 review asked for.
 - `pyr_up`'s target validation could overflow and abort in debug builds: a
   zero-area image can legally carry a dimension past `usize::MAX / 2`, and
   any `Size` can be named as the target. The validation now uses checked
@@ -1021,6 +1054,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `hspan` accepts either argument order, so the output was silently
   wrong rather than clipped. The extents now saturate, and a pathological
   `Size` clips like any other off-image extent.
+- `ssim` / `ssim_map` clamp the windowed covariance into the
+  Cauchy-Schwarz bound over the (already clamped) variances. Without it,
+  an image compared against itself scored a hair off exactly 1.0 wherever
+  its raw windowed variance rounded a step below zero, contradicting the
+  documented identity; and a residual covariance over clamped-to-zero
+  variances could push a map value marginally past 1.0. Epsilon-scale on
+  real data, and NaN samples still propagate.
 - The detect module documentation claimed "no parameter moves a detection"
   for the segment test. True for the threshold, which only filters; false
   for the arc length, which changes the score map itself, so detections

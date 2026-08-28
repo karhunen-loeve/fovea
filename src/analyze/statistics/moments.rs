@@ -24,8 +24,11 @@ use super::summary::StatisticsChannel;
 
 /// Raw intensity-weighted moments of an image, up to third order.
 ///
-/// `m_pq = Σ_y Σ_x xᵖ yᵈ I(x, y)`, with `x` and `y` the pixel-centre
-/// coordinates and `I` the channel value in its own units (a `Mono8` 255
+/// `m_pq = Σ_y Σ_x x^p · y^q · I(x, y)`, with `x` and `y` the pixel-centre
+/// coordinates **in the analyzed view's own frame** — `image_moments` over
+/// an `roi` reports a centroid in ROI coordinates, not parent-frame
+/// coordinates; add the rectangle's offset to lift it — and `I` the
+/// channel value in its own units (a `Mono8` 255
 /// contributes 255, not 1.0). The ten values below are every `m_pq` with
 /// `p + q ≤ 3`, which is the set the derived quantities need: `m00` is total
 /// intensity, first order gives the centroid, second order the orientation and
@@ -139,7 +142,7 @@ impl ImageMoments {
 
 /// Moments about the centroid: unchanged by translating the image.
 ///
-/// `μ_pq = Σ (x − x̄)ᵖ (y − ȳ)ᵈ I(x, y)`. `μ10` and `μ01` are zero by
+/// `μ_pq = Σ (x − x̄)^p · (y − ȳ)^q · I(x, y)`. `μ10` and `μ01` are zero by
 /// construction and are not stored. `μ00` is carried because the scale
 /// normalisation in [`normalized`](Self::normalized) needs it.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -378,7 +381,7 @@ pub(crate) fn axis_eccentricity(mu20: f64, mu02: f64, mu11: f64) -> f64 {
 /// # Cost
 ///
 /// One pass, `O(width · height)`, with four accumulators per row and ten adds
-/// per row rather than per pixel: `Σ xᵈ yᵈ I` factors into a row sum times a
+/// per row rather than per pixel: `Σ x^p y^q I` factors into a row sum times a
 /// power of `y`, so the `y` powers are computed once per scan line.
 ///
 /// # Example

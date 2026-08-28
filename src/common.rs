@@ -432,6 +432,7 @@ impl From<(usize, usize)> for Stride {
 /// # Ok::<(), fovea::Error>(())
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
+#[repr(transparent)]
 pub struct Sigma(f32);
 
 impl Sigma {
@@ -462,13 +463,14 @@ impl Sigma {
             Ok(Self(value))
         } else {
             Err(Error::InvalidParameter(format!(
-                "sigma must be finite and positive, got {value}"
+                "sigma must be finite and strictly positive, got {value}"
             )))
         }
     }
 
     /// Returns the raw value.
     #[must_use]
+    #[inline]
     pub const fn get(self) -> f32 {
         self.0
     }
@@ -537,6 +539,7 @@ macro_rules! sigma {
 /// assert_eq!(OCTAVE_1.get(), 2.0);
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
+#[repr(transparent)]
 pub struct PixelDistance(f64);
 
 impl PixelDistance {
@@ -567,13 +570,14 @@ impl PixelDistance {
             Ok(Self(value))
         } else {
             Err(Error::InvalidParameter(format!(
-                "pixel distance must be finite and positive, got {value}"
+                "pixel distance must be finite and strictly positive, got {value}"
             )))
         }
     }
 
     /// Returns the raw value.
     #[must_use]
+    #[inline]
     pub const fn get(self) -> f64 {
         self.0
     }
@@ -635,6 +639,7 @@ macro_rules! pixel_distance {
 /// assert_eq!(HALF_PIXEL.get(), 0.5);
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
+#[repr(transparent)]
 pub struct Tolerance(f64);
 
 impl Tolerance {
@@ -671,6 +676,7 @@ impl Tolerance {
 
     /// Returns the raw value.
     #[must_use]
+    #[inline]
     pub const fn get(self) -> f64 {
         self.0
     }
@@ -759,6 +765,7 @@ macro_rules! tolerance {
 /// let _ = window!(16);
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(transparent)]
 pub struct OddWindowSide(usize);
 
 impl OddWindowSide {
@@ -794,6 +801,7 @@ impl OddWindowSide {
 
     /// Returns the side length.
     #[must_use]
+    #[inline]
     pub const fn get(self) -> usize {
         self.0
     }
@@ -867,6 +875,30 @@ fn wrap_pi(radians: f64) -> f64 {
     }
 }
 
+/// Which kind of stationary point the samples are expected to describe.
+///
+/// The fit itself is polarity-free arithmetic; this is what turns it into a
+/// checked operation. A score map that is *minimized* at the best position
+/// ([`SSD`](crate::transform::SSD), [`SAD`](crate::transform::SAD)) and one
+/// that is maximized ([`NCC`](crate::transform::NCC), any corner response)
+/// go through the same code, and naming which is expected is what lets the
+/// fit refuse a surface that curves the other way instead of returning the
+/// wrong stationary point with no indication.
+///
+/// For a template-match score map, do not name it by hand: the method
+/// carries its own polarity as
+/// [`ScorePolarity::EXTREMUM`](crate::transform::ScorePolarity), so
+/// `SSD::EXTREMUM` cannot disagree with the map `SSD` produced.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Extremum {
+    /// The centre sample is expected to be the largest, and the fitted
+    /// surface to curve downward away from its vertex.
+    Maximum,
+    /// The centre sample is expected to be the smallest, and the fitted
+    /// surface to curve upward away from its vertex.
+    Minimum,
+}
+
 /// A **direction** in the image plane: an angle modulo 2π, canonicalized to
 /// `(−π, π]`.
 ///
@@ -919,6 +951,7 @@ fn wrap_pi(radians: f64) -> f64 {
 /// # Ok::<(), fovea::Error>(())
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[repr(transparent)]
 pub struct Orientation(f32);
 
 impl Orientation {
@@ -961,6 +994,7 @@ impl Orientation {
     /// assert_eq!(Orientation::from_atan2(0.0, 1.0).radians(), 0.0);
     /// ```
     #[must_use]
+    #[inline]
     pub fn from_atan2(y: f32, x: f32) -> Self {
         let angle = y.atan2(x);
         if angle == -core::f32::consts::PI {
@@ -972,6 +1006,7 @@ impl Orientation {
 
     /// Returns the angle in radians, in `(−π, π]`.
     #[must_use]
+    #[inline]
     pub const fn radians(self) -> f32 {
         self.0
     }
@@ -992,6 +1027,7 @@ impl Orientation {
     /// # Ok::<(), fovea::Error>(())
     /// ```
     #[must_use]
+    #[inline]
     pub fn signed_difference(self, other: Self) -> f32 {
         wrap_two_pi(self.0 - other.0)
     }
@@ -1022,6 +1058,7 @@ impl Orientation {
     /// # Ok::<(), fovea::Error>(())
     /// ```
     #[must_use]
+    #[inline]
     pub fn to_axial(self) -> AxialOrientation {
         AxialOrientation(wrap_pi(f64::from(self.0)))
     }
@@ -1061,6 +1098,7 @@ impl Orientation {
 /// # Ok::<(), fovea::Error>(())
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[repr(transparent)]
 pub struct AxialOrientation(f64);
 
 impl AxialOrientation {
@@ -1101,6 +1139,7 @@ impl AxialOrientation {
     /// assert_eq!(AxialOrientation::from_half_atan2(0.0, 1.0).radians(), 0.0);
     /// ```
     #[must_use]
+    #[inline]
     pub fn from_half_atan2(y: f64, x: f64) -> Self {
         let axis = 0.5 * y.atan2(x);
         if axis == -core::f64::consts::FRAC_PI_2 {
@@ -1112,6 +1151,7 @@ impl AxialOrientation {
 
     /// Returns the angle in radians, in `(−π/2, π/2]`.
     #[must_use]
+    #[inline]
     pub const fn radians(self) -> f64 {
         self.0
     }
@@ -1138,6 +1178,7 @@ impl AxialOrientation {
     /// # Ok::<(), fovea::Error>(())
     /// ```
     #[must_use]
+    #[inline]
     pub fn signed_difference(self, other: Self) -> f64 {
         wrap_pi(self.0 - other.0)
     }

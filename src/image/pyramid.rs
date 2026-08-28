@@ -97,7 +97,7 @@ impl<P: Copy> PyramidLevel for Image<P> {
 /// assert_eq!(pyramid.finest().size(), Size::new(16, 16));
 /// assert_eq!(pyramid.coarsest().size(), Size::new(4, 4));
 /// ```
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Pyramid<L: PyramidLevel> {
     levels: Vec<L>,
 }
@@ -403,7 +403,7 @@ pub trait ScaleLevel: PyramidLevel {
 ///     CoordinateF64::new(6.0, 8.0),
 /// );
 /// ```
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ScaledImage<P: Copy> {
     image: Image<P>,
     pixel_distance: PixelDistance,

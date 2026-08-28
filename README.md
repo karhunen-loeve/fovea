@@ -141,11 +141,12 @@ Important distinction: `Rgb8` and `Srgb8` may both store three `u8` channels, bu
 
 | Module | Start here | One job |
 |---|---|---|
-| `image` | `Image`, `ImageView`, `SubView` | Storage, views, rows, ROIs, tiles, and neighborhoods. |
-| `pixel` | `Srgb8`, `RgbF32`, `PlainPixel`, `LinearSpace` | Pixel vocabulary and the traits that make illegal operations unrepresentable. |
-| `transform` | `convert_image`, `resize`, `combine_images` | Image-producing operations: conversion, resize, geometry, convolution, morphology. |
-| `analyze` | `histogram`, `integral_image`, `connected_components` | Image analysis that produces data about an image. |
-| `features` | `detect::detect_corners`, `detect::fast`, `Corner` | Corner detection — the structure-tensor and segment-test families — and the keypoint types they produce. |
+| `image` | `Image`, `ImageView`, `SubView`, `Pyramid` | Storage, views, rows, ROIs, tiles, neighborhoods, and image pyramids. |
+| `pixel` | `Srgb8`, `RgbF32`, `PlainPixel`, `LinearSpace`, `bayer` | Pixel vocabulary — including the raw Bayer CFA family — and the traits that make illegal operations unrepresentable. |
+| `transform` | `convert_image`, `resize`, `demosaic`, `pyr_down` | Image-producing operations: conversion, resize, geometry, convolution, morphology, demosaicing, pyramids. |
+| `analyze` | `histogram`, `connected_components`, `extract_contours`, `image_statistics`, `ssim` | Image analysis that produces data about an image: histograms, components, contours and shape descriptors, whole-image statistics and moments, quality metrics, peak interpolation. |
+| `features` | `detect::detect_corners`, `detect::fast`, `refine_corners`, `Corner` | Corner detection — the structure-tensor and segment-test families — sub-pixel refinement, and the keypoint types they produce. |
+| `draw` | `draw_rect`, `draw_circle`, `Drawable` | Annotation burn-in: lines, rectangles, circles, polylines and crosshairs, clipped, with hard single-pixel strokes. |
 | `border` | `Clamp`, `Mirror`, `Skip` | Boundary behavior for neighborhood operations. |
 | `guide` | `guide::faq`, `guide::pixel_types` | Task-oriented docs.rs pages for common questions. |
 

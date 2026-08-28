@@ -28,13 +28,21 @@ use crate::transform::convolve_separable::convolve_separable;
 /// compensating for the zero-inserted samples so brightness is preserved.
 const PYR_UP_WEIGHTS: [f32; 5] = [0.125, 0.5, 0.75, 0.5, 0.125];
 
+/// The same kernel normalized to sum 1, for an axis that received **no**
+/// zero-inserted samples: a length-1 axis whose target is also 1 (the only
+/// case where `target == source` passes validation). The ×2 compensation
+/// above assumes half of each axis's samples are inserted zeros; with none,
+/// it would double the brightness of every pixel along that axis.
+const PYR_UP_WEIGHTS_UNDOUBLED: [f32; 5] = [0.0625, 0.25, 0.375, 0.25, 0.0625];
+
 // ─── pyr_down / pyr_up ──────────────────────────────────────────────────────
 
 /// Blurs and decimates the image by a factor of 2.
 ///
-/// Applies the binomial 5×5 Gaussian (`[1, 4, 6, 4, 1] / 16` per axis — the
-/// [`gaussian_blur_5x5`](crate::transform::gaussian_blur_5x5) kernel,
-/// effective σ exactly 1.0) followed by 2× downsampling that keeps the
+/// Applies the binomial 5×5 Gaussian (`[1, 4, 6, 4, 1] / 16` per axis:
+/// [`SeparableKernel::gaussian_5`](crate::image::SeparableKernel::gaussian_5),
+/// the same weights [`gaussian_blur_5x5`](crate::transform::gaussian_blur_5x5)
+/// applies, effective σ exactly 1.0) followed by 2× downsampling that keeps the
 /// even-indexed samples (pixels 0, 2, 4, …).
 ///
 /// The output dimensions are `((width + 1) / 2, (height + 1) / 2)`
@@ -165,7 +173,20 @@ where
         }
     }
 
-    let kernel = SeparableKernel::symmetric(PYR_UP_WEIGHTS);
+    // Per axis: the doubled weights compensate for the interleaved zeros;
+    // an axis that stayed at length 1 has none, so it takes the normalized
+    // weights instead (a flat field must stay flat either way).
+    let h_weights = if target.width == w {
+        PYR_UP_WEIGHTS_UNDOUBLED
+    } else {
+        PYR_UP_WEIGHTS
+    };
+    let v_weights = if target.height == h {
+        PYR_UP_WEIGHTS_UNDOUBLED
+    } else {
+        PYR_UP_WEIGHTS
+    };
+    let kernel = SeparableKernel::new(h_weights, v_weights);
     Ok(convolve_separable(&upsampled, &kernel, &Mirror))
 }
 
@@ -199,13 +220,20 @@ pub trait PyramidMethod<P: Copy> {
 
     /// Builds a pyramid from the given image.
     ///
+    /// The input is any [`RasterImage`] view — an owned [`Image`], a
+    /// borrowed buffer, or an ROI — so building a pyramid of a camera
+    /// frame's sub-rectangle needs no intermediate copy beyond the base
+    /// level the pyramid owns anyway.
+    ///
     /// `max_depth` is an **upper bound, not a promise**. If the image is
     /// too small to support the requested depth, `build` clamps at the
     /// method's minimum usable level size — it never panics, never errors,
     /// and never mutates the caller's parameters. The resolved depth is
     /// whatever [`Pyramid::depth`] reports afterwards. The result always
     /// contains at least one level.
-    fn build(&self, image: &Image<P>, max_depth: usize) -> Pyramid<Self::Level>;
+    fn build<I>(&self, image: &I, max_depth: usize) -> Pyramid<Self::Level>
+    where
+        I: RasterImage<Pixel = P>;
 }
 
 /// Gaussian pyramid construction: repeated [`pyr_down`].
@@ -247,9 +275,21 @@ where
 {
     type Level = Image<P>;
 
-    fn build(&self, image: &Image<P>, max_depth: usize) -> Pyramid<Image<P>> {
+    fn build<I>(&self, image: &I, max_depth: usize) -> Pyramid<Image<P>>
+    where
+        I: RasterImage<Pixel = P>,
+    {
         let resolved = max_depth.max(1);
-        let mut levels = vec![image.clone()];
+        // Level 0 is an owned copy of whatever view came in, row by row.
+        let base = {
+            let mut data = Vec::with_capacity(image.width() * image.height());
+            for y in 0..image.height() {
+                data.extend_from_slice(image.row(y));
+            }
+            Image::from_vec(image.width(), image.height(), data)
+                .expect("rows fill width * height exactly")
+        };
+        let mut levels = vec![base];
         while levels.len() < resolved {
             let prev = levels.last().expect("levels start non-empty");
             let Size { width, height } = prev.size();
@@ -381,6 +421,28 @@ mod tests {
         assert_eq!(a.size(), Size::new(8, 8));
         let b: Image<MonoF32> = pyr_up(&src, Size::new(7, 7)).unwrap();
         assert_eq!(b.size(), Size::new(7, 7));
+    }
+
+    #[test]
+    fn pyr_up_handles_one_pixel_sources() {
+        // 1x1 and 1xN sources: the zero-insertion and reflection paths must
+        // survive the degenerate shapes, and a flat field must stay inside
+        // its own range.
+        let dot = Image::fill(1, 1, MonoF32::new(0.5));
+        let up: Image<MonoF32> = pyr_up(&dot, Size::new(2, 2)).unwrap();
+        assert_eq!(up.size(), Size::new(2, 2));
+        let same: Image<MonoF32> = pyr_up(&dot, Size::new(1, 1)).unwrap();
+        assert_eq!(same.size(), Size::new(1, 1));
+
+        let bar = Image::fill(1, 4, MonoF32::new(0.5));
+        let up: Image<MonoF32> = pyr_up(&bar, Size::new(2, 8)).unwrap();
+        assert_eq!(up.size(), Size::new(2, 8));
+        let odd: Image<MonoF32> = pyr_up(&bar, Size::new(1, 7)).unwrap();
+        assert_eq!(odd.size(), Size::new(1, 7));
+        for y in 0..odd.height() {
+            let v = odd.pixel_at(0, y).0;
+            assert!((0.0..=0.5 + 1e-6).contains(&v), "({y}) = {v}");
+        }
     }
 
     #[test]
@@ -570,11 +632,16 @@ mod tests {
 
         let mut level: Image<MonoF32> = pyr_down(&src);
         level = pyr_down(&level);
+        // Cumulative smoothing in base-frame units: the first binomial
+        // blur is σ = 1 at distance 1, the second σ = 1 at distance 2,
+        // composing to √(1² + 2²) ≈ 2.24. (The lift under test reads only
+        // the geometry fields, but a fixture should not model a wrong
+        // value.)
         let scaled = ScaledImage::new(
             level,
             pixel_distance!(4.0),
             CoordinateF64::new(0.0, 0.0),
-            sigma!(1.0),
+            sigma!(2.236),
         );
 
         // Find the argmax on the coarse level.

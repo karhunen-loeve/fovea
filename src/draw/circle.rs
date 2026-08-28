@@ -427,4 +427,31 @@ mod tests {
             assert!(dist <= 1_000_002.5, "({x}, {y}) at {dist}");
         }
     }
+
+    #[test]
+    fn fill_pins_the_disc_shape_exactly() {
+        // Coverage that pins the shape rather than a subset relation: for
+        // each radius the fill must have no holes inside the ideal disc and
+        // no reach beyond the outline's own half-pixel overshoot at octant
+        // transitions (r + 0.75).
+        use crate::image::ImageView;
+
+        for r in 0..=32u32 {
+            let n = (2 * r + 3) as usize;
+            let c = (r + 1) as f64;
+            let mut image: Image<Mono8> = Image::zero(n, n);
+            draw_circle(&mut image, ((r + 1) as i32, (r + 1) as i32), r, ink(), true);
+            for y in 0..n {
+                for x in 0..n {
+                    let dist = ((x as f64 - c).powi(2) + (y as f64 - c).powi(2)).sqrt();
+                    let painted = image.pixel_at(x, y) != Mono8::new(0);
+                    if dist <= r as f64 {
+                        assert!(painted, "hole at ({x}, {y}), r = {r}, dist {dist}");
+                    } else if dist > r as f64 + 0.75 {
+                        assert!(!painted, "over-reach at ({x}, {y}), r = {r}, dist {dist}");
+                    }
+                }
+            }
+        }
+    }
 }

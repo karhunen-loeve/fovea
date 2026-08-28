@@ -10,7 +10,7 @@ use crate::image::{Decimated, Image, ImageView, RasterImage, RasterImageMut};
 use crate::pixel::{LinearPixel, MonoF32, SingleChannel};
 use crate::{CoordinateF64, Offset, Rectangle, Size};
 
-use super::peaks::{NmsRadius, corner_peaks, scan_peaks};
+use super::peaks::{NmsRadius, corner_peaks, lift_peaks, scan_peaks};
 
 // ─── The ring ────────────────────────────────────────────────────────────────
 
@@ -588,14 +588,14 @@ where
     B: BorderPolicy<Image<P>>,
 {
     let scores = fast_score_map(level.as_image(), params.test(), border);
-    scan_score_peaks(
-        &scores,
-        params.test().threshold(),
-        params.nms_radius().get(),
+    lift_peaks(
+        level,
+        scan_score_peaks(
+            &scores,
+            params.test().threshold(),
+            params.nms_radius().get(),
+        ),
     )
-    .into_iter()
-    .map(|(local, response)| Corner::from_level(level, local, response))
-    .collect()
 }
 
 // ─── Internals ───────────────────────────────────────────────────────────────
@@ -652,7 +652,7 @@ where
 /// The four cardinal ring samples are read and tested first; the other twelve
 /// and the arc scan are reached only by the pixels [`cardinals_admit`] cannot
 /// rule out. On the `benches/features.rs` texture (512×512 `Mono8`,
-/// 2026-08-07) that is worth ≈1.6× at `arc_length = 9`, ≈5.8× at 12 and ≈14×
+/// 2026-08-07) that is worth 1.61× at `arc_length = 9`, 5.93× at 12 and 14.6×
 /// at 16 — the filter needs `arc_length / 4` cardinals, so it grows teeth as
 /// the arc gets longer, and is weakest exactly where FAST-9 needs it most.
 fn score_in_region<I, P, Acc, B>(
@@ -822,12 +822,14 @@ fn cardinals_admit(centre: f64, ring: &[f64; 16], arc_length: usize, threshold: 
 /// sliding-window minimum of the signed differences over a circular buffer of
 /// 16 (plus a maximum, for the dark direction), which a doubled array and a
 /// prefix/suffix block decomposition would give in `O(16 + arc_length)`. That
-/// was built and measured, and it lost: on a 512x512 texture the block
-/// decomposition is ≈6 % *slower* at `arc_length = 9`, the case that matters
-/// most, because four 31-element scratch arrays cost more than the 144 cheap
-/// comparisons they replace. It won ≈6 % at 12 and was a wash at 16, which
-/// does not pay for a second scoring path. Sixteen elements is simply too few
-/// for the asymptotics to matter.
+/// was built and measured, and it lost where it matters: on a 512x512
+/// texture the block decomposition is 5.9 % *slower* at `arc_length = 9`,
+/// the variant ORB uses, because four 31-element scratch arrays cost more
+/// than the 144 cheap comparisons they replace. It saved 5.6 % at 12 and
+/// 9.7 % at 16 — but those arcs are already the fast ones, so the absolute
+/// milliseconds saved there are small, and they do not pay for a second
+/// scoring path that loses on the slowest, most-used case. Sixteen elements
+/// is simply too few for the asymptotics to matter.
 fn segment_score(centre: f64, ring: &[f64; 16], arc_length: usize) -> f64 {
     let mut best = f64::NEG_INFINITY;
 
@@ -1177,7 +1179,7 @@ mod tests {
             MonoF32::new(checker + ripple)
         });
 
-        for arc_length in [9usize, 12, 16] {
+        for arc_length in 9usize..=16 {
             for &threshold in &[0.05f32, 0.2, 0.5] {
                 let test = SegmentTest::new(threshold, arc_length).unwrap();
                 let scores = fast_score_map(&image, test, &Skip);

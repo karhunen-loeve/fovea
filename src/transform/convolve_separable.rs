@@ -490,12 +490,16 @@ where
 /// so this is correlation, not convolution. It performs **no kernel-shaped
 /// heap allocation**: both passes consume the `ImageView` weights as-is. The
 /// flipping `convolve_separable_*` functions are thin wrappers that arrange
-/// the flip — on the stack for [`SeparableKernel`], via [`flip_1d`] for raw
-/// borrowed weights — and delegate here.
+/// the flip on the stack through [`SeparableWeights::flipped`] and delegate
+/// here.
 ///
 /// (The inter-pass intermediate image and the per-row accumulator inside
-/// [`fold_neighborhood`] are still allocated; eliminating *those* is a
-/// separate, deferred concern — see the allocation-free separable blur plan.)
+/// [`fold_neighborhood`] are allocated per call *here*;
+/// [`SeparableScratch::correlate_separable_raw_into`] is the variant that
+/// reuses both across calls.)
+///
+/// [`SeparableWeights::flipped`]: crate::image::SeparableWeights::flipped
+/// [`SeparableScratch::correlate_separable_raw_into`]: crate::transform::SeparableScratch::correlate_separable_raw_into
 pub(crate) fn correlate_separable_raw_into<I, HW, VW, B, O, P, Acc, Out>(
     image: &I,
     h_weights: &HW,

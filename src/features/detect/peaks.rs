@@ -44,6 +44,7 @@ use crate::{Coordinate, CoordinateF64, Error};
 /// assert!(NmsRadius::try_new(0).is_err());
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[repr(transparent)]
 pub struct NmsRadius(usize);
 
 impl NmsRadius {
@@ -52,6 +53,7 @@ impl NmsRadius {
     /// `const`, so binding the result to a `const` item checks a literal at
     /// compile time. For a computed radius use [`try_new`](Self::try_new).
     #[must_use]
+    #[inline]
     pub const fn new(radius: usize) -> Option<Self> {
         if radius == 0 {
             return None;
@@ -75,6 +77,7 @@ impl NmsRadius {
 
     /// Returns the radius, in pixels.
     #[must_use]
+    #[inline]
     pub const fn get(self) -> usize {
         self.0
     }
@@ -251,6 +254,13 @@ where
 /// from wrapping a negative or saturating a NaN into a valid-looking index.
 /// Shared with `refine_corners`, whose re-centring loop asks the same
 /// question of every intermediate solution.
+///
+/// An exact half-pixel position resolves with `f64::round`, which rounds
+/// half *away from zero*: a solved `x = 3.5` names pixel 4, not the
+/// raster-earlier pixel 3. This is load-bearing for the re-centring loop,
+/// where the chosen pixel picks the next window and therefore which
+/// gradients vote, so it is a documented rule, not an accident of the
+/// cast.
 #[inline]
 pub(super) fn pixel_site(at: CoordinateF64) -> Option<Coordinate> {
     let (x, y) = (at.x.round(), at.y.round());
@@ -292,11 +302,29 @@ where
             // than reported as an infinitely strong corner.
             if value >= threshold && is_local_max(response, x, y, radius, value) {
                 let at = CoordinateF64::new(x as f64, y as f64);
-                peaks.push((at, f64::from(value) as f32));
+                // Named narrowing: an f64 response map's value is truncated
+                // to Corner's f32 response field. A response is a ranking
+                // score, not a measurement to preserve, so f32 is enough,
+                // and every response type on this path is finite here.
+                let response_f32 = f64::from(value) as f32;
+                peaks.push((at, response_f32));
             }
         }
     }
     peaks
+}
+
+/// Lifts level-local peaks into the base-image frame: the shared tail of
+/// [`detect_corners_in_level`](super::detect_corners_in_level) and
+/// [`fast_in_level`](super::fast_in_level).
+pub(super) fn lift_peaks(
+    level: &impl crate::image::Decimated,
+    peaks: Vec<(CoordinateF64, f32)>,
+) -> Vec<Corner> {
+    peaks
+        .into_iter()
+        .map(|(local, response)| Corner::from_level(level, local, response))
+        .collect()
 }
 
 /// Whether `value` at `(x, y)` is the maximum of its clipped

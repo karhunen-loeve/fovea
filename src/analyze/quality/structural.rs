@@ -464,7 +464,21 @@ where
                 non_negative(moment_aa.pixel_at(x, y).0 - centered_mean_a * centered_mean_a);
             let variance_b =
                 non_negative(moment_bb.pixel_at(x, y).0 - centered_mean_b * centered_mean_b);
-            let covariance = moment_ab.pixel_at(x, y).0 - centered_mean_a * centered_mean_b;
+            // Cauchy-Schwarz bounds the covariance by √(σ²a·σ²b) — over the
+            // *clamped* variances, so that an image against itself stays
+            // exactly 1.0 even where its raw variance rounded a step below
+            // zero, and a residual covariance over zeroed variances cannot
+            // push a score past 1. Written as comparisons so a NaN sample
+            // propagates instead of being clamped or panicking.
+            let raw = moment_ab.pixel_at(x, y).0 - centered_mean_a * centered_mean_b;
+            let bound = (variance_a * variance_b).sqrt();
+            let covariance = if raw > bound {
+                bound
+            } else if raw < -bound {
+                -bound
+            } else {
+                raw
+            };
 
             let numerator = (2.0 * luminance_a * luminance_b + c1) * (2.0 * covariance + c2);
             let denominator = (luminance_a * luminance_a + luminance_b * luminance_b + c1)
@@ -818,11 +832,12 @@ mod tests {
 
     #[test]
     fn a_pedestal_cannot_push_the_score_out_of_range() {
-        // The same mechanism at its most visible: with the peak named for a
-        // narrow signal, an uncentred variance error of ~190 counts against a
-        // `C2` of `(0.03·100)² = 9` produces scores in the thousands. The
+        // The same mechanism at its most visible: with the peak named for
+        // a narrow signal, an uncentred variance error of ~190 counts
+        // against a `C2` of `(0.03·20)² = 0.36` produces scores in the
+        // thousands (−1749.9 measured for this pedestal/peak pair). The
         // bound is the invariant that catches it.
-        let params = SsimParams::reference(peak!(100.0));
+        let params = SsimParams::reference(peak!(20.0));
         let a = Image::generate(48, 48, |x, y| {
             Mono16::new(60_000 + ((x * 3 + y) % 7) as u16)
         });

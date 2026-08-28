@@ -78,29 +78,7 @@ use crate::pixel::SingleChannel;
 use crate::transform::{nms_sector, nms_sector_from_gradient};
 use crate::{Coordinate, CoordinateF64, Offset, Orientation};
 
-/// Which kind of stationary point the samples are expected to describe.
-///
-/// The fit itself is polarity-free arithmetic; this is what turns it into a
-/// checked operation. A score map that is *minimized* at the best position
-/// ([`SSD`](crate::transform::SSD), [`SAD`](crate::transform::SAD)) and one
-/// that is maximized ([`NCC`](crate::transform::NCC), any corner response)
-/// go through the same code, and naming which is expected is what lets the
-/// fit refuse a surface that curves the other way instead of returning the
-/// wrong stationary point with no indication.
-///
-/// For a template-match score map, do not name it by hand: the method
-/// carries its own polarity as
-/// [`ScorePolarity::EXTREMUM`](crate::transform::ScorePolarity), so
-/// `SSD::EXTREMUM` cannot disagree with the map `SSD` produced.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Extremum {
-    /// The centre sample is expected to be the largest, and the fitted
-    /// surface to curve downward away from its vertex.
-    Maximum,
-    /// The centre sample is expected to be the smallest, and the fitted
-    /// surface to curve upward away from its vertex.
-    Minimum,
-}
+pub use crate::common::Extremum;
 
 /// Vertex of the parabola through `(-1, before)`, `(0, at)` and
 /// `(1, after)`, as an offset from the centre sample.
@@ -905,7 +883,7 @@ mod tests {
     }
 
     #[test]
-    fn a_thinned_magnitude_is_not_silently_accepted() {
+    fn a_thinned_magnitude_leaves_the_point_on_its_pixel() {
         // Suppression zeroes the two neighbours the fit reads. With both
         // at zero the centre is still the largest of three, so the
         // parabola is well formed and its vertex is the centre: the fit

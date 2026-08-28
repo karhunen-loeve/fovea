@@ -26,9 +26,10 @@
 //! So interpolating the border between pixels is a separate step over
 //! different inputs and is deliberately not folded in here:
 //! [`analyze::peak::interpolate_ridge_points`](crate::analyze::peak::interpolate_ridge_points)
-//! takes [`Contour::points`] as its sites, plus the gradient magnitude and
-//! gradient pair of the image the mask came from, and returns one
-//! interpolated position per vertex in vertex order.
+//! takes the contour's points as its sites (`points().iter().copied()`,
+//! since the parameter is `impl IntoIterator<Item = Coordinate>`), plus the
+//! gradient magnitude and gradient pair of the image the mask came from,
+//! and returns one interpolated position per vertex in vertex order.
 //!
 //! Cheap aggregate measurements (pixel-count area, boundary-pixel count,
 //! moments) remain single-pass in

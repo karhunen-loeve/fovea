@@ -142,7 +142,9 @@ pub trait DemosaicMethod<B: BayerPixel> {
     /// * Because the engine reflects without duplicating the edge sample,
     ///   the tap has the colour
     ///   `B::PATTERN.color_at(at.x + tap.dx, at.y + tap.dy)` even where that
-    ///   position lies outside the frame.
+    ///   position lies outside the frame — for every dimension of at
+    ///   least 2, which a real CFA mosaic always has (a one-pixel axis
+    ///   reflects onto itself and flips parity).
     /// * `at.x + 1` and `at.y + 1` never overflow a `usize` for a real
     ///   image, so the colour of a neighbouring site can be queried
     ///   directly — which is how a green site tells a red row from a blue

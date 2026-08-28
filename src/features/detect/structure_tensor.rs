@@ -14,7 +14,7 @@ use crate::pixel::{FromLinear, LinearPixel, SingleChannel, ZeroablePixel};
 use crate::transform::{PixelMultiply, combine_images, gaussian_blur, sobel_x, sobel_y};
 use crate::{Sigma, Size};
 
-use super::peaks::{NmsRadius, corner_peaks, scan_peaks};
+use super::peaks::{NmsRadius, corner_peaks, lift_peaks, scan_peaks};
 
 // ─── Response channel arithmetic ─────────────────────────────────────────────
 
@@ -866,10 +866,10 @@ where
     M: CornerResponse<Acc::Channel>,
 {
     let response = corner_response_map(level.as_image(), method, params.window());
-    scan_peaks(&response, params.threshold(), params.nms_radius().get())
-        .into_iter()
-        .map(|(local, response)| Corner::from_level(level, local, response))
-        .collect()
+    lift_peaks(
+        level,
+        scan_peaks(&response, params.threshold(), params.nms_radius().get()),
+    )
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────────────

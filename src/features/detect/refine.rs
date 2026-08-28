@@ -227,6 +227,8 @@ where
     f64: From<P::Channel>,
 {
     let mut centre = pixel_site(at)?;
+    // Inclusive deliberately: up to MAX_RECENTRES window moves, plus the
+    // confirming solve from the final centre — four solves in total.
     for _ in 0..=MAX_RECENTRES {
         let solved = solve_window(gx, gy, centre, radius)?;
         let nearest = pixel_site(solved)?;
@@ -395,6 +397,8 @@ mod tests {
         let gx = sobel_x(&image, &Clamp);
         let gy = sobel_y(&image, &Clamp);
         let truth = square_corners(8, 16);
+        let mut per_radius: std::collections::BTreeMap<usize, f64> =
+            std::collections::BTreeMap::new();
 
         for sigma in [0.8f32, 1.0, 1.2, 1.6, 2.0] {
             let window = Sigma::new(sigma).unwrap();
@@ -419,7 +423,26 @@ mod tests {
                     (p.x - tx).abs() <= 0.05 && (p.y - ty).abs() <= 0.05,
                     "sigma {sigma}, radius {radius}: refined to {p:?}, corner at ({tx}, {ty})",
                 );
+                let residual = (p.x - tx).abs().max((p.y - ty).abs());
+                let worst = per_radius.entry(radius).or_insert(0.0f64);
+                if residual > *worst {
+                    *worst = residual;
+                }
             }
+        }
+
+        // The documented residuals are per *radius*, so the regression
+        // bands are too: 0.040 / 0.030 / 0.024 px at radius 2 / 3 / 4
+        // (measured 2026-08-18). A band catches loosening past the
+        // documented number and an unrecorded tightening alike; either
+        // means the documented accuracy needs re-measuring, not just this
+        // assertion widened.
+        for (radius, lo, hi) in [(2usize, 0.02, 0.045), (3, 0.015, 0.035), (4, 0.01, 0.03)] {
+            let worst = per_radius[&radius];
+            assert!(
+                (lo..=hi).contains(&worst),
+                "radius {radius}: worst residual {worst} left the band {lo}..={hi}",
+            );
         }
     }
 

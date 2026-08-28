@@ -164,3 +164,100 @@ pub struct MyMosaic8 {
 Only implement `LinearPixel` / `LinearSpace` if interpolation and blending are meaningful for the type. Likewise, only implement `OriginInvariantPixel` if cropping preserves the pixel's meaning. A coordinate-dependent mosaic pixel such as `MyMosaic8` deliberately omits both: an ROI at an odd origin shifts the 2×2 phase, so the compiler rejects ordinary `roi`/`tiles`/`sliding_windows` and steers callers to a phase-aware API instead.
 
 That is exactly how the shipped Bayer family is built — see `fovea::pixel::bayer` before writing your own. Reach for a custom type when your sensor is *not* one of the four standard patterns; use `#[linear(accumulator = MonoF32, no_space)]` on the `LinearPixel` derive to keep weighted sums while withholding interpolation.
+
+## How do I find corners in an image?
+
+Two detector families live in `fovea::features::detect`, and they share their
+parameter and output types. `detect_corners` is the structure-tensor family
+(`Harris`, `ShiTomasi`): noise-robust, graded responses, drifts inward as its
+window grows. `fast` is the segment test: its threshold is in intensity
+units, so it can be chosen without calibration.
+
+```rust
+use fovea::features::detect::{CornerParams, NmsRadius, ShiTomasi, detect_corners};
+use fovea::image::Image;
+use fovea::pixel::MonoF32;
+use fovea::sigma;
+
+let image: Image<MonoF32> = Image::generate(24, 24, |x, y| {
+    MonoF32::new(if (8..16).contains(&x) && (8..16).contains(&y) { 1.0 } else { 0.0 })
+});
+let params = CornerParams::new(sigma!(1.6), 0.05, NmsRadius::new(3).unwrap()).unwrap();
+let corners = detect_corners(&image, ShiTomasi, params);
+assert_eq!(corners.len(), 4);
+```
+
+Both families report pixel positions with documented biases; for sub-pixel
+accuracy hand the corners plus a Sobel pair to
+`features::detect::refine_corners`, which solves for the intersection of the
+edge lines in the gradient field and removes the drift instead of measuring
+it more precisely.
+
+## How do I get geometry out of a binary mask?
+
+Label it first, then choose the record that answers your question, all in
+`fovea::analyze`: `connected_components_with_stats` for area, bounding box
+and centroid; `_with_measurements` for orientation, eccentricity and
+circularity as well; `extract_contours` for outlines, holes, convex hulls
+and polygon descriptors.
+
+```rust
+use fovea::analyze::components::{Connectivity4, connected_components_with_stats};
+use fovea::image::{BinaryImage, Image};
+use fovea::pixel::Label32;
+
+let mask: BinaryImage =
+    Image::generate(16, 16, |x, y| (4..12).contains(&x) && (6..10).contains(&y));
+let (labeling, stats) =
+    connected_components_with_stats::<Label32, Connectivity4>(&mask).unwrap();
+assert_eq!(labeling.label_count, 1);
+assert_eq!(stats[0].area, 8 * 4);
+# Ok::<(), fovea::Error>(())
+```
+
+For shape over *intensity* rather than a mask (the centre of brightness, Hu
+invariants), use `analyze::statistics::image_moments`; for per-channel
+summaries (min, max, mean, variance), `analyze::statistics::image_statistics`.
+
+## How do I compare two images?
+
+`fovea::analyze::quality` has both classical error metrics and structural
+similarity. `squared_error` gives per-channel SSE, MSE, RMSE and PSNR;
+`ssim` is the published Wang et al. definition with its reference parameters
+one constructor away.
+
+```rust
+use fovea::analyze::quality::{PeakValue, SsimParams, squared_error, ssim};
+use fovea::image::Image;
+use fovea::pixel::Mono8;
+
+let a = Image::generate(32, 32, |x, y| Mono8::new((x * 7 + y * 3) as u8));
+let b = a.clone();
+
+let error = squared_error(&a, &b)?;
+assert_eq!(error.pooled().mean_squared_error(), Some(0.0));
+
+let score = ssim(&a, &b, SsimParams::reference(PeakValue::of_pixel::<Mono8>()))?;
+assert_eq!(score, 1.0);
+# Ok::<(), fovea::Error>(())
+```
+
+## How do I draw detection results onto an image?
+
+`fovea::draw` burns annotations into the pixels themselves, so the record is
+self-contained: it opens in any viewer and survives being copied around. Run
+the algorithm on the original, draw on a clone. Every primitive takes signed
+coordinates and clips, so a marker centred near the edge is fine.
+
+```rust
+use fovea::Size;
+use fovea::draw::{draw_crosshair, draw_rect};
+use fovea::image::Image;
+use fovea::pixel::Mono8;
+
+let source: Image<Mono8> = Image::zero(64, 64);
+let mut annotated = source.clone();
+draw_rect(&mut annotated, (8, 8), Size::new(24, 16), Mono8::new(255), false);
+draw_crosshair(&mut annotated, (20, 16), 5, Mono8::new(255));
+```
+

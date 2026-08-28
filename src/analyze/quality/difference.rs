@@ -285,9 +285,10 @@ impl SquaredError {
     /// is the maximum over all channels. For a single-channel image this is
     /// [`channel(0)`](Self::channel).
     ///
-    /// Because every channel of a [`HomogeneousPixel`] has the same sample
-    /// count, the pooled MSE does coincide with the mean of the per-channel
-    /// MSEs. The pooled PSNR does **not** coincide with the mean of the
+    /// Because every channel of a [`HomogeneousPixel`] has the same
+    /// *included* sample count (equal `nan_count`s), the pooled MSE does
+    /// coincide with the mean of the per-channel MSEs; once per-channel NaN
+    /// exclusion fires unevenly, it is the count-weighted mean instead. The pooled PSNR does **not** coincide with the mean of the
     /// per-channel PSNRs, and the pooled one is the conventional figure.
     #[must_use]
     pub fn pooled(&self) -> ChannelSquaredError {

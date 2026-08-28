@@ -79,8 +79,8 @@ use core::marker::PhantomData;
 use std::ops::Sub as StdSub;
 
 use super::fold::{FoldItem, FoldOp, fold_neighborhood_into};
-use crate::analyze::peak::Extremum;
 use crate::border::Skip;
+use crate::common::Extremum;
 use crate::error::Error;
 use crate::image::sequential::Image;
 use crate::image::{ImageView, ImageViewMut, RasterImage, RasterImageMut};

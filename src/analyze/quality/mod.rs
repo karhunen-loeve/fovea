@@ -140,6 +140,7 @@ use crate::pixel::WhiteChannel;
 /// let _peak = PeakValue::of_pixel::<MonoF32>();
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
+#[repr(transparent)]
 pub struct PeakValue(f64);
 
 impl PeakValue {
@@ -169,7 +170,7 @@ impl PeakValue {
             Ok(Self(value))
         } else {
             Err(Error::InvalidParameter(format!(
-                "peak value must be finite and positive, got {value}"
+                "peak value must be finite and strictly positive, got {value}"
             )))
         }
     }
@@ -205,6 +206,7 @@ impl PeakValue {
 
     /// Returns the raw value.
     #[must_use]
+    #[inline]
     pub const fn get(self) -> f64 {
         self.0
     }

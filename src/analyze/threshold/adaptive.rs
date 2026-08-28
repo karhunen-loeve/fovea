@@ -39,14 +39,14 @@ mod sealed {
 /// system rather than a runtime assert (contrast
 /// [`hysteresis_threshold`](super::hysteresis_threshold)).
 ///
-/// The associated [`Offset`](Self::Offset) is the signed bias domain:
+/// The associated [`BiasValue`](Self::BiasValue) is the signed bias domain:
 /// `i64` for the integer accumulators (`Mono32`, `Mono64`) and `f64` for
 /// `MonoF64`. The offset is keyed on the accumulator rather than on its
 /// (unsigned) channel type, which could not represent a negative bias.
 pub trait AdaptiveAccumulator: sealed::Sealed + Copy + Sub<Output = Self> {
     /// Signed offset domain for [`Bias<Self>`](Bias): `i64` for integer
     /// accumulators, `f64` for `MonoF64`.
-    type Offset: Copy + core::fmt::Debug + PartialEq;
+    type BiasValue: Copy + core::fmt::Debug + PartialEq;
 
     /// Build the summed-area table of `image` with `Self` as the
     /// accumulator. Delegates to
@@ -70,11 +70,11 @@ pub trait AdaptiveAccumulator: sealed::Sealed + Copy + Sub<Output = Self> {
     /// `region_sum`; `area` is the clipped pixel count. Equality is
     /// **background** (strict `>`).
     #[doc(hidden)]
-    fn exceeds_local_mean(pixel: Self, sum: Self, area: u64, offset: Self::Offset) -> bool;
+    fn exceeds_local_mean(pixel: Self, sum: Self, area: u64, offset: Self::BiasValue) -> bool;
 }
 
 impl AdaptiveAccumulator for Mono32 {
-    type Offset = i64;
+    type BiasValue = i64;
 
     #[inline]
     fn integral_of<I>(image: &I) -> Result<IntegralImage<Self>, Error>
@@ -96,7 +96,7 @@ impl AdaptiveAccumulator for Mono32 {
 }
 
 impl AdaptiveAccumulator for Mono64 {
-    type Offset = i64;
+    type BiasValue = i64;
 
     #[inline]
     fn integral_of<I>(image: &I) -> Result<IntegralImage<Self>, Error>
@@ -118,7 +118,7 @@ impl AdaptiveAccumulator for Mono64 {
 }
 
 impl AdaptiveAccumulator for MonoF64 {
-    type Offset = f64;
+    type BiasValue = f64;
 
     #[inline]
     fn integral_of<I>(image: &I) -> Result<IntegralImage<Self>, Error>
@@ -146,7 +146,7 @@ impl AdaptiveAccumulator for MonoF64 {
 /// **background**. A `Bias::new(0)` makes the decision a strict
 /// `pixel > local_mean`.
 ///
-/// The wrapped value is `A::Offset` — `i64` for the integer accumulators
+/// The wrapped value is `A::BiasValue` — `i64` for the integer accumulators
 /// (`Mono32`, `Mono64`) and `f64` for `MonoF64`. The newtype exists to
 /// keep the sign explicit and to stop the offset being accidentally
 /// transposed with `adaptive_threshold`'s window argument, which carries
@@ -169,23 +169,23 @@ impl AdaptiveAccumulator for MonoF64 {
 /// let mask = adaptive_threshold::<_, Mono32>(&img, window, Bias::new(1)).unwrap();
 /// assert!(mask.pixel_at(2, 2));
 /// ```
-pub struct Bias<A: AdaptiveAccumulator>(A::Offset);
+pub struct Bias<A: AdaptiveAccumulator>(A::BiasValue);
 
 impl<A: AdaptiveAccumulator> Bias<A> {
     /// Wrap a signed offset value in the accumulator's bias domain.
     #[inline]
-    pub fn new(offset: A::Offset) -> Self {
+    pub fn new(offset: A::BiasValue) -> Self {
         Bias(offset)
     }
 
     /// The wrapped offset value.
     #[inline]
-    pub fn get(self) -> A::Offset {
+    pub fn get(self) -> A::BiasValue {
         self.0
     }
 }
 
-// Hand-written (not derived) so the bounds land on `A::Offset` — which is
+// Hand-written (not derived) so the bounds land on `A::BiasValue` — which is
 // always `Copy + Debug + PartialEq` per the trait — rather than on `A`.
 impl<A: AdaptiveAccumulator> Clone for Bias<A> {
     fn clone(&self) -> Self {
