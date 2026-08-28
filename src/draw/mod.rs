@@ -43,6 +43,11 @@
 //! out-of-bounds pixels are skipped, no error is returned and no panic
 //! occurs. This is the universal convention for 2D rasterisation.
 //!
+//! Clipping bounds the cost as well as the writes: the walks skip the
+//! invisible portion of a shape, so a segment or circle whose ideal extent
+//! is billions of pixels costs what its visible portion costs, not what
+//! the ideal shape would.
+//!
 //! ## Crisp, single-pixel rendering
 //!
 //! All primitives write hard single-pixel strokes: each touched pixel is set

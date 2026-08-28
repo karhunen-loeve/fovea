@@ -170,8 +170,11 @@ pub fn parabola_vertex(before: f64, at: f64, after: f64, kind: Extremum) -> Opti
     }
     let offset = 0.5 * (before - after) / curvature;
     // The three samples span one step either side; a vertex beyond that was
-    // extrapolated from an interval that does not contain it.
-    if offset.abs() > 1.0 {
+    // extrapolated from an interval that does not contain it. Also written
+    // in the positive: an infinite sample passes the curvature guard and
+    // divides two infinities into NaN, which must be refused, not returned.
+    let contained = offset.abs() <= 1.0;
+    if !contained {
         return None;
     }
     Some(offset)
@@ -302,8 +305,11 @@ fn quadratic_vertex(s: &[[f64; 3]; 3], kind: Extremum) -> Option<(f64, f64)> {
     let dy = -(hxx * gy - hxy * gx) / determinant;
 
     // The samples span one pixel either side; a vertex beyond that was
-    // extrapolated from a window that does not contain it.
-    if dx.abs() > 1.0 || dy.abs() > 1.0 {
+    // extrapolated from a window that does not contain it. Also written in
+    // the positive: an infinite sample passes the definiteness guard and
+    // divides two infinities into NaN, which must be refused, not returned.
+    let contained = dx.abs() <= 1.0 && dy.abs() <= 1.0;
+    if !contained {
         return None;
     }
     Some((dx, dy))
@@ -649,6 +655,25 @@ mod tests {
         }
     }
 
+    #[test]
+    fn an_infinite_sample_is_refused_rather_than_propagated() {
+        // An infinite sample passes the positive curvature guard (infinite
+        // curvature curves), and the vertex quotient of two infinities is
+        // NaN. The containment guard must refuse that, not report Some(NaN).
+        assert_eq!(
+            parabola_vertex(f64::INFINITY, 0.0, 0.0, Extremum::Minimum),
+            None
+        );
+        assert_eq!(
+            parabola_vertex(f64::NEG_INFINITY, 0.0, 0.0, Extremum::Maximum),
+            None
+        );
+        assert_eq!(
+            parabola_vertex(0.0, 0.0, f64::INFINITY, Extremum::Minimum),
+            None
+        );
+    }
+
     // ── interpolate_peak ─────────────────────────────────────────────────
 
     #[test]
@@ -772,6 +797,26 @@ mod tests {
         });
         assert_eq!(
             interpolate_peak(&surface, Coordinate::new(2, 2), Extremum::Maximum),
+            None
+        );
+    }
+
+    #[test]
+    fn an_infinite_neighbour_refuses_the_fit() {
+        // The infinite sample makes the Hessian determinant infinite, which
+        // passes the positive definiteness guard, and the Cramer solve then
+        // divides two infinities into NaN. The containment guard must refuse
+        // that rather than report a NaN position as a successful fit.
+        let surface: Image<MonoF32> = Image::generate(5, 5, |x, y| {
+            MonoF32::new(if (x, y) == (1, 2) {
+                f32::INFINITY
+            } else {
+                let (dx, dy) = (x as f32 - 2.0, y as f32 - 2.0);
+                dx * dx + dy * dy
+            })
+        });
+        assert_eq!(
+            interpolate_peak(&surface, Coordinate::new(2, 2), Extremum::Minimum),
             None
         );
     }

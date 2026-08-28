@@ -24,7 +24,13 @@ use super::union_find::UnionFind;
 /// # Errors — Tier 2
 ///
 /// Returns [`Error::LabelOverflow`] if the input contains more
-/// connected components than `L::MAX_LABEL` can encode.
+/// connected components than `L::MAX_LABEL` can encode. The count is of
+/// final components, not provisional labels, so an image whose components
+/// merge through many provisional labels is not rejected. Also returned,
+/// with `label_capacity == u32::MAX`, when the engine's own `u32`
+/// provisional-label space is exhausted, which takes more than
+/// `u32::MAX` disconnected foreground sites and is out of practical
+/// reach.
 ///
 /// # Examples
 ///
@@ -55,6 +61,10 @@ where
 /// Compute the connected-component labeling of `image`, writing the
 /// label image into `out` and returning `label_count`.
 ///
+/// On an `Err` return the contents of `out` are unspecified: the
+/// capacity check runs while labels are being written, so a prefix of
+/// the buffer may already carry labels from the failed run.
+///
 /// # Panics
 ///
 /// Panics if `out.size() != image.size()` (Tier 3 — programmer bug).
@@ -62,7 +72,13 @@ where
 /// # Errors \u2014 Tier 2
 ///
 /// Returns [`Error::LabelOverflow`] if the input contains more
-/// connected components than `L::MAX_LABEL` can encode.
+/// connected components than `L::MAX_LABEL` can encode. The count is of
+/// final components, not provisional labels, so an image whose components
+/// merge through many provisional labels is not rejected. Also returned,
+/// with `label_capacity == u32::MAX`, when the engine's own `u32`
+/// provisional-label space is exhausted, which takes more than
+/// `u32::MAX` disconnected foreground sites and is out of practical
+/// reach.
 pub fn connected_components_into<L, C>(
     image: &impl RasterImage<Pixel = bool>,
     out: &mut Image<L>,
@@ -92,7 +108,13 @@ where
 /// # Errors \u2014 Tier 2
 ///
 /// Returns [`Error::LabelOverflow`] if the input contains more
-/// connected components than `L::MAX_LABEL` can encode.
+/// connected components than `L::MAX_LABEL` can encode. The count is of
+/// final components, not provisional labels, so an image whose components
+/// merge through many provisional labels is not rejected. Also returned,
+/// with `label_capacity == u32::MAX`, when the engine's own `u32`
+/// provisional-label space is exhausted, which takes more than
+/// `u32::MAX` disconnected foreground sites and is out of practical
+/// reach.
 ///
 /// # Examples
 ///
@@ -165,7 +187,13 @@ where
 /// # Errors — Tier 2
 ///
 /// Returns [`Error::LabelOverflow`] if the input contains more connected
-/// components than `L::MAX_LABEL` can encode.
+/// components than `L::MAX_LABEL` can encode. The count is of final
+/// components, not provisional labels, so an image whose components merge
+/// through many provisional labels is not rejected. Also returned, with
+/// `label_capacity == u32::MAX`, when the engine's own `u32`
+/// provisional-label space is exhausted, which takes more than
+/// `u32::MAX` disconnected foreground sites and is out of practical
+/// reach.
 ///
 /// # Examples
 ///
@@ -291,13 +319,17 @@ where
 
             let label = if smallest == 0 {
                 // `make_set` returns `None` only when the u32 label
-                // space itself is spent; a narrower `L` trips the
-                // `MAX_LABEL` comparison long before.
+                // space itself is spent: more than `u32::MAX` provisional
+                // labels, the engine's own width. The capacity of the
+                // target type `L` is deliberately NOT checked here:
+                // provisional labels routinely exceed the final component
+                // count (merging them is what pass 2 is for), so `L` is
+                // checked in pass 2 against the compacted count.
                 match uf.make_set() {
-                    Some(new_label) if new_label <= L::MAX_LABEL => new_label,
-                    _ => {
+                    Some(new_label) => new_label,
+                    None => {
                         return Err(Error::LabelOverflow {
-                            label_capacity: L::MAX_LABEL,
+                            label_capacity: u32::MAX,
                         });
                     }
                 }
@@ -332,6 +364,16 @@ where
                 let root = uf.find(p);
                 let existing = compact[root as usize];
                 let (c, first) = if existing == 0 {
+                    // The `L` capacity check lives here, on the compacted
+                    // count, because this is the first point at which the
+                    // *final* number of components is known. Checking the
+                    // provisional counter in pass 1 would reject images
+                    // whose components merely merge through many labels.
+                    if label_count == L::MAX_LABEL {
+                        return Err(Error::LabelOverflow {
+                            label_capacity: L::MAX_LABEL,
+                        });
+                    }
                     let assigned = label_count + 1;
                     compact[root as usize] = assigned;
                     label_count = assigned;
@@ -340,7 +382,7 @@ where
                     (existing, false)
                 };
                 // Invariant: 0 < c <= label_count <= L::MAX_LABEL
-                // (the pass-1 overflow check guarantees this).
+                // (the capacity check just above guarantees this).
                 debug_assert!(
                     c <= L::MAX_LABEL,
                     "internal invariant violated: compact label {} > MAX_LABEL {}",
@@ -349,7 +391,7 @@ where
                 );
                 *cell = L::from_label_index(c).expect(
                     "internal error: compact label exceeds L::MAX_LABEL despite \
-                     pass-1 overflow check (analyze::components engine)",
+                     the pass-2 capacity check (analyze::components engine)",
                 );
                 // The boundary neighbour-check is gated behind the sink's
                 // `NEEDS_BOUNDARY` const so it is const-folded away (and
@@ -818,6 +860,47 @@ mod tests {
         assert_eq!(out.pixel_at(0, 0), TinyLabel(1));
         assert_eq!(out.pixel_at(2, 0), TinyLabel(2));
         assert_eq!(out.pixel_at(4, 0), TinyLabel(3));
+    }
+
+    #[test]
+    fn label_overflow_counts_final_components_not_provisional_labels() {
+        // Row 0 alone creates four provisional labels, all merged into
+        // one component by row 1. TinyLabel holds 3 labels, so a check
+        // against the provisional counter would reject this ordinary
+        // image; the documented contract counts final components (one).
+        let img = img_from_str(
+            r#"
+            #.#.#.#
+            #######
+        "#,
+        );
+        let r = connected_components::<Label32, Connectivity4>(&img).unwrap();
+        assert_eq!(r.label_count, 1);
+
+        let mut out: Image<TinyLabel> = Image::zero(7, 2);
+        let n = connected_components_into::<TinyLabel, Connectivity4>(&img, &mut out).unwrap();
+        assert_eq!(n, 1);
+    }
+
+    #[test]
+    fn label_overflow_still_fires_on_merged_components_over_capacity() {
+        // Eight provisional labels merging down to four components, one
+        // more than TinyLabel can hold: still an overflow, reported with
+        // the label type's capacity.
+        let img = img_from_str(
+            r#"
+            #.#.#.#.#.#.#.#
+            ###.###.###.###
+        "#,
+        );
+        let r = connected_components::<Label32, Connectivity4>(&img).unwrap();
+        assert_eq!(r.label_count, 4);
+
+        let err = connected_components::<TinyLabel, Connectivity4>(&img).unwrap_err();
+        match err {
+            Error::LabelOverflow { label_capacity } => assert_eq!(label_capacity, 3),
+            other => panic!("expected LabelOverflow, got {:?}", other),
+        }
     }
 
     // Step 9 \u2014 trait audit on Labeling ────────────────────────────────

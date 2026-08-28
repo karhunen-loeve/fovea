@@ -59,7 +59,7 @@ pub use moments::{CentralMoments, ImageMoments, NormalizedMoments, image_moments
 pub use summary::{ChannelStatistics, StatisticsChannel};
 
 use crate::image::RasterImage;
-use crate::pixel::HomogeneousPixel;
+use crate::pixel::{HomogeneousPixel, SingleChannel};
 
 /// Caller-chosen output shape for [`image_statistics`].
 ///
@@ -67,10 +67,21 @@ use crate::pixel::HomogeneousPixel;
 /// single-channel image should not force the caller to unwrap a one-element
 /// `Vec`, and a fixed-channel pixel type should let the array length be
 /// checked rather than assumed. Implemented for
-/// [`ChannelStatistics<C>`] (single-channel input only),
-/// `Vec<ChannelStatistics<C>>` (any channel count) and
-/// `[ChannelStatistics<C>; N]` (exactly `N` channels).
-pub trait StatisticsOutput<C>: Sized {
+/// [`ChannelStatistics<C>`] (pixel types with one channel only, enforced at
+/// compile time through [`SingleChannel`]), `Vec<ChannelStatistics<C>>`
+/// (any channel count) and `[ChannelStatistics<C>; N]` (exactly `N`
+/// channels, checked at run time).
+///
+/// The pixel type `P` is a parameter so that the single-record shape can be
+/// keyed on [`SingleChannel`]: a `ChannelStatistics` binding on a colour
+/// image is a compile error naming this trait, not a run-time panic.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` is not a statistics output shape for the pixel type `{P}`",
+    label = "the single-record `ChannelStatistics<C>` shape requires a single-channel pixel",
+    note = "use `Vec<ChannelStatistics<C>>` or `[ChannelStatistics<C>; N]` for a pixel type \
+            with more than one channel"
+)]
+pub trait StatisticsOutput<C, P>: Sized {
     /// Builds the output shape by invoking `compute(channel_index)` once per
     /// channel.
     ///
@@ -80,22 +91,21 @@ pub trait StatisticsOutput<C>: Sized {
     fn collect(channel_count: usize, compute: impl FnMut(usize) -> ChannelStatistics<C>) -> Self;
 }
 
-impl<C> StatisticsOutput<C> for ChannelStatistics<C> {
+impl<P> StatisticsOutput<P::Channel, P> for ChannelStatistics<P::Channel>
+where
+    P: SingleChannel,
+{
     fn collect(
         channel_count: usize,
-        mut compute: impl FnMut(usize) -> ChannelStatistics<C>,
+        mut compute: impl FnMut(usize) -> ChannelStatistics<P::Channel>,
     ) -> Self {
-        assert_eq!(
-            channel_count, 1,
-            "image_statistics() called with output type `ChannelStatistics<C>` on a pixel with \
-             {channel_count} channels; use `Vec<ChannelStatistics<C>>` or \
-             `[ChannelStatistics<C>; N]` instead",
-        );
+        // `P: SingleChannel` makes the count 1 by construction.
+        debug_assert_eq!(channel_count, 1);
         compute(0)
     }
 }
 
-impl<C> StatisticsOutput<C> for Vec<ChannelStatistics<C>> {
+impl<C, P> StatisticsOutput<C, P> for Vec<ChannelStatistics<C>> {
     fn collect(
         channel_count: usize,
         mut compute: impl FnMut(usize) -> ChannelStatistics<C>,
@@ -104,7 +114,7 @@ impl<C> StatisticsOutput<C> for Vec<ChannelStatistics<C>> {
     }
 }
 
-impl<C, const N: usize> StatisticsOutput<C> for [ChannelStatistics<C>; N] {
+impl<C, P, const N: usize> StatisticsOutput<C, P> for [ChannelStatistics<C>; N] {
     fn collect(
         channel_count: usize,
         compute: impl FnMut(usize) -> ChannelStatistics<C>,
@@ -138,12 +148,28 @@ impl<C, const N: usize> StatisticsOutput<C> for [ChannelStatistics<C>; N] {
 /// costs nothing on the single-channel images the statistics are usually
 /// wanted for.
 ///
+/// # Output shape mismatches
+///
+/// A [`ChannelStatistics`] binding on a multi-channel image is a **compile
+/// error**: the single-record shape is implemented only for
+/// [`SingleChannel`] pixel types.
+///
+/// ```compile_fail,E0277
+/// use fovea::analyze::statistics::{ChannelStatistics, image_statistics};
+/// use fovea::image::Image;
+/// use fovea::pixel::Rgb8;
+///
+/// let image = Image::fill(2, 2, Rgb8::new(1, 2, 3));
+/// // Three channels cannot fold into one record.
+/// let stats: ChannelStatistics<_> = image_statistics(&image);
+/// ```
+///
 /// # Panics
 ///
-/// Panics if the requested output shape does not match the pixel's channel
-/// count: a [`ChannelStatistics`] binding on a multi-channel image, or an
-/// `[ChannelStatistics; N]` whose `N` is wrong. This is a programmer error
-/// visible in the calling line, not a data-dependent failure.
+/// Panics if an `[ChannelStatistics; N]` binding's `N` does not match the
+/// pixel's channel count. This is a programmer error visible in the calling
+/// line, not a data-dependent failure. (Moving this check to compile time
+/// too is a v0.5.0 question shared with the histogram's output shape.)
 ///
 /// # Example
 ///
@@ -168,7 +194,7 @@ where
     I: RasterImage<Pixel = P>,
     P: HomogeneousPixel,
     P::Channel: StatisticsChannel,
-    O: StatisticsOutput<P::Channel>,
+    O: StatisticsOutput<P::Channel, P>,
 {
     O::collect(P::CHANNEL_COUNT, |channel| {
         let mut stats = ChannelStatistics::empty();
@@ -247,12 +273,9 @@ mod tests {
         }
     }
 
-    #[test]
-    #[should_panic(expected = "3 channels")]
-    fn a_single_record_shape_on_a_colour_image_panics() {
-        let image = Image::fill(2, 2, Rgb8::new(1, 2, 3));
-        let _stats: ChannelStatistics<_> = image_statistics(&image);
-    }
+    // A single-record binding on a colour image no longer compiles (the
+    // shape is keyed on `SingleChannel`); the case is pinned by the
+    // `compile_fail` doctest on `image_statistics`.
 
     #[test]
     #[should_panic(expected = "with 3 channels")]

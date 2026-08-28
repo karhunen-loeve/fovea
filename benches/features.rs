@@ -1,9 +1,9 @@
 //! Corner detection: the two families, measured against each other.
 //!
-//! The question this bench exists to answer is the one Roadmap item 4 asks —
-//! whether the classical four-point early rejection is worth building into
-//! the segment test — and the wider one behind it: what a segment test costs
-//! relative to a structure tensor on the same frame.
+//! The question this bench exists to answer: whether the classical
+//! four-point early rejection is worth building into the segment test, and
+//! the wider one behind it: what a segment test costs relative to a
+//! structure tensor on the same frame.
 //!
 //! The image is a synthetic texture rather than a clean square, because the
 //! interesting cost of FAST is how quickly it *rejects* ordinary pixels, and
@@ -14,8 +14,8 @@ use std::hint::black_box;
 use criterion::{Criterion, criterion_group, criterion_main};
 use fovea::border::Skip;
 use fovea::features::detect::{
-    CornerParams, FastParams, SegmentTest, ShiTomasi, corner_response_map, detect_corners, fast,
-    fast_score_map,
+    CornerParams, FastParams, NmsRadius, SegmentTest, ShiTomasi, corner_response_map,
+    detect_corners, fast, fast_score_map,
 };
 use fovea::image::Image;
 use fovea::pixel::{Mono8, MonoF32};
@@ -54,7 +54,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         b.iter(|| {
             corner_response_map::<_, _, _, MonoF32>(
                 black_box(&image),
-                &harris!(0.04),
+                harris!(0.04),
                 sigma!(1.4),
             )
         })
@@ -63,24 +63,24 @@ fn criterion_benchmark(c: &mut Criterion) {
         b.iter(|| {
             corner_response_map::<_, _, _, MonoF32>(
                 black_box(&image),
-                &ShiTomasi,
+                ShiTomasi,
                 sigma!(1.4),
             )
         })
     });
 
     // The whole detector, so the peak stage is included in the comparison.
-    let fast_params = FastParams::new(SegmentTest::new(20.0, 9).unwrap(), 3).unwrap();
+    let fast_params = FastParams::new(SegmentTest::new(20.0, 9).unwrap(), NmsRadius::new(3).unwrap());
     group.bench_function("fast-9 detect 512x512 Mono8", |b| {
         b.iter(|| fast(black_box(&image), fast_params, &Skip))
     });
 
-    let corner_params = CornerParams::new(sigma!(1.4), 1e7, 3).unwrap();
+    let corner_params = CornerParams::new(sigma!(1.4), 1e7, NmsRadius::new(3).unwrap()).unwrap();
     group.bench_function("harris detect 512x512 Mono8", |b| {
-        b.iter(|| detect_corners(black_box(&image), &harris!(0.04), corner_params))
+        b.iter(|| detect_corners(black_box(&image), harris!(0.04), corner_params))
     });
     group.bench_function("shi-tomasi detect 512x512 Mono8", |b| {
-        b.iter(|| detect_corners(black_box(&image), &ShiTomasi, corner_params))
+        b.iter(|| detect_corners(black_box(&image), ShiTomasi, corner_params))
     });
 
     group.finish();

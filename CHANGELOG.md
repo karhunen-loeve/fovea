@@ -115,7 +115,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the keypoint model above. `features::detect::Harris` (the classical
   `det(M) − k·tr(M)²`) and `features::detect::ShiTomasi` (`λ_min(M)`, no `k`
   to tune) are two **response strategies** over one shared pipeline rather
-  than two detectors: `features::detect::detect_corners(&image, &method,
+  than two detectors: `features::detect::detect_corners(&image, method,
   params)` runs Sobel gradients → gradient products → Gaussian window →
   response → threshold and peak selection, and returns `Vec<Corner>` in
   raster order. A third measure is an implementation of the open
@@ -916,6 +916,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   colour. Migration is mechanical — `(dx, dy)` becomes `Offset::new(dx,
   dy)`, `(0, 0)` becomes `Offset::ZERO`, and a destructuring `let (dx, dy)
   = …` becomes field access.
+- **Breaking:** the four structure-tensor detector entry points take their
+  response strategy by value: `StructureTensor::response(&self, method: M)`,
+  `corner_response_map(&image, method, window)`, `detect_corners` and
+  `detect_corners_in_level` likewise (was `&M` everywhere). The demosaic,
+  template-matching, resize and image-combining engines already took their
+  strategies by value, so the detect family was the one place a caller had
+  to borrow a `Copy`-sized marker, and the inconsistency was between
+  shipped siblings. Migration: delete the `&`.
+- **Breaking:** the non-maximum-suppression radius is a validated type,
+  `features::detect::NmsRadius` (at least 1, with `const fn new -> Option`,
+  `try_new -> Result` and `get`), replacing three hand-written "must be at
+  least 1" validations with three message phrasings. `CornerParams` and
+  `FastParams` carry it as a field and their `nms_radius()` accessors
+  return it; `refine_corners` takes it for the fitting window, whose
+  at-least-one-pixel invariant is the same one (a single-pixel window has
+  a rank-one normal matrix, so every fit would be refused), and is
+  therefore total in its radius. `FastParams::new` is total now that both
+  fields carry their own invariants, and `FastParams::try_new` is removed.
+  `corner_peaks` deliberately keeps its raw `usize`: it is the permissive
+  primitive, where radius 0 degenerates to "every pixel above the
+  threshold". Migration: `NmsRadius::new(3).unwrap()` for a literal
+  (checkable in a `const` item), `NmsRadius::try_new(r)?` for a computed
+  radius.
+- **Breaking** for downstream implementors: `StatisticsOutput<C>` gained
+  the pixel type as a parameter, `StatisticsOutput<C, P>`, and the
+  single-record `ChannelStatistics<C>` shape is implemented only for
+  `P: SingleChannel`. Binding a single record on a colour image is now a
+  compile error carrying the former panic message's advice, instead of a
+  run-time panic. Call sites of `image_statistics` are unchanged unless
+  they relied on the panic, which no longer compiles; the array shape's
+  length check stays at run time.
+- **Breaking:** `Depalettize::from_slice` is replaced by
+  `Depalettize::try_from_slice -> Result`. A partial palette routinely
+  arrives from a decoded file, so its length is data, and data failures
+  are errors, not panics; this was the one value-certifying constructor
+  in the crate that still aborted. The full-array
+  `Depalettize::new([P; 256])` is unchanged and total.
+- A `SeparableWeights` implementation returning an empty weight slice or
+  an out-of-bounds anchor now fails at the engine's boundary with a
+  message naming the trait and the offending method, instead of
+  underflowing the interior-region arithmetic several frames deeper in a
+  panic that named neither. Correct implementations are unaffected; the
+  checks run once per call, not per pixel.
 
 ### Fixed
 
@@ -925,6 +968,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   only; the bound the compiler enforces never changed, so no behaviour or
   signature moves with this. Corrected while writing the same sentence for
   the corner detectors, which do widen `Mono32` and up.
+- `connected_components` (and through it `_with_stats`,
+  `_with_measurements` and `extract_contours`) reported `LabelOverflow`
+  against the engine's *provisional* label count, so an ordinary image
+  whose components merge through many provisional labels could fail to
+  label into a narrow `LabelPixel` type: a one-component 7x2 comb-over-bar
+  image overflowed a `MAX_LABEL = 3` label type. The capacity check now
+  runs in pass 2 against the final compacted count, matching the
+  documented contract; exhausting the engine's own `u32` provisional
+  space, which takes more than `u32::MAX` disconnected foreground sites,
+  is reported with `label_capacity == u32::MAX`. On an `Err`,
+  `connected_components_into` may leave a prefix of the output buffer
+  written, now documented.
+- `parabola_vertex` and `interpolate_peak` returned `Some(NaN)` for an
+  infinite sample, outside their documented ranges: infinite curvature
+  passes the positive definiteness guards and the vertex quotient of two
+  infinities is NaN, which the negatively-written containment guard let
+  through, so `interpolate_corners` then counted a NaN position as a
+  successful refinement. Both guards are rewritten in the positive, and an
+  infinite sample is refused exactly like a NaN one.
+- The line and circle walks are clipped to the frame. Painted pixels were
+  always correct, but the walks stepped through the *ideal* shape, so
+  `draw_line(&mut img, (i32::MIN, 0), (i32::MAX, 0), color)` cost roughly
+  twenty seconds to paint four pixels and a `u32::MAX` circle radius ran
+  the octant walk about three billion times. Both walks now fast-forward
+  their exact internal state past invisible iterations, so the cost
+  follows the visible portion; the painted output is unchanged, pinned
+  pixel-for-pixel against the unclipped walks by exhaustive sweeps.
+- `Orientation::from_atan2` and `AxialOrientation::from_half_atan2` could
+  return exactly `-π` (respectively `-π/2`), outside their documented
+  canonical ranges: `atan2` returns the closed `[-π, π]`, and a
+  negative-zero `y` beside a negative `x` lands on the bottom endpoint.
+  That single boundary value now folds to the top of the range, the same
+  angle spelled canonically.
+- `pyr_up`'s target validation could overflow and abort in debug builds: a
+  zero-area image can legally carry a dimension past `usize::MAX / 2`, and
+  any `Size` can be named as the target. The validation now uses checked
+  arithmetic and rejects such targets as invalid.
+- `eccentricity` (on `CentralMoments` and `BlobMeasurements`) could exceed
+  its documented `[0, 1]` for a near-collinear shape at a large coordinate
+  offset, where cancellation pushes the smaller eigenvalue slightly below
+  zero (1.000 000 19 measured at x = 65 535). The guarding clamp is now
+  two-sided.
+- `Contour::solidity` returned `Some(0.0)`, outside its documented
+  `(0, 1]`, for a bent one-pixel out-and-back trace: the trace encloses no
+  area while its point set's hull does, so the degenerate-hull guard did
+  not fire. Zero enclosed area now yields `None`, symmetric with
+  `centroid`. `circularity` is unchanged: its `Some(0.0)` for a line-like
+  chain is a meaningful zero-roundness score over a nonzero perimeter.
+- `Rect` painted a span to the *left* of its anchor for a width or height
+  past `i64::MAX`: the plain cast wrapped (`usize::MAX as i64` is `-1`)
+  and `hspan` accepts either argument order, so the output was silently
+  wrong rather than clipped. The extents now saturate, and a pathological
+  `Size` clips like any other off-image extent.
+- The detect module documentation claimed "no parameter moves a detection"
+  for the segment test. True for the threshold, which only filters; false
+  for the arc length, which changes the score map itself, so detections
+  can move or vanish between arc lengths (the suite's own right-angle
+  fixture vanishes outright between 9 and 12). The claim is narrowed to
+  the threshold and pinned by a mixed-contrast filtering test.
 
 ### Performance
 

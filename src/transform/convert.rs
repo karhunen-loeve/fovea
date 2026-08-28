@@ -2598,12 +2598,20 @@ impl<P: Copy> Depalettize<P> {
 }
 
 impl<P: Copy + ZeroablePixel> Depalettize<P> {
-    /// Build from a slice shorter than 256 entries.
-    /// Remaining entries are zero-filled.
+    /// Builds from a slice of at most 256 entries; the remainder is
+    /// zero-filled.
     ///
-    /// # Panics
+    /// A partial palette routinely arrives from a decoded file, so the
+    /// length is data, not a literal — which is why this is a `try_`
+    /// constructor and there is no aborting sibling. A full compile-time
+    /// palette goes through [`new`](Self::new), which takes the whole
+    /// `[P; 256]` and cannot fail.
     ///
-    /// Panics if `entries.len() > 256`.
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidParameter`] if `entries.len() > 256`: an
+    /// [`Indexed8`] index can never reach past entry 255, so longer input
+    /// could only be silently dead data.
     ///
     /// # Examples
     ///
@@ -2611,16 +2619,22 @@ impl<P: Copy + ZeroablePixel> Depalettize<P> {
     /// # use fovea::pixel::{Indexed8, Rgb8};
     /// # use fovea::transform::{ConvertPixel, Depalettize};
     /// let entries = [Rgb8::new(255, 0, 0), Rgb8::new(0, 255, 0)];
-    /// let strategy = Depalettize::from_slice(&entries);
+    /// let strategy = Depalettize::try_from_slice(&entries)?;
     /// assert_eq!(strategy.convert(&Indexed8(0)), Rgb8::new(255, 0, 0));
     /// assert_eq!(strategy.convert(&Indexed8(1)), Rgb8::new(0, 255, 0));
     /// assert_eq!(strategy.convert(&Indexed8(2)), Rgb8::new(0, 0, 0)); // zero-filled
+    /// # Ok::<(), fovea::Error>(())
     /// ```
-    pub fn from_slice(entries: &[P]) -> Self {
-        assert!(entries.len() <= 256);
+    pub fn try_from_slice(entries: &[P]) -> Result<Self, Error> {
+        if entries.len() > 256 {
+            return Err(Error::InvalidParameter(format!(
+                "Depalettize palette must have at most 256 entries, got {}",
+                entries.len()
+            )));
+        }
         let mut palette = [P::zero(); 256];
         palette[..entries.len()].copy_from_slice(entries);
-        Self { palette }
+        Ok(Self { palette })
     }
 }
 
@@ -7220,7 +7234,7 @@ mod tests {
     #[test]
     fn depalettize_from_slice_zero_fills() {
         let entries = [Rgb8::new(255, 0, 0), Rgb8::new(0, 255, 0)];
-        let strategy = Depalettize::from_slice(&entries);
+        let strategy = Depalettize::try_from_slice(&entries).unwrap();
         assert_eq!(strategy.convert(&Indexed8(0)), Rgb8::new(255, 0, 0));
         assert_eq!(strategy.convert(&Indexed8(1)), Rgb8::new(0, 255, 0));
         // Remaining entries are zero-filled
@@ -7230,7 +7244,7 @@ mod tests {
 
     #[test]
     fn depalettize_from_slice_empty() {
-        let strategy = Depalettize::<Rgb8>::from_slice(&[]);
+        let strategy = Depalettize::<Rgb8>::try_from_slice(&[]).unwrap();
         assert_eq!(strategy.convert(&Indexed8(0)), Rgb8::new(0, 0, 0));
         assert_eq!(strategy.convert(&Indexed8(255)), Rgb8::new(0, 0, 0));
     }
@@ -7241,7 +7255,7 @@ mod tests {
         for (i, entry) in entries.iter_mut().enumerate() {
             *entry = Rgb8::new(i as u8, 0, 0);
         }
-        let strategy = Depalettize::from_slice(&entries);
+        let strategy = Depalettize::try_from_slice(&entries).unwrap();
         for i in 0..256u16 {
             assert_eq!(
                 strategy.convert(&Indexed8(i as u8)),
@@ -7253,16 +7267,21 @@ mod tests {
     #[test]
     fn depalettize_from_slice_single_entry() {
         let entries = [Rgb8::new(42, 43, 44)];
-        let strategy = Depalettize::from_slice(&entries);
+        let strategy = Depalettize::try_from_slice(&entries).unwrap();
         assert_eq!(strategy.convert(&Indexed8(0)), Rgb8::new(42, 43, 44));
         assert_eq!(strategy.convert(&Indexed8(1)), Rgb8::new(0, 0, 0));
     }
 
     #[test]
-    #[should_panic]
-    fn depalettize_from_slice_panics_over_256() {
+    fn depalettize_try_from_slice_rejects_over_256() {
         let entries = vec![Rgb8::new(0, 0, 0); 257];
-        let _ = Depalettize::from_slice(&entries);
+        match Depalettize::try_from_slice(&entries) {
+            Err(Error::InvalidParameter(reason)) => {
+                assert!(reason.contains("256") && reason.contains("257"), "{reason}");
+            }
+            Err(other) => panic!("expected InvalidParameter, got {other:?}"),
+            Ok(_) => panic!("a 257-entry palette must be rejected"),
+        }
     }
 
     #[test]
@@ -7286,7 +7305,7 @@ mod tests {
             Rgba8::new(0, 255, 0, 128), // semi-transparent green
             Rgba8::new(0, 0, 255, 0),   // fully transparent blue
         ];
-        let strategy = Depalettize::<Rgba8>::from_slice(&entries);
+        let strategy = Depalettize::<Rgba8>::try_from_slice(&entries).unwrap();
         assert_eq!(strategy.convert(&Indexed8(0)), Rgba8::new(255, 0, 0, 255));
         assert_eq!(strategy.convert(&Indexed8(1)), Rgba8::new(0, 255, 0, 128));
         assert_eq!(strategy.convert(&Indexed8(2)), Rgba8::new(0, 0, 255, 0));

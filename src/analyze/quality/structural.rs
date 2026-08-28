@@ -21,8 +21,7 @@ use super::PeakValue;
 /// Window and stabilizing constants for [`ssim`] and [`ssim_map`].
 ///
 /// A parameter *value*, not a suffix: varying the window is varying this
-/// argument, which is the crate's one mechanism for variant selection
-/// (PHILOSOPHY §13). [`reference`](Self::reference) builds the published
+/// argument, which is the crate's one mechanism for variant selection. [`reference`](Self::reference) builds the published
 /// defaults and is what nearly every caller wants.
 ///
 /// # The reference parameters, and why they are the default

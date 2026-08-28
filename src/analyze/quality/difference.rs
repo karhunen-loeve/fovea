@@ -315,11 +315,9 @@ impl SquaredError {
 /// A pair whose difference is not a number is recorded in
 /// [`nan_count`](ChannelSquaredError::nan_count) and left out of every metric,
 /// which is the policy
-/// [`image_statistics`](crate::analyze::statistics::image_statistics) uses and
-/// for the reason
-/// [ADR-0066](https://github.com/karhunen-loeve/fovea) gives for it: a summary
-/// that has somewhere to record an exclusion should exclude rather than
-/// poison. [`ssim`](super::ssim) has nowhere to record one and therefore
+/// [`image_statistics`](crate::analyze::statistics::image_statistics) uses,
+/// and for the same reason: a summary that has somewhere to record an
+/// exclusion should exclude rather than poison. [`ssim`](super::ssim) has nowhere to record one and therefore
 /// propagates instead.
 ///
 /// # Cost

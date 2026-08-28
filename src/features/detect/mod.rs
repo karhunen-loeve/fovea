@@ -76,9 +76,13 @@
 //! [`FAST_RING`] is entirely at least `I_p + t`, or entirely at most
 //! `I_p − t`. There is no window, no gradient and no filtering: the answer
 //! depends on 17 raw samples, and nothing between them and the decision. One
-//! consequence is worth relying on — **no parameter moves a detection**. The
-//! reported pixels are the same at every threshold and every arc length,
-//! where the tensor family's peak drifts inward as its window grows.
+//! consequence is worth relying on — **the threshold never moves a
+//! detection**. The score map is fixed once the arc length is chosen, so
+//! raising the threshold only removes corners; every survivor keeps its
+//! exact pixel, where the tensor family's peak drifts inward as its window
+//! grows. The arc length enjoys no such guarantee: each length is its own
+//! detector with its own score map, and a corner reported at 9 can vanish at
+//! 12 (a right angle does exactly that).
 //!
 //! The score is the largest `t` at which the pixel still passes, so one
 //! number serves as both the test's threshold and the peak stage's.
@@ -149,7 +153,7 @@
 //! let gx = scharr_x(&image, &Clamp);
 //! let gy = scharr_y(&image, &Clamp);
 //! let tensor = StructureTensor::from_gradients(&gx, &gy, sigma!(1.2))?;
-//! let response = tensor.response(&harris!(0.04));
+//! let response = tensor.response(harris!(0.04));
 //!
 //! // The square's four corners, and nothing else.
 //! let peak = corner_peaks(&response, 0.0, 3)
@@ -188,8 +192,7 @@
 //!
 //! What both refuse is a "quality level" knob relative to the strongest
 //! corner in *this* frame: it makes a detection depend on the rest of the
-//! frame, which is a decision for the caller (PHILOSOPHY §8), not for the
-//! detector. It is also three lines over a public map.
+//! frame, which is a decision for the caller, not for the detector. It is also three lines over a public map.
 //!
 //! ## Scale
 //!
@@ -206,7 +209,7 @@
 //! ```
 //! use fovea::CoordinateF64;
 //! use fovea::features::HasPosition;
-//! use fovea::features::detect::{detect_corners_in_level, CornerParams, ShiTomasi};
+//! use fovea::features::detect::{detect_corners_in_level, CornerParams, NmsRadius, ShiTomasi};
 //! use fovea::image::{Image, ScaledImage};
 //! use fovea::pixel::MonoF32;
 //! use fovea::{pixel_distance, sigma};
@@ -224,8 +227,8 @@
 //!     sigma!(1.0),
 //! );
 //!
-//! let params = CornerParams::try_new(sigma!(1.0), 0.05, 2)?;
-//! let corners = detect_corners_in_level(&level, &ShiTomasi, params);
+//! let params = CornerParams::try_new(sigma!(1.0), 0.05, NmsRadius::new(2).unwrap())?;
+//! let corners = detect_corners_in_level(&level, ShiTomasi, params);
 //!
 //! // Found on a 24×24 level, reported in the 48×48 base frame: an x of 30
 //! // is not a coordinate the level could have produced.
@@ -243,7 +246,7 @@ pub use fast::{
     FAST_RING, FAST_RING_RADIUS, FastParams, SegmentTest, fast, fast_in_level, fast_score_at,
     fast_score_map,
 };
-pub use peaks::{corner_peaks, interpolate_corners};
+pub use peaks::{NmsRadius, corner_peaks, interpolate_corners};
 pub use refine::refine_corners;
 pub use structure_tensor::{
     CornerParams, CornerResponse, CornerResponseChannel, Harris, ShiTomasi, StructureTensor,

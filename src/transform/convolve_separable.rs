@@ -240,9 +240,31 @@ pub fn convolve_separable_into<I, B, K, O, P, Acc, Out>(
 /// Borrow a [`SeparableWeights`] value's two axes as `ImageRef` views — the
 /// shape the correlation core consumes. Zero-copy: the views point into the
 /// kernel's own storage.
+///
+/// This is also the boundary where the trait's prose contract is checked,
+/// once per call rather than per pixel: a downstream implementor returning
+/// an empty axis or an out-of-bounds anchor is reported here by trait and
+/// method name, instead of underflowing the interior-region arithmetic
+/// several frames deeper in a panic that names neither.
 fn weight_views<K: SeparableWeights>(kernel: &K) -> (ImageRef<'_, f32>, ImageRef<'_, f32>) {
     let h_weights = kernel.h_weights();
     let v_weights = kernel.v_weights();
+    assert!(
+        !h_weights.is_empty() && !v_weights.is_empty(),
+        "SeparableWeights contract violated: h_weights() and v_weights() must be non-empty \
+         (h has {} taps, v has {})",
+        h_weights.len(),
+        v_weights.len(),
+    );
+    assert!(
+        kernel.h_anchor() < h_weights.len() && kernel.v_anchor() < v_weights.len(),
+        "SeparableWeights contract violated: anchors must index their own axis \
+         (h_anchor() {} of {} taps, v_anchor() {} of {})",
+        kernel.h_anchor(),
+        h_weights.len(),
+        kernel.v_anchor(),
+        v_weights.len(),
+    );
     let h = ImageRef::new(h_weights.len(), 1, h_weights).expect("h kernel view: 1 row");
     let v = ImageRef::new(1, v_weights.len(), v_weights).expect("v kernel view: 1 column");
     (h, v)
@@ -1536,5 +1558,61 @@ mod tests {
             differ,
             "swapping asymmetric kernels should produce different results"
         );
+    }
+
+    // ── The SeparableWeights contract is checked at the boundary ────────
+
+    /// A downstream implementor that breaks the "never empty" clause.
+    struct EmptyAxis;
+    impl crate::image::SeparableWeights for EmptyAxis {
+        fn h_weights(&self) -> &[f32] {
+            &[]
+        }
+        fn h_anchor(&self) -> usize {
+            0
+        }
+        fn v_weights(&self) -> &[f32] {
+            &[1.0]
+        }
+        fn v_anchor(&self) -> usize {
+            0
+        }
+        fn flipped(&self) -> Self {
+            EmptyAxis
+        }
+    }
+
+    /// A downstream implementor whose anchor points past its axis.
+    struct WildAnchor;
+    impl crate::image::SeparableWeights for WildAnchor {
+        fn h_weights(&self) -> &[f32] {
+            &[1.0, 1.0, 1.0]
+        }
+        fn h_anchor(&self) -> usize {
+            3
+        }
+        fn v_weights(&self) -> &[f32] {
+            &[1.0]
+        }
+        fn v_anchor(&self) -> usize {
+            0
+        }
+        fn flipped(&self) -> Self {
+            WildAnchor
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "SeparableWeights contract violated")]
+    fn an_empty_weight_axis_is_reported_by_trait_and_method_name() {
+        let src: Image<MonoF32> = Image::fill(4, 4, MonoF32::new(1.0));
+        let _: Image<MonoF32> = convolve_separable(&src, &EmptyAxis, &Clamp);
+    }
+
+    #[test]
+    #[should_panic(expected = "SeparableWeights contract violated")]
+    fn an_out_of_bounds_anchor_is_reported_by_trait_and_method_name() {
+        let src: Image<MonoF32> = Image::fill(4, 4, MonoF32::new(1.0));
+        let _: Image<MonoF32> = convolve_separable(&src, &WildAnchor, &Clamp);
     }
 }

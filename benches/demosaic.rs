@@ -1,8 +1,8 @@
 //! Demosaicing: what a phase-aware pass costs against the engines it did
 //! not reuse.
 //!
-//! The question this bench exists to answer is the one Roadmap item 8 left
-//! open. Its engine is pixel-outer / kernel-inner, because the kernel is
+//! The question this bench exists to answer was left open when the engine
+//! was designed. It is pixel-outer / kernel-inner, because the kernel is
 //! selected by the site's parity — so it cannot use the loop-inverted,
 //! auto-vectorising interior path `fold_neighborhood` has. That is a
 //! plausible-sounding cost with no number attached, and the honest way to

@@ -944,10 +944,13 @@ impl Orientation {
 
     /// Creates an orientation from a gradient vector, as `atan2(y, x)`.
     ///
-    /// The dominant construction site, and **total**: `atan2` already
-    /// returns a value in `(−π, π]`, so no wrapping is performed and
-    /// nothing can fail. (`atan2(0, 0)` is `0` — an arbitrary but defined
-    /// direction for a zero-length vector, matching [`f32::atan2`].)
+    /// The dominant construction site, and **total**: nothing can fail.
+    /// `atan2` returns `[−π, π]`, one value wider than the canonical range
+    /// at the bottom — a negative-zero `y` beside a negative `x` yields
+    /// exactly `−π` — so that single boundary value is folded to `+π`, the
+    /// same angle spelled inside `(−π, π]`. (`atan2(0, 0)` is `0` — an
+    /// arbitrary but defined direction for a zero-length vector, matching
+    /// [`f32::atan2`].)
     ///
     /// # Example
     ///
@@ -959,7 +962,12 @@ impl Orientation {
     /// ```
     #[must_use]
     pub fn from_atan2(y: f32, x: f32) -> Self {
-        Self(y.atan2(x))
+        let angle = y.atan2(x);
+        if angle == -core::f32::consts::PI {
+            Self(core::f32::consts::PI)
+        } else {
+            Self(angle)
+        }
     }
 
     /// Returns the angle in radians, in `(−π, π]`.
@@ -1078,8 +1086,11 @@ impl AxialOrientation {
     /// Creates an axis orientation as `½·atan2(y, x)`.
     ///
     /// The half-angle form that second-moment axis extraction produces.
-    /// **Total**: `atan2` returns `(−π, π]`, so the halved result already
-    /// lies in `(−π/2, π/2]` and no wrapping is performed.
+    /// **Total**: nothing can fail. `atan2` returns `[−π, π]`, one value
+    /// wider than twice the canonical range at the bottom — a negative-zero
+    /// `y` beside a negative `x` yields exactly `−π` — so the halved
+    /// boundary value `−π/2` is folded to `+π/2`, the same axis spelled
+    /// inside `(−π/2, π/2]`.
     ///
     /// # Example
     ///
@@ -1091,7 +1102,12 @@ impl AxialOrientation {
     /// ```
     #[must_use]
     pub fn from_half_atan2(y: f64, x: f64) -> Self {
-        Self(0.5 * y.atan2(x))
+        let axis = 0.5 * y.atan2(x);
+        if axis == -core::f64::consts::FRAC_PI_2 {
+            Self(core::f64::consts::FRAC_PI_2)
+        } else {
+            Self(axis)
+        }
     }
 
     /// Returns the angle in radians, in `(−π/2, π/2]`.
@@ -1302,6 +1318,11 @@ mod tests {
         assert_eq!(Orientation::from_atan2(0.0, -1.0).radians(), PI32);
         // A zero-length gradient is defined, not NaN.
         assert_eq!(Orientation::from_atan2(0.0, 0.0).radians(), 0.0);
+        // The atan2 boundary: a negative-zero y beside a negative x is the
+        // one input that produces exactly −π, and it folds to +π so the
+        // result stays inside the canonical (−π, π].
+        assert_eq!(Orientation::from_atan2(-0.0, -1.0).radians(), PI32);
+        assert!(Orientation::from_atan2(-0.0, 1.0).radians() == 0.0);
     }
 
     #[test]
@@ -1421,6 +1442,12 @@ mod tests {
             PI64 / 2.0
         );
         assert_eq!(AxialOrientation::from_half_atan2(0.0, 0.0).radians(), 0.0);
+        // The atan2 boundary: atan2(−0.0, −1) = −π → halved = −π/2, which
+        // folds to +π/2 so the result stays inside (−π/2, π/2].
+        assert_eq!(
+            AxialOrientation::from_half_atan2(-0.0, -1.0).radians(),
+            PI64 / 2.0
+        );
     }
 
     #[test]

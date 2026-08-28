@@ -8,7 +8,77 @@ use crate::analyze::peak::{Extremum, interpolate_peak};
 use crate::features::Corner;
 use crate::image::RasterImage;
 use crate::pixel::SingleChannel;
-use crate::{Coordinate, CoordinateF64};
+use crate::{Coordinate, CoordinateF64, Error};
+
+/// A pixel-window radius that is **at least 1**: the half-side of the
+/// square window a detection must be the maximum of, and therefore the
+/// minimum separation between two reported corners.
+///
+/// The invariant exists because a radius of zero asks for the local maximum
+/// of a one-pixel window, which every pixel trivially is; the thresholded
+/// map that request really wants is one [`corner_response_map`] or
+/// [`fast_score_map`] call away. Carried by
+/// [`CornerParams`](super::CornerParams) and
+/// [`FastParams`](super::FastParams), and reused by
+/// [`refine_corners`](super::refine_corners) for its fitting window, which
+/// shares the same at-least-one-pixel invariant (a single-pixel window has
+/// a rank-one normal matrix, so every fit would be refused).
+///
+/// [`corner_peaks`] itself stays a raw `usize` deliberately: it is the
+/// permissive primitive, where radius 0 degenerates to "every pixel above
+/// the threshold" rather than being a mistake worth rejecting.
+///
+/// [`corner_response_map`]: super::corner_response_map
+/// [`fast_score_map`]: super::fast_score_map
+///
+/// # Example
+///
+/// ```
+/// use fovea::features::detect::NmsRadius;
+///
+/// // Literals: checked at compile time in a const context.
+/// const RADIUS: NmsRadius = NmsRadius::new(3).unwrap();
+/// assert_eq!(RADIUS.get(), 3);
+///
+/// assert!(NmsRadius::new(0).is_none());
+/// assert!(NmsRadius::try_new(0).is_err());
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct NmsRadius(usize);
+
+impl NmsRadius {
+    /// Creates a radius, returning `None` if `radius == 0`.
+    ///
+    /// `const`, so binding the result to a `const` item checks a literal at
+    /// compile time. For a computed radius use [`try_new`](Self::try_new).
+    #[must_use]
+    pub const fn new(radius: usize) -> Option<Self> {
+        if radius == 0 {
+            return None;
+        }
+        Some(Self(radius))
+    }
+
+    /// Creates a radius from a computed value, validating it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidParameter`] if `radius == 0`.
+    pub fn try_new(radius: usize) -> Result<Self, Error> {
+        if radius == 0 {
+            return Err(Error::InvalidParameter(
+                "window radius must be at least 1".to_string(),
+            ));
+        }
+        Ok(Self(radius))
+    }
+
+    /// Returns the radius, in pixels.
+    #[must_use]
+    pub const fn get(self) -> usize {
+        self.0
+    }
+}
 
 /// Selects the local maxima of a corner map as keypoints.
 ///

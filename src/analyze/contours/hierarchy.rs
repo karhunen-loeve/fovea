@@ -130,14 +130,27 @@ impl Contour {
     /// non-degenerate contours — `1` means the shape *is* its hull
     /// (convex), lower values mean concavities.
     ///
-    /// `None` when the hull encloses no area (degenerate chain).
+    /// `None` when either area is zero: a degenerate chain whose hull
+    /// encloses nothing, or a thin out-and-back trace that encloses no
+    /// area itself even though its *point set*'s hull does (a bent
+    /// one-pixel skeleton is the ordinary case — the tracer's honest
+    /// output for a thin structure). `Some(0.0)` there would invite a
+    /// division downstream; absence is the answer, symmetric with
+    /// [`centroid`](Self::centroid). Contrast [`circularity`](Self::circularity),
+    /// which legitimately reports `Some(0.0)` for a line-like chain:
+    /// zero roundness is a meaningful score while its perimeter is
+    /// nonzero.
     #[must_use]
     pub fn solidity(&self) -> Option<f64> {
+        let area = self.area();
+        if area == 0.0 {
+            return None;
+        }
         let hull_area = polygon_area(&self.convex_hull());
         if hull_area == 0.0 {
             return None;
         }
-        Some(self.area() / hull_area)
+        Some(area / hull_area)
     }
 
     /// Encode as a Freeman chain code — see [`ChainCode`].
@@ -280,6 +293,17 @@ mod tests {
         // Perimeter is nonzero, so circularity is defined — and 0.
         assert_eq!(line.circularity(), Some(0.0));
         assert_eq!(line.solidity(), None);
+
+        // A *bent* out-and-back trace (an L-shaped one-pixel skeleton):
+        // still zero enclosed area, but its point set's hull is a real
+        // triangle, so the hull-side guard alone used to let this reach
+        // the quotient and report the misuse-inviting Some(0.0).
+        let bent = Contour::new(vec![c(1, 1), c(2, 1), c(2, 2), c(2, 1)], ContourKind::Outer);
+        assert_eq!(bent.area(), 0.0);
+        assert_eq!(bent.perimeter(), 4.0);
+        assert!(polygon_area(&bent.convex_hull()) > 0.0);
+        assert_eq!(bent.solidity(), None);
+        assert_eq!(bent.circularity(), Some(0.0));
     }
 
     #[test]

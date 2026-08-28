@@ -137,10 +137,18 @@ where
         + LinearPixel<f32, Accumulator = Acc>
         + std::ops::Add<Output = Acc>,
 {
+    /// `target` doubles `dim` (even parent) or doubles it minus one (odd
+    /// parent). Checked: a zero-area image can carry a dimension past
+    /// `usize::MAX / 2` and any `Size` can be named as the target, and both
+    /// must be rejected rather than wrapped over (or aborted on, in debug).
+    fn doubles(target: usize, dim: usize) -> bool {
+        match dim.checked_mul(2) {
+            Some(two) => target == two || target.checked_add(1) == Some(two),
+            None => false,
+        }
+    }
     let (w, h) = (image.width(), image.height());
-    let width_ok = target.width == 2 * w || target.width + 1 == 2 * w;
-    let height_ok = target.height == 2 * h || target.height + 1 == 2 * h;
-    if !width_ok || !height_ok {
+    if !doubles(target.width, w) || !doubles(target.height, h) {
         return Err(Error::InvalidPyrUpTarget {
             source: image.size(),
             target,
@@ -373,6 +381,22 @@ mod tests {
         assert_eq!(a.size(), Size::new(8, 8));
         let b: Image<MonoF32> = pyr_up(&src, Size::new(7, 7)).unwrap();
         assert_eq!(b.size(), Size::new(7, 7));
+    }
+
+    #[test]
+    fn pyr_up_rejects_extreme_sizes_without_overflowing() {
+        // A zero-area image can legally carry a dimension past
+        // usize::MAX / 2, and any Size can be named as the target. Both
+        // used to wrap in the validation arithmetic (aborting in debug
+        // builds); they must simply be rejected.
+        let wide: Image<MonoF32> = Image::zero(usize::MAX, 0);
+        let result: Result<Image<MonoF32>, Error> = pyr_up(&wide, Size::new(4, 4));
+        assert!(result.is_err());
+
+        let src = Image::fill(4, 4, MonoF32::new(0.5));
+        let result: Result<Image<MonoF32>, Error> =
+            pyr_up(&src, Size::new(usize::MAX, usize::MAX));
+        assert!(result.is_err());
     }
 
     #[test]

@@ -111,13 +111,32 @@ pub enum Error {
 
     /// A computed value violates a parameter type's invariant.
     ///
-    /// Returned by the `try_new` constructors of invariant-carrying
-    /// parameter types ([`Sigma`](crate::Sigma),
-    /// [`PixelDistance`](crate::PixelDistance)) when the value is zero,
-    /// negative, NaN, or infinite — conditions that arise when the
-    /// parameter is derived from a computation over image data. (Literal
-    /// parameters use the types' const `new` constructors instead, which
-    /// fail at compile time in const contexts.)
+    /// Returned by the `try_new` constructors of the invariant-carrying
+    /// parameter types — [`Sigma`](crate::Sigma),
+    /// [`PixelDistance`](crate::PixelDistance),
+    /// [`Tolerance`](crate::Tolerance),
+    /// [`OddWindowSide`](crate::OddWindowSide),
+    /// [`HysteresisThresholds`](crate::analyze::threshold::HysteresisThresholds),
+    /// [`Clamp`](crate::transform::Clamp),
+    /// [`Harris`](crate::features::detect::Harris),
+    /// [`SegmentTest`](crate::features::detect::SegmentTest),
+    /// [`NmsRadius`](crate::features::detect::NmsRadius),
+    /// [`PeakValue`](crate::analyze::quality::PeakValue),
+    /// [`BayerGains`](crate::transform::BayerGains) and their kin — and by
+    /// validating functions whose parameter is a plain value. What
+    /// "invalid" means is the type's own invariant: a sign or finiteness
+    /// condition for the float parameters, a parity or at-least-one
+    /// condition for the integer ones, an ordering relation between two
+    /// values for the pairs. The constructor's documentation states it.
+    ///
+    /// This is the *computed-value* path, for parameters derived from data
+    /// at run time. A literal parameter does not need it: the types carry
+    /// `const fn new -> Option` constructors, and where a literal is the
+    /// normal input, a matching literal macro ([`sigma!`](crate::sigma),
+    /// [`pixel_distance!`](crate::pixel_distance),
+    /// [`tolerance!`](crate::tolerance), [`window!`](crate::window),
+    /// [`harris!`](crate::harris), [`peak!`](crate::peak)) that rejects a
+    /// bad literal at compile time.
     ///
     /// The contained string describes the specific reason. Treat it as
     /// human-readable diagnostic text, not as a stable machine-readable

@@ -55,8 +55,15 @@ impl<P: Copy> Drawable<P> for Rect<P> {
             return;
         }
         let (x0, y0) = (i64::from(self.top_left.0), i64::from(self.top_left.1));
-        let x1 = x0 + self.size.width as i64 - 1;
-        let y1 = y0 + self.size.height as i64 - 1;
+        // `Size` performs no validation, and a width past i64::MAX would
+        // wrap the plain cast negative (usize::MAX as i64 is -1), painting
+        // a span to the *left* of the anchor instead of clipping a huge
+        // rectangle. Saturate instead: the far edge lands beyond any frame
+        // and the spans clip it like any other off-image extent.
+        let width = i64::try_from(self.size.width).unwrap_or(i64::MAX);
+        let height = i64::try_from(self.size.height).unwrap_or(i64::MAX);
+        let x1 = x0.saturating_add(width - 1);
+        let y1 = y0.saturating_add(height - 1);
         if self.fill {
             // Clip the row range up front so a mostly-off-image rectangle
             // does not iterate its invisible rows.
@@ -184,5 +191,25 @@ mod tests {
         let mut image: Image<Mono8> = Image::zero(4, 4);
         draw_rect(&mut image, (2, 2), Size::new(5, 5), ink(), false);
         assert_eq!(inked(&image), vec![(2, 2), (3, 2), (2, 3)]);
+    }
+
+    #[test]
+    fn a_pathological_size_clips_instead_of_wrapping() {
+        // `Size` performs no validation, and `usize::MAX as i64` is -1: the
+        // old cast painted a two-pixel span to the *left* of the anchor.
+        // The saturating conversion clips the huge rectangle to the frame.
+        let mut image: Image<Mono8> = Image::zero(6, 6);
+        draw_rect(&mut image, (2, 2), Size::new(usize::MAX, 2), ink(), true);
+        let drawn = inked(&image);
+        assert_eq!(drawn.len(), 8, "{drawn:?}");
+        assert!(drawn.contains(&(2, 2)) && drawn.contains(&(5, 3)), "{drawn:?}");
+        assert!(!drawn.contains(&(0, 2)) && !drawn.contains(&(1, 2)), "{drawn:?}");
+
+        let mut image: Image<Mono8> = Image::zero(6, 6);
+        draw_rect(&mut image, (1, 1), Size::new(usize::MAX, usize::MAX), ink(), false);
+        // Only the top and left border arms are visible; both clip.
+        let drawn = inked(&image);
+        assert!(drawn.contains(&(5, 1)) && drawn.contains(&(1, 5)), "{drawn:?}");
+        assert!(!drawn.contains(&(0, 0)), "{drawn:?}");
     }
 }

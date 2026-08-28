@@ -358,8 +358,11 @@ pub(crate) fn axis_eccentricity(mu20: f64, mu02: f64, mu11: f64) -> f64 {
     if larger <= 0.0 {
         return 0.0;
     }
-    // The clamp guards tiny negatives from float error at the extremes.
-    (1.0 - smaller / larger).max(0.0).sqrt()
+    // The clamp guards float error at both extremes: a near-circular blob
+    // can put the ratio a hair above 1, and a near-collinear one can push
+    // `smaller` a hair below 0 through cancellation, which would take the
+    // result above the documented 1 (measured 1.000_000_19 at x = 65 535).
+    (1.0 - smaller / larger).clamp(0.0, 1.0).sqrt()
 }
 
 /// Raw intensity-weighted moments of a single-channel image, up to third
@@ -765,6 +768,22 @@ mod tests {
         assert_eq!(central.mu20, 0.0);
         assert_eq!(central.mu02, 0.0);
         assert_eq!(central.eccentricity(), 0.0);
+    }
+
+    #[test]
+    fn a_collinear_run_at_a_large_offset_stays_in_the_documented_range() {
+        // At x = 65 535 the second-moment cancellation can leave mu20 a
+        // hair below zero, which used to push the eccentricity above its
+        // documented [0, 1] (1.000_000_19 measured). The clamp is now
+        // two-sided; a collinear run stays maximally eccentric and in
+        // range.
+        let image: Image<MonoF32> = Image::generate(65_536, 5, |x, _| {
+            MonoF32::new(if x == 65_535 { 1.0 } else { 0.0 })
+        });
+        let central = image_moments(&image).central_moments().unwrap();
+        let ecc = central.eccentricity();
+        assert!(ecc <= 1.0, "eccentricity {ecc} escapes [0, 1]");
+        assert!(ecc > 0.999, "a collinear run is maximally eccentric: {ecc}");
     }
 
     #[test]
