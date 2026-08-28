@@ -4,8 +4,8 @@
 //! for the public surface and the worked 4×4 example.
 
 use crate::image::{Image, ImageView, ImageViewMut, RasterImage};
-use crate::{Coordinate, Error};
 use crate::pixel::LabelPixel;
+use crate::{Coordinate, Error};
 
 use super::Labeling;
 use super::connectivity::Connectivity;
@@ -1033,6 +1033,9 @@ mod tests {
         // 3x3 block with all four view edges cutting it → every pixel is a
         // boundary pixel except the centre → boundary count 8.
         assert_eq!(m[0].boundary_pixels, 8);
-        assert_eq!(m[0].bbox(), Rectangle::new(Coordinate::new(0, 0), Size::new(3, 3)));
+        assert_eq!(
+            m[0].bbox(),
+            Rectangle::new(Coordinate::new(0, 0), Size::new(3, 3))
+        );
     }
 }

@@ -1,6 +1,6 @@
 //! Straight line segments — Bresenham's algorithm.
 
-use super::{put, Drawable};
+use super::{Drawable, put};
 use crate::image::ImageViewMut;
 
 /// A straight line segment between two points, drawn one pixel wide.
@@ -364,7 +364,12 @@ mod tests {
         assert_eq!(inked(&image), vec![(0, 0), (1, 0), (2, 0), (3, 0)]);
 
         let mut image: Image<Mono8> = Image::zero(4, 4);
-        draw_line(&mut image, (-10_000_000, -10_000_000), (10_000_000, 10_000_000), ink());
+        draw_line(
+            &mut image,
+            (-10_000_000, -10_000_000),
+            (10_000_000, 10_000_000),
+            ink(),
+        );
         assert_eq!(inked(&image), vec![(0, 0), (1, 1), (2, 2), (3, 3)]);
 
         // Steep counterpart, and a shallow segment whose bounding box

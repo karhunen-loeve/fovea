@@ -271,10 +271,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{pixel_distance, sigma};
+    use crate::CoordinateF64;
     use crate::image::{Decimated, PyramidLevel, ScaledImage};
     use crate::pixel::{Mono8, MonoF32};
-    use crate::CoordinateF64;
+    use crate::{pixel_distance, sigma};
 
     // ── pyr_down: size contract ─────────────────────────────────────────
 
@@ -394,8 +394,7 @@ mod tests {
         assert!(result.is_err());
 
         let src = Image::fill(4, 4, MonoF32::new(0.5));
-        let result: Result<Image<MonoF32>, Error> =
-            pyr_up(&src, Size::new(usize::MAX, usize::MAX));
+        let result: Result<Image<MonoF32>, Error> = pyr_up(&src, Size::new(usize::MAX, usize::MAX));
         assert!(result.is_err());
     }
 

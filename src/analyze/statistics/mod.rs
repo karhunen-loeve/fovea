@@ -115,10 +115,7 @@ impl<C, P> StatisticsOutput<C, P> for Vec<ChannelStatistics<C>> {
 }
 
 impl<C, P, const N: usize> StatisticsOutput<C, P> for [ChannelStatistics<C>; N] {
-    fn collect(
-        channel_count: usize,
-        compute: impl FnMut(usize) -> ChannelStatistics<C>,
-    ) -> Self {
+    fn collect(channel_count: usize, compute: impl FnMut(usize) -> ChannelStatistics<C>) -> Self {
         assert_eq!(
             channel_count, N,
             "image_statistics() called with output type `[ChannelStatistics<C>; {N}]` on a pixel \
@@ -245,9 +242,7 @@ mod tests {
     #[test]
     fn each_channel_is_summarised_independently() {
         // Channel values chosen so a channel mix-up cannot pass.
-        let image = Image::generate(4, 4, |x, y| {
-            Rgb8::new((x * 10) as u8, (y * 20) as u8, 200)
-        });
+        let image = Image::generate(4, 4, |x, y| Rgb8::new((x * 10) as u8, (y * 20) as u8, 200));
         let [r, g, b]: [ChannelStatistics<_>; 3] = image_statistics(&image);
 
         assert_eq!(r.min().map(|c| c.0), Some(0));

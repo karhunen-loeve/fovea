@@ -483,10 +483,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sigma;
     use crate::PixelDistance;
     use crate::image::{Image, ScaledImage};
     use crate::pixel::MonoF32;
+    use crate::sigma;
 
     fn level(distance: f64, offset: (f64, f64), sigma: f32) -> ScaledImage<MonoF32> {
         ScaledImage::new(

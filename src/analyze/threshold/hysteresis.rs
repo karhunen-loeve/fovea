@@ -366,7 +366,8 @@ mod tests {
         // Strong at (1,1); weak chain (2,1),(3,1) is 4-connected to it.
         let img = mask(&["....", ".#++", "...."]);
         let out = hysteresis_threshold(&img, pair());
-        let expected: std::collections::BTreeSet<_> = [(1, 1), (2, 1), (3, 1)].into_iter().collect();
+        let expected: std::collections::BTreeSet<_> =
+            [(1, 1), (2, 1), (3, 1)].into_iter().collect();
         assert_eq!(set_true(&out), expected);
     }
 
@@ -377,7 +378,8 @@ mod tests {
         // the weak ones dropped; Connectivity8 keeps the whole chain.
         let img = mask(&["#..", ".+.", "..+"]);
         let out = hysteresis_threshold(&img, pair());
-        let expected: std::collections::BTreeSet<_> = [(0, 0), (1, 1), (2, 2)].into_iter().collect();
+        let expected: std::collections::BTreeSet<_> =
+            [(0, 0), (1, 1), (2, 2)].into_iter().collect();
         assert_eq!(set_true(&out), expected);
     }
 
@@ -401,8 +403,12 @@ mod tests {
         // inclusive from exclusive at *both* thresholds: with exclusive
         // `>` the 128 would be non-edge and the 200 would be a lone weak
         // pixel, so the whole row would drop to false.
-        let img =
-            Image::from_vec(3, 1, vec![Mono8::new(127), Mono8::new(128), Mono8::new(200)]).unwrap();
+        let img = Image::from_vec(
+            3,
+            1,
+            vec![Mono8::new(127), Mono8::new(128), Mono8::new(200)],
+        )
+        .unwrap();
         let t = HysteresisThresholds::try_new(Saturating(128), Saturating(200)).unwrap();
         let out = hysteresis_threshold(&img, t);
         assert!(!out.pixel_at(0, 0), "127 < low → non-edge");

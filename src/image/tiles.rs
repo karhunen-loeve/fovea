@@ -2040,7 +2040,9 @@ mod bayer_roi_tests {
     #[test]
     fn a_zero_sized_aligned_crop_is_empty_not_an_error() {
         let img = frame();
-        let roi = img.aligned_bayer_roi(Rectangle::new((2, 2), (0, 0))).unwrap();
+        let roi = img
+            .aligned_bayer_roi(Rectangle::new((2, 2), (0, 0)))
+            .unwrap();
         assert_eq!(roi.size(), Size::new(0, 0));
     }
 
@@ -2050,7 +2052,9 @@ mod bayer_roi_tests {
         // has to hold at each level — which it does, because an even offset
         // from an even offset is even.
         let img = frame();
-        let outer = img.aligned_bayer_roi(Rectangle::new((2, 2), (6, 6))).unwrap();
+        let outer = img
+            .aligned_bayer_roi(Rectangle::new((2, 2), (6, 6)))
+            .unwrap();
         let inner = outer
             .aligned_bayer_roi(Rectangle::new((2, 2), (2, 2)))
             .unwrap();
@@ -2088,7 +2092,9 @@ mod bayer_roi_tests {
         }
 
         let view = ImageRef::new(8, 8, &data).unwrap();
-        let roi = view.aligned_bayer_roi(Rectangle::new((2, 2), (2, 2))).unwrap();
+        let roi = view
+            .aligned_bayer_roi(Rectangle::new((2, 2), (2, 2)))
+            .unwrap();
         assert_eq!(roi.pixel_at(0, 0), BayerRggb8::new(18));
         assert!(
             view.aligned_bayer_roi(Rectangle::new((1, 2), (2, 2)))

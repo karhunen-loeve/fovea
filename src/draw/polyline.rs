@@ -1,7 +1,7 @@
 //! Connected line chains — open polylines and closed polygons.
 
-use super::line::segment;
 use super::Drawable;
+use super::line::segment;
 use crate::image::ImageViewMut;
 
 /// A chain of line segments through a list of points, open or closed.

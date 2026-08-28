@@ -442,7 +442,10 @@ mod tests {
         .map(Coordinate::from)
         .to_vec();
         let coarse = approximate_polygon(&outline, tolerance!(1.5));
-        assert!(!coarse.contains(&c(4, 1)), "bump survived ε=1.5: {coarse:?}");
+        assert!(
+            !coarse.contains(&c(4, 1)),
+            "bump survived ε=1.5: {coarse:?}"
+        );
         let fine = approximate_polygon(&outline, tolerance!(0.5));
         assert!(fine.contains(&c(4, 1)), "bump lost at ε=0.5: {fine:?}");
     }

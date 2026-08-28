@@ -9302,7 +9302,10 @@ mod tests {
         assert_eq!(strat.lo(), Mono8::new(20));
         assert_eq!(strat.hi(), Mono8::new(235));
         // Equivalent to the struct-literal form.
-        assert_eq!(strat, Clamp::try_new(Mono8::new(20), Mono8::new(235)).unwrap());
+        assert_eq!(
+            strat,
+            Clamp::try_new(Mono8::new(20), Mono8::new(235)).unwrap()
+        );
     }
 
     #[test]
@@ -9335,7 +9338,10 @@ mod tests {
         let strat = Clamp::try_new(Mono8::new(20), Mono8::new(235)).unwrap();
         assert_eq!(strat.lo(), Mono8::new(20));
         assert_eq!(strat.hi(), Mono8::new(235));
-        assert_eq!(strat, Clamp::try_new(Mono8::new(20), Mono8::new(235)).unwrap());
+        assert_eq!(
+            strat,
+            Clamp::try_new(Mono8::new(20), Mono8::new(235)).unwrap()
+        );
         // Equal bounds are valid here too, for the same reason as in `new`.
         assert!(Clamp::try_new(Mono8::new(128), Mono8::new(128)).is_ok());
     }

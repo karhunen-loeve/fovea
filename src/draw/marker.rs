@@ -1,6 +1,6 @@
 //! Point markers — the crosshair.
 
-use super::{hspan, vspan, Drawable};
+use super::{Drawable, hspan, vspan};
 use crate::image::ImageViewMut;
 
 /// A `+`-shaped marker centred on a point.

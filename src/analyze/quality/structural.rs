@@ -529,10 +529,10 @@ fn non_negative(value: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::peak;
     use crate::Size;
     use crate::analyze::statistics::{ChannelStatistics, image_statistics};
     use crate::image::ContiguousImage;
+    use crate::peak;
     use crate::pixel::{Mono8, Mono16, MonoF32};
 
     fn reference_params() -> SsimParams {
@@ -577,10 +577,7 @@ mod tests {
         // radius = floor(3σ + 0.5), so σ < 1/6 gives a single tap: no window
         // variance at all, and a score that is only the luminance term.
         let peak = PeakValue::of_pixel::<Mono8>();
-        assert_eq!(
-            gaussian_kernel_size(sigma!(0.1), SsimParams::TRUNCATE),
-            1
-        );
+        assert_eq!(gaussian_kernel_size(sigma!(0.1), SsimParams::TRUNCATE), 1);
         let refused = SsimParams::try_new(peak, sigma!(0.1), 0.01, 0.03);
         assert!(
             matches!(refused, Err(Error::InvalidParameter(_))),

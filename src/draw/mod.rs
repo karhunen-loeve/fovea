@@ -81,11 +81,11 @@ mod marker;
 mod polyline;
 mod rect;
 
-pub use circle::{draw_circle, Circle};
-pub use line::{draw_line, Line};
-pub use marker::{draw_crosshair, Crosshair};
-pub use polyline::{draw_polyline, Polyline};
-pub use rect::{draw_rect, Rect};
+pub use circle::{Circle, draw_circle};
+pub use line::{Line, draw_line};
+pub use marker::{Crosshair, draw_crosshair};
+pub use polyline::{Polyline, draw_polyline};
+pub use rect::{Rect, draw_rect};
 
 use crate::image::ImageViewMut;
 

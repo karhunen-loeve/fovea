@@ -1,8 +1,8 @@
 //! Axis-aligned rectangles — outline and filled.
 
-use super::{hspan, vspan, Drawable};
-use crate::image::ImageViewMut;
+use super::{Drawable, hspan, vspan};
 use crate::Size;
+use crate::image::ImageViewMut;
 
 /// An axis-aligned rectangle, outlined or filled.
 ///
@@ -202,14 +202,29 @@ mod tests {
         draw_rect(&mut image, (2, 2), Size::new(usize::MAX, 2), ink(), true);
         let drawn = inked(&image);
         assert_eq!(drawn.len(), 8, "{drawn:?}");
-        assert!(drawn.contains(&(2, 2)) && drawn.contains(&(5, 3)), "{drawn:?}");
-        assert!(!drawn.contains(&(0, 2)) && !drawn.contains(&(1, 2)), "{drawn:?}");
+        assert!(
+            drawn.contains(&(2, 2)) && drawn.contains(&(5, 3)),
+            "{drawn:?}"
+        );
+        assert!(
+            !drawn.contains(&(0, 2)) && !drawn.contains(&(1, 2)),
+            "{drawn:?}"
+        );
 
         let mut image: Image<Mono8> = Image::zero(6, 6);
-        draw_rect(&mut image, (1, 1), Size::new(usize::MAX, usize::MAX), ink(), false);
+        draw_rect(
+            &mut image,
+            (1, 1),
+            Size::new(usize::MAX, usize::MAX),
+            ink(),
+            false,
+        );
         // Only the top and left border arms are visible; both clip.
         let drawn = inked(&image);
-        assert!(drawn.contains(&(5, 1)) && drawn.contains(&(1, 5)), "{drawn:?}");
+        assert!(
+            drawn.contains(&(5, 1)) && drawn.contains(&(1, 5)),
+            "{drawn:?}"
+        );
         assert!(!drawn.contains(&(0, 0)), "{drawn:?}");
     }
 }

@@ -141,8 +141,7 @@ pub use combine::{
 pub use convert::{
     AddAlpha, BayerToMono, BinaryMask, BinaryThreshold, BinaryThresholdInv, BrightnessContrast,
     Broadcast, ChannelLut, Clamp, ColorSwap, ConvertPixel, ConvertPixelExt, Depalettize, FullRange,
-    Invert,
-    Luminance, Lut, Narrow, PixelMap, SrgbGamma, Then, ToZeroThreshold, ToZeroThresholdInv,
+    Invert, Luminance, Lut, Narrow, PixelMap, SrgbGamma, Then, ToZeroThreshold, ToZeroThresholdInv,
     TruncateThreshold, convert_image, convert_image_into,
 };
 pub use convolve::{convolve, convolve_into, correlate, correlate_into};
@@ -151,14 +150,14 @@ pub use demosaic::{
     BayerBilinear, BayerGains, DemosaicMethod, MalvarHeCutler, demosaic, demosaic_into,
     white_balance, white_balance_into,
 };
-pub(crate) use filters::{
-    nms_sector, nms_sector_from_gradient, non_maximum_suppression_from_gradients,
-};
 pub use filters::{
     DEFAULT_TRUNCATE, box_blur_3x3, box_blur_5x5, emboss, gaussian_blur, gaussian_blur_3x3,
-    gaussian_blur_5x5, gaussian_blur_into,
-    gradient_direction, gradient_magnitude, laplacian, laplacian_8, non_maximum_suppression,
-    prewitt_x, prewitt_y, scharr_x, scharr_y, sharpen, sobel_x, sobel_y,
+    gaussian_blur_5x5, gaussian_blur_into, gradient_direction, gradient_magnitude, laplacian,
+    laplacian_8, non_maximum_suppression, prewitt_x, prewitt_y, scharr_x, scharr_y, sharpen,
+    sobel_x, sobel_y,
+};
+pub(crate) use filters::{
+    nms_sector, nms_sector_from_gradient, non_maximum_suppression_from_gradients,
 };
 pub use fold::{
     ClosureFold, FoldItem, FoldOp, fold_neighborhood, fold_neighborhood_fn,

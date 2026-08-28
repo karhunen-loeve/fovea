@@ -277,10 +277,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::sigma;
     use super::{HysteresisThresholds, canny, interpolate_edge_points};
     use crate::image::{Image, ImageView, RasterImage};
     use crate::pixel::{Mono8, MonoF32, MonoF64};
+    use crate::sigma;
 
     /// The `(low, high)` pair as one argument, so the call sites stay short.
     fn t(low: f32, high: f32) -> HysteresisThresholds<f32> {
@@ -454,8 +454,9 @@ mod tests {
         Image<MonoF32>,
     ) {
         let sigma = sigma!(1.0);
-        let image: Image<MonoF32> =
-            Image::generate(w, h, |x, _| MonoF32::new(if x < edge_x { 0.0 } else { 1.0 }));
+        let image: Image<MonoF32> = Image::generate(w, h, |x, _| {
+            MonoF32::new(if x < edge_x { 0.0 } else { 1.0 })
+        });
         let mask = canny(&image, t(0.10, 0.30), sigma);
         let blurred: Image<MonoF32> = gaussian_blur(&image, sigma, &Clamp);
         let gx = scharr_x(&blurred, &Clamp);

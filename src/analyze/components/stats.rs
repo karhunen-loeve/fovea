@@ -158,7 +158,14 @@ pub(super) mod sink {
 
     impl StatsSink for NoStats {
         #[inline(always)]
-        fn record(&mut self, _compact_label: u32, _first: bool, _at: Coordinate, _is_boundary: bool) {}
+        fn record(
+            &mut self,
+            _compact_label: u32,
+            _first: bool,
+            _at: Coordinate,
+            _is_boundary: bool,
+        ) {
+        }
     }
 
     /// Sink that accumulates per-component stats into a `Vec` indexed

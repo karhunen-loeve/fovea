@@ -52,25 +52,20 @@ fn criterion_benchmark(c: &mut Criterion) {
     // selected a peak yet.
     group.bench_function("harris response map 512x512 Mono8", |b| {
         b.iter(|| {
-            corner_response_map::<_, _, _, MonoF32>(
-                black_box(&image),
-                harris!(0.04),
-                sigma!(1.4),
-            )
+            corner_response_map::<_, _, _, MonoF32>(black_box(&image), harris!(0.04), sigma!(1.4))
         })
     });
     group.bench_function("shi-tomasi response map 512x512 Mono8", |b| {
         b.iter(|| {
-            corner_response_map::<_, _, _, MonoF32>(
-                black_box(&image),
-                ShiTomasi,
-                sigma!(1.4),
-            )
+            corner_response_map::<_, _, _, MonoF32>(black_box(&image), ShiTomasi, sigma!(1.4))
         })
     });
 
     // The whole detector, so the peak stage is included in the comparison.
-    let fast_params = FastParams::new(SegmentTest::new(20.0, 9).unwrap(), NmsRadius::new(3).unwrap());
+    let fast_params = FastParams::new(
+        SegmentTest::new(20.0, 9).unwrap(),
+        NmsRadius::new(3).unwrap(),
+    );
     group.bench_function("fast-9 detect 512x512 Mono8", |b| {
         b.iter(|| fast(black_box(&image), fast_params, &Skip))
     });

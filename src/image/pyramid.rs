@@ -488,8 +488,8 @@ impl<P: Copy> ScaleLevel for ScaledImage<P> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{pixel_distance, sigma};
     use crate::pixel::{Mono8, MonoF32};
+    use crate::{pixel_distance, sigma};
 
     fn two_level_pyramid() -> Pyramid<Image<Mono8>> {
         Pyramid::try_from_levels(vec![

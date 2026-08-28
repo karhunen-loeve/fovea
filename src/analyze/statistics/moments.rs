@@ -104,8 +104,7 @@ impl ImageMoments {
     /// there a centre to report.
     #[must_use]
     pub fn centroid(&self) -> Option<CoordinateF64> {
-        (self.m00 != 0.0)
-            .then(|| CoordinateF64::new(self.m10 / self.m00, self.m01 / self.m00))
+        (self.m00 != 0.0).then(|| CoordinateF64::new(self.m10 / self.m00, self.m01 / self.m00))
     }
 
     /// Moments taken about the centroid, so translating the image does not
@@ -579,7 +578,11 @@ mod tests {
     fn the_centroid_of_a_symmetric_block_is_its_centre() {
         // A block spanning 4..=11 on both axes: centre at 7.5.
         let image = Image::generate(16, 16, |x, y| {
-            Mono8::new(if (4..12).contains(&x) && (4..12).contains(&y) { 200 } else { 0 })
+            Mono8::new(if (4..12).contains(&x) && (4..12).contains(&y) {
+                200
+            } else {
+                0
+            })
         });
         let centroid = image_moments(&image).centroid().unwrap();
         assert!((centroid.x - 7.5).abs() < 1e-12, "{}", centroid.x);
@@ -736,13 +739,22 @@ mod tests {
             assert!((a[i] - b[i]).abs() <= 1e-9 * scale, "h{}", i + 1);
         }
         assert!(a[6].abs() > 1e-12, "the fixture must have a nonzero h7");
-        assert!((a[6] + b[6]).abs() <= 1e-9 * a[6].abs(), "{} vs {}", a[6], b[6]);
+        assert!(
+            (a[6] + b[6]).abs() <= 1e-9 * a[6].abs(),
+            "{} vs {}",
+            a[6],
+            b[6]
+        );
     }
 
     #[test]
     fn a_horizontal_bar_is_eccentric_and_axis_aligned() {
         let image = Image::generate(32, 32, |x, y| {
-            MonoF32::new(if (4..28).contains(&x) && (15..17).contains(&y) { 1.0 } else { 0.0 })
+            MonoF32::new(if (4..28).contains(&x) && (15..17).contains(&y) {
+                1.0
+            } else {
+                0.0
+            })
         });
         let central = image_moments(&image).central_moments().unwrap();
         assert!(central.eccentricity() > 0.98, "{}", central.eccentricity());
@@ -753,7 +765,11 @@ mod tests {
     fn a_symmetric_disc_is_barely_eccentric() {
         let image = Image::generate(41, 41, |x, y| {
             let (dx, dy) = (x as f64 - 20.0, y as f64 - 20.0);
-            MonoF32::new(if dx * dx + dy * dy <= 15.0 * 15.0 { 1.0 } else { 0.0 })
+            MonoF32::new(if dx * dx + dy * dy <= 15.0 * 15.0 {
+                1.0
+            } else {
+                0.0
+            })
         });
         let central = image_moments(&image).central_moments().unwrap();
         assert!(central.eccentricity() < 0.05, "{}", central.eccentricity());
@@ -789,10 +805,18 @@ mod tests {
     #[test]
     fn integer_and_float_inputs_agree_on_the_same_shape() {
         let eight = Image::generate(24, 24, |x, y| {
-            Mono8::new(if (5..15).contains(&x) && (7..19).contains(&y) { 255 } else { 0 })
+            Mono8::new(if (5..15).contains(&x) && (7..19).contains(&y) {
+                255
+            } else {
+                0
+            })
         });
         let float = Image::generate(24, 24, |x, y| {
-            MonoF32::new(if (5..15).contains(&x) && (7..19).contains(&y) { 255.0 } else { 0.0 })
+            MonoF32::new(if (5..15).contains(&x) && (7..19).contains(&y) {
+                255.0
+            } else {
+                0.0
+            })
         });
         let a = image_moments(&eight);
         let b = image_moments(&float);

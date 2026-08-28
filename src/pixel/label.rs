@@ -107,7 +107,11 @@ impl LabelPixel for Label32 {
     fn from_label_index(index: u32) -> Option<Self> {
         // `MAX_LABEL == u32::MAX`, so every non-zero index is in range;
         // only the background index is rejected.
-        if index == 0 { None } else { Some(Label32::new(index)) }
+        if index == 0 {
+            None
+        } else {
+            Some(Label32::new(index))
+        }
     }
 
     #[inline]

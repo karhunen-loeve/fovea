@@ -4,9 +4,7 @@
 use crate::{Coordinate, CoordinateF64};
 
 use super::chain::ChainCode;
-use super::polygon::{
-    convex_hull, polygon_area, polygon_centroid, polygon_perimeter,
-};
+use super::polygon::{convex_hull, polygon_area, polygon_centroid, polygon_perimeter};
 
 /// Whether a contour is a component's outer border or the border of one
 /// of its holes.
@@ -53,7 +51,10 @@ pub struct Contour {
 impl Contour {
     /// Certify a traced point chain. Tracer-internal.
     pub(super) fn new(points: Vec<Coordinate>, kind: ContourKind) -> Self {
-        debug_assert!(!points.is_empty(), "a traced contour has at least one point");
+        debug_assert!(
+            !points.is_empty(),
+            "a traced contour has at least one point"
+        );
         Self { points, kind }
     }
 

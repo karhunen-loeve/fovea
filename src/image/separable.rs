@@ -693,8 +693,8 @@ impl<const HK: usize, const VK: usize> PartialEq for SeparableKernel<HK, VK> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sigma;
     use crate::image::ImageView;
+    use crate::sigma;
 
     // ── constructors ────────────────────────────────────────────────────
 
@@ -1084,10 +1084,7 @@ mod tests {
         assert_eq!(gaussian_kernel_size(sigma!(20.0), 4.0), 161);
         assert!(gaussian_kernel_size(sigma!(20.0), 4.0) > 2 * MAX_RADIUS + 1);
         // The largest admissible sigma sits exactly on the bound.
-        assert_eq!(
-            gaussian_kernel_size(sigma!(16.0), 4.0),
-            2 * MAX_RADIUS + 1
-        );
+        assert_eq!(gaussian_kernel_size(sigma!(16.0), 4.0), 2 * MAX_RADIUS + 1);
     }
 
     #[test]
@@ -1193,14 +1190,8 @@ mod tests {
         assert_eq!(axes(&SeparableKernel::box_blur_3()), (3, 1, 3, 1));
 
         // radius = round(4.0 * 1.0) = 4 ⇒ 9 taps, anchor 4.
-        assert_eq!(
-            axes(&gaussian_kernel_1d(sigma!(1.0), 4.0)),
-            (9, 4, 9, 4)
-        );
+        assert_eq!(axes(&gaussian_kernel_1d(sigma!(1.0), 4.0)), (9, 4, 9, 4));
         // Tiny σ collapses to the 1-tap identity, the trait's edge case.
-        assert_eq!(
-            axes(&gaussian_kernel_1d(sigma!(0.05), 4.0)),
-            (1, 0, 1, 0)
-        );
+        assert_eq!(axes(&gaussian_kernel_1d(sigma!(0.05), 4.0)), (1, 0, 1, 0));
     }
 }

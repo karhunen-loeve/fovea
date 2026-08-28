@@ -43,7 +43,11 @@ fn mosaic8(width: usize, height: usize) -> Image<BayerRggb8> {
 
 fn mosaic12(width: usize, height: usize) -> Image<BayerRggb12> {
     Image::generate(width, height, |x, y| {
-        let checker = if (x / 17 + y / 13) % 2 == 0 { 640 } else { 3200 };
+        let checker = if (x / 17 + y / 13) % 2 == 0 {
+            640
+        } else {
+            3200
+        };
         let ripple = ((x * 7 + y * 11) % 37) as i32 - 18;
         BayerRggb12::new((checker + ripple).clamp(0, 4095) as u16)
     })

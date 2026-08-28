@@ -524,7 +524,11 @@ where
     B: BorderPolicy<I>,
 {
     let scores = fast_score_map(image, params.test(), border);
-    score_peaks(&scores, params.test().threshold(), params.nms_radius().get())
+    score_peaks(
+        &scores,
+        params.test().threshold(),
+        params.nms_radius().get(),
+    )
 }
 
 /// Detects corners on a pyramid level, reporting them in the **base-image**
@@ -584,10 +588,14 @@ where
     B: BorderPolicy<Image<P>>,
 {
     let scores = fast_score_map(level.as_image(), params.test(), border);
-    scan_score_peaks(&scores, params.test().threshold(), params.nms_radius().get())
-        .into_iter()
-        .map(|(local, response)| Corner::from_level(level, local, response))
-        .collect()
+    scan_score_peaks(
+        &scores,
+        params.test().threshold(),
+        params.nms_radius().get(),
+    )
+    .into_iter()
+    .map(|(local, response)| Corner::from_level(level, local, response))
+    .collect()
 }
 
 // ─── Internals ───────────────────────────────────────────────────────────────
@@ -1024,8 +1032,10 @@ mod tests {
 
     #[test]
     fn fast_params_round_trip() {
-        const PARAMS: FastParams =
-            FastParams::new(SegmentTest::new(0.08, 12).unwrap(), NmsRadius::new(4).unwrap());
+        const PARAMS: FastParams = FastParams::new(
+            SegmentTest::new(0.08, 12).unwrap(),
+            NmsRadius::new(4).unwrap(),
+        );
         assert_eq!(PARAMS.nms_radius().get(), 4);
         assert_eq!(PARAMS.test(), SegmentTest::new(0.08, 12).unwrap());
     }
@@ -1297,7 +1307,8 @@ mod tests {
         for step in 1..20 {
             let t = 0.05 * step as f32;
             let from_map = corner_peaks(&scores, t, 3);
-            let params = FastParams::new(SegmentTest::new(t, 9).unwrap(), NmsRadius::new(3).unwrap());
+            let params =
+                FastParams::new(SegmentTest::new(t, 9).unwrap(), NmsRadius::new(3).unwrap());
             let rebuilt = fast(&image, params, &Skip);
             assert_eq!(from_map, rebuilt, "at t = {t}");
         }
@@ -1426,7 +1437,10 @@ mod tests {
     #[test]
     fn a_square_has_four_corners() {
         let image = square(32, 10, 22);
-        let params = FastParams::new(SegmentTest::new(0.1, 9).unwrap(), NmsRadius::new(3).unwrap());
+        let params = FastParams::new(
+            SegmentTest::new(0.1, 9).unwrap(),
+            NmsRadius::new(3).unwrap(),
+        );
         let corners = fast(&image, params, &Skip);
 
         assert_one_per_corner(&corners, square_corner_pixels(10, 22), 2.0);
@@ -1463,7 +1477,10 @@ mod tests {
 
         // Top-left: the raster-first member *is* the corner. Top-right: it is
         // two pixels along the edge, and no threshold or radius moves it.
-        let params = FastParams::new(SegmentTest::new(0.1, 9).unwrap(), NmsRadius::new(3).unwrap());
+        let params = FastParams::new(
+            SegmentTest::new(0.1, 9).unwrap(),
+            NmsRadius::new(3).unwrap(),
+        );
         let corners = fast(&image, params, &Skip);
         assert_eq!(
             positions(&corners),
@@ -1481,11 +1498,17 @@ mod tests {
         let image = square(32, 10, 22);
         let reference = positions(&fast(
             &image,
-            FastParams::new(SegmentTest::new(0.05, 9).unwrap(), NmsRadius::new(3).unwrap()),
+            FastParams::new(
+                SegmentTest::new(0.05, 9).unwrap(),
+                NmsRadius::new(3).unwrap(),
+            ),
             &Skip,
         ));
         for threshold in [0.2f32, 0.5, 0.9, 1.0] {
-            let params = FastParams::new(SegmentTest::new(threshold, 9).unwrap(), NmsRadius::new(3).unwrap());
+            let params = FastParams::new(
+                SegmentTest::new(threshold, 9).unwrap(),
+                NmsRadius::new(3).unwrap(),
+            );
             assert_eq!(
                 positions(&fast(&image, params, &Skip)),
                 reference,
@@ -1513,14 +1536,20 @@ mod tests {
         });
         let both = positions(&fast(
             &image,
-            FastParams::new(SegmentTest::new(0.1, 9).unwrap(), NmsRadius::new(3).unwrap()),
+            FastParams::new(
+                SegmentTest::new(0.1, 9).unwrap(),
+                NmsRadius::new(3).unwrap(),
+            ),
             &Skip,
         ));
         assert_eq!(both.len(), 8, "{both:?}");
 
         let bright_only = positions(&fast(
             &image,
-            FastParams::new(SegmentTest::new(0.5, 9).unwrap(), NmsRadius::new(3).unwrap()),
+            FastParams::new(
+                SegmentTest::new(0.5, 9).unwrap(),
+                NmsRadius::new(3).unwrap(),
+            ),
             &Skip,
         ));
         assert_eq!(bright_only.len(), 4, "{bright_only:?}");
@@ -1536,7 +1565,10 @@ mod tests {
         // passes and exactly one pixel is reported — the dot itself.
         let image = dot(16, (8, 8));
         for n in 9..=16 {
-            let params = FastParams::new(SegmentTest::new(0.1, n).unwrap(), NmsRadius::new(3).unwrap());
+            let params = FastParams::new(
+                SegmentTest::new(0.1, n).unwrap(),
+                NmsRadius::new(3).unwrap(),
+            );
             let corners = fast(&image, params, &Skip);
             assert_eq!(positions(&corners), [(8.0, 8.0)], "n = {n}");
             assert_eq!(corners[0].response(), 1.0);
@@ -1551,11 +1583,17 @@ mod tests {
         // means, and why 12 is not simply a better 9.
         let image = square(32, 10, 22);
         for n in [9, 10, 11] {
-            let params = FastParams::new(SegmentTest::new(0.1, n).unwrap(), NmsRadius::new(3).unwrap());
+            let params = FastParams::new(
+                SegmentTest::new(0.1, n).unwrap(),
+                NmsRadius::new(3).unwrap(),
+            );
             assert_eq!(fast(&image, params, &Skip).len(), 4, "n = {n}");
         }
         for n in [12, 16] {
-            let params = FastParams::new(SegmentTest::new(0.1, n).unwrap(), NmsRadius::new(3).unwrap());
+            let params = FastParams::new(
+                SegmentTest::new(0.1, n).unwrap(),
+                NmsRadius::new(3).unwrap(),
+            );
             assert!(fast(&image, params, &Skip).is_empty(), "n = {n}");
         }
     }
@@ -1565,7 +1603,10 @@ mod tests {
         let image: Image<MonoF32> = Image::generate(24, 24, |x, y| {
             MonoF32::new(if x >= 12 && y >= 12 { 1.0 } else { 0.0 })
         });
-        let params = FastParams::new(SegmentTest::new(0.1, 9).unwrap(), NmsRadius::new(4).unwrap());
+        let params = FastParams::new(
+            SegmentTest::new(0.1, 9).unwrap(),
+            NmsRadius::new(4).unwrap(),
+        );
         assert_eq!(positions(&fast(&image, params, &Skip)), [(12.0, 12.0)]);
     }
 
@@ -1577,7 +1618,10 @@ mod tests {
         let dark: Image<MonoF32> = Image::generate(32, 32, |x, y| {
             MonoF32::new(1.0 - bright.pixel_at(x, y).value())
         });
-        let params = FastParams::new(SegmentTest::new(0.1, 9).unwrap(), NmsRadius::new(3).unwrap());
+        let params = FastParams::new(
+            SegmentTest::new(0.1, 9).unwrap(),
+            NmsRadius::new(3).unwrap(),
+        );
         assert_eq!(
             positions(&fast(&dark, params, &Skip)),
             positions(&fast(&bright, params, &Skip))
@@ -1586,7 +1630,10 @@ mod tests {
 
     #[test]
     fn a_flat_field_and_a_straight_edge_have_no_corners() {
-        let params = FastParams::new(SegmentTest::new(0.01, 9).unwrap(), NmsRadius::new(2).unwrap());
+        let params = FastParams::new(
+            SegmentTest::new(0.01, 9).unwrap(),
+            NmsRadius::new(2).unwrap(),
+        );
         assert!(fast(&Image::fill(16, 16, MonoF32::new(0.5)), params, &Skip).is_empty());
 
         let edge: Image<MonoF32> =
@@ -1613,7 +1660,8 @@ mod tests {
         // clusters chain into one detection — one corner per square, which is
         // all this test needs.
         let count = |t: f32| {
-            let params = FastParams::new(SegmentTest::new(t, 9).unwrap(), NmsRadius::new(3).unwrap());
+            let params =
+                FastParams::new(SegmentTest::new(t, 9).unwrap(), NmsRadius::new(3).unwrap());
             fast(&image, params, &Skip).len()
         };
         assert_eq!(count(0.1), 3);
@@ -1652,8 +1700,10 @@ mod tests {
         // and here it is doing exactly that — visibly.
         let image = square(24, 8, 16);
         let at = |r: usize| {
-            let params =
-                FastParams::new(SegmentTest::new(0.1, 9).unwrap(), NmsRadius::new(r).unwrap());
+            let params = FastParams::new(
+                SegmentTest::new(0.1, 9).unwrap(),
+                NmsRadius::new(r).unwrap(),
+            );
             fast(&image, params, &Skip)
         };
         assert_eq!(at(2).len(), 4);
@@ -1661,7 +1711,10 @@ mod tests {
 
         // Widening the gap by widening the square separates them again.
         let wider = square(32, 10, 22);
-        let params = FastParams::new(SegmentTest::new(0.1, 9).unwrap(), NmsRadius::new(3).unwrap());
+        let params = FastParams::new(
+            SegmentTest::new(0.1, 9).unwrap(),
+            NmsRadius::new(3).unwrap(),
+        );
         assert_eq!(fast(&wider, params, &Skip).len(), 4);
     }
 
@@ -1670,11 +1723,18 @@ mod tests {
         // The orchestrator must be exactly score map + peaks at the test's own
         // threshold, so rebuilding it by hand is not a different detector.
         let image = square(24, 8, 16);
-        let params = FastParams::new(SegmentTest::new(0.1, 9).unwrap(), NmsRadius::new(3).unwrap());
+        let params = FastParams::new(
+            SegmentTest::new(0.1, 9).unwrap(),
+            NmsRadius::new(3).unwrap(),
+        );
 
         let staged = {
             let scores = fast_score_map(&image, params.test(), &Skip);
-            corner_peaks(&scores, params.test().threshold(), params.nms_radius().get())
+            corner_peaks(
+                &scores,
+                params.test().threshold(),
+                params.nms_radius().get(),
+            )
         };
         assert_eq!(fast(&image, params, &Skip), staged);
         assert!(!staged.is_empty());
@@ -1688,7 +1748,8 @@ mod tests {
         let scores = fast_score_map(&image, SegmentTest::new(0.05, 9).unwrap(), &Skip);
         for step in 1..20 {
             let t = 0.05 * step as f32;
-            let params = FastParams::new(SegmentTest::new(t, 9).unwrap(), NmsRadius::new(3).unwrap());
+            let params =
+                FastParams::new(SegmentTest::new(t, 9).unwrap(), NmsRadius::new(3).unwrap());
             let detected = fast(&image, params, &Skip);
             let above = (0..24)
                 .flat_map(|y| (0..24).map(move |x| (x, y)))
@@ -1711,7 +1772,10 @@ mod tests {
             let inside = (10..22).contains(&x) && (10..22).contains(&y);
             Mono8::new(if inside { 255 } else { 0 })
         });
-        let params = FastParams::new(SegmentTest::new(20.0, 9).unwrap(), NmsRadius::new(3).unwrap());
+        let params = FastParams::new(
+            SegmentTest::new(20.0, 9).unwrap(),
+            NmsRadius::new(3).unwrap(),
+        );
         let corners = fast(&image, params, &Skip);
         assert_one_per_corner(&corners, square_corner_pixels(10, 22), 2.0);
         // `to_accumulator` widens without rescaling, so the score is in grey
@@ -1727,7 +1791,10 @@ mod tests {
         });
         let corners = fast(
             &image,
-            FastParams::new(SegmentTest::new(5000.0, 9).unwrap(), NmsRadius::new(3).unwrap()),
+            FastParams::new(
+                SegmentTest::new(5000.0, 9).unwrap(),
+                NmsRadius::new(3).unwrap(),
+            ),
             &Skip,
         );
         assert_one_per_corner(&corners, square_corner_pixels(10, 22), 2.0);
@@ -1741,7 +1808,10 @@ mod tests {
             let inside = (10..22).contains(&x) && (10..22).contains(&y);
             MonoF64::new(if inside { 1.0 } else { 0.0 })
         });
-        let params = FastParams::new(SegmentTest::new(0.1, 9).unwrap(), NmsRadius::new(3).unwrap());
+        let params = FastParams::new(
+            SegmentTest::new(0.1, 9).unwrap(),
+            NmsRadius::new(3).unwrap(),
+        );
         assert_one_per_corner(
             &fast(&image, params, &Skip),
             square_corner_pixels(10, 22),
@@ -1780,7 +1850,10 @@ mod tests {
             CoordinateF64::new(0.0, 0.0),
             sigma!(0.5),
         );
-        let params = FastParams::new(SegmentTest::new(0.1, 9).unwrap(), NmsRadius::new(3).unwrap());
+        let params = FastParams::new(
+            SegmentTest::new(0.1, 9).unwrap(),
+            NmsRadius::new(3).unwrap(),
+        );
         assert_eq!(
             fast_in_level(&level, params, &Skip),
             fast(&image, params, &Skip)
@@ -1796,7 +1869,10 @@ mod tests {
             CoordinateF64::new(0.0, 0.0),
             sigma!(1.0),
         );
-        let params = FastParams::new(SegmentTest::new(0.1, 9).unwrap(), NmsRadius::new(2).unwrap());
+        let params = FastParams::new(
+            SegmentTest::new(0.1, 9).unwrap(),
+            NmsRadius::new(2).unwrap(),
+        );
         let corners = fast_in_level(&level, params, &Skip);
         assert_eq!(corners.len(), 4, "{corners:?}");
 
@@ -1813,7 +1889,10 @@ mod tests {
     fn a_level_with_an_origin_offset_lifts_through_it() {
         let base = square(48, 16, 32);
         let coarse = pyr_down(&base);
-        let params = FastParams::new(SegmentTest::new(0.1, 9).unwrap(), NmsRadius::new(2).unwrap());
+        let params = FastParams::new(
+            SegmentTest::new(0.1, 9).unwrap(),
+            NmsRadius::new(2).unwrap(),
+        );
 
         let unshifted = ScaledImage::new(
             coarse.clone(),
@@ -1856,7 +1935,10 @@ mod tests {
             ),
         ];
         let pyramid = Pyramid::try_from_levels(levels).unwrap();
-        let params = FastParams::new(SegmentTest::new(0.1, 9).unwrap(), NmsRadius::new(2).unwrap());
+        let params = FastParams::new(
+            SegmentTest::new(0.1, 9).unwrap(),
+            NmsRadius::new(2).unwrap(),
+        );
 
         let mut corners: Vec<Corner> = pyramid
             .iter()
@@ -1884,7 +1966,10 @@ mod tests {
             ShiTomasi,
             CornerParams::new(sigma!(1.0), 0.5, NmsRadius::new(3).unwrap()).unwrap(),
         );
-        let params = FastParams::new(SegmentTest::new(0.1, 9).unwrap(), NmsRadius::new(3).unwrap());
+        let params = FastParams::new(
+            SegmentTest::new(0.1, 9).unwrap(),
+            NmsRadius::new(3).unwrap(),
+        );
         let segment = fast(&image, params, &Skip);
 
         assert_one_per_corner(&tensor, truth, 2.0);

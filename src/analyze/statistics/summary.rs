@@ -381,7 +381,10 @@ mod tests {
             (variance - reference).abs() < 1e-9,
             "{variance} vs {reference}"
         );
-        assert!(variance > 0.6, "a real spread must not collapse: {variance}");
+        assert!(
+            variance > 0.6,
+            "a real spread must not collapse: {variance}"
+        );
     }
 
     #[test]

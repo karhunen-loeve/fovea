@@ -1,6 +1,6 @@
 //! Circles — midpoint algorithm, outline and filled.
 
-use super::{hspan, put, Drawable};
+use super::{Drawable, hspan, put};
 use crate::image::ImageViewMut;
 
 /// A circle around a center point, outlined or filled.
@@ -417,7 +417,10 @@ mod tests {
         let mut image: Image<Mono8> = Image::zero(6, 6);
         draw_circle(&mut image, (3, -1_000_000), 1_000_002, ink(), true);
         let drawn = inked(&image);
-        assert!(drawn.contains(&(3, 0)) && drawn.contains(&(0, 2)), "{drawn:?}");
+        assert!(
+            drawn.contains(&(3, 0)) && drawn.contains(&(0, 2)),
+            "{drawn:?}"
+        );
         assert!(!drawn.contains(&(3, 3)), "{drawn:?}");
         for &(x, y) in &drawn {
             let dist = ((x as f64 - 3.0).powi(2) + (y as f64 + 1_000_000.0).powi(2)).sqrt();
