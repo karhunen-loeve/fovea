@@ -210,7 +210,7 @@
 //! use fovea::CoordinateF64;
 //! use fovea::features::HasPosition;
 //! use fovea::features::detect::{detect_corners_in_level, CornerParams, NmsRadius, ShiTomasi};
-//! use fovea::image::{Image, ScaledImage};
+//! use fovea::image::{Image, OriginOffset, ScaledImage};
 //! use fovea::pixel::MonoF32;
 //! use fovea::{pixel_distance, sigma};
 //! use fovea::transform::pyr_down;
@@ -223,7 +223,7 @@
 //! let level = ScaledImage::new(
 //!     pyr_down(&base),
 //!     pixel_distance!(2.0),
-//!     CoordinateF64::new(0.0, 0.0),
+//!     OriginOffset::ZERO,
 //!     sigma!(1.0),
 //! );
 //!

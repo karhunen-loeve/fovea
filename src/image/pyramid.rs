@@ -247,7 +247,7 @@ pub type GaussianPyramid<P> = Pyramid<Image<P>>;
 ///
 /// ```
 /// use fovea::CoordinateF64;
-/// use fovea::image::{Decimated, Image, ScaledImage};
+/// use fovea::image::{Decimated, Image, OriginOffset, ScaledImage};
 /// use fovea::pixel::MonoF32;
 /// use fovea::{pixel_distance, sigma};
 ///
@@ -256,7 +256,7 @@ pub type GaussianPyramid<P> = Pyramid<Image<P>>;
 /// let level = ScaledImage::new(
 ///     Image::<MonoF32>::zero(4, 4),
 ///     pixel_distance!(2.0),
-///     CoordinateF64::new(0.0, 0.0),
+///     OriginOffset::ZERO,
 ///     sigma!(1.0),
 /// );
 ///
@@ -306,14 +306,14 @@ pub trait Decimated: PyramidLevel {
     ///
     /// ```
     /// use fovea::CoordinateF64;
-    /// use fovea::image::{Decimated, Image, ScaledImage};
+    /// use fovea::image::{Decimated, Image, OriginOffset, ScaledImage};
     /// use fovea::pixel::MonoF32;
     /// use fovea::{pixel_distance, sigma};
     ///
     /// let level = ScaledImage::new(
     ///     Image::<MonoF32>::zero(4, 4),
     ///     pixel_distance!(2.0),
-    ///     CoordinateF64::new(0.5, 0.5),
+    ///     OriginOffset::new(0.5, 0.5).unwrap(),
     ///     sigma!(1.0),
     /// );
     ///
@@ -339,14 +339,14 @@ pub trait Decimated: PyramidLevel {
 ///
 /// ```
 /// use fovea::CoordinateF64;
-/// use fovea::image::{Image, ScaledImage, ScaleLevel};
+/// use fovea::image::{Image, OriginOffset, ScaleLevel, ScaledImage};
 /// use fovea::pixel::MonoF32;
 /// use fovea::{pixel_distance, sigma};
 ///
 /// let level = ScaledImage::new(
 ///     Image::<MonoF32>::zero(8, 8),
 ///     pixel_distance!(1.0),
-///     CoordinateF64::new(0.0, 0.0),
+///     OriginOffset::ZERO,
 ///     sigma!(1.6),
 /// );
 /// assert_eq!(level.sigma().get(), 1.6);
@@ -379,7 +379,7 @@ pub trait ScaleLevel: PyramidLevel {
 ///
 /// ```
 /// use fovea::CoordinateF64;
-/// use fovea::image::{Decimated, Image, ImageView, ScaledImage, ScaleLevel};
+/// use fovea::image::{Decimated, Image, ImageView, OriginOffset, ScaleLevel, ScaledImage};
 /// use fovea::pixel::MonoF32;
 /// use fovea::{pixel_distance, sigma};
 /// use fovea::transform::pyr_down;
@@ -391,7 +391,7 @@ pub trait ScaleLevel: PyramidLevel {
 /// let level = ScaledImage::new(
 ///     coarse,
 ///     pixel_distance!(2.0),
-///     CoordinateF64::new(0.0, 0.0),
+///     OriginOffset::ZERO,
 ///     sigma!(1.0),
 /// );
 ///
@@ -407,8 +407,80 @@ pub trait ScaleLevel: PyramidLevel {
 pub struct ScaledImage<P: Copy> {
     image: Image<P>,
     pixel_distance: PixelDistance,
-    origin_offset: CoordinateF64,
+    origin_offset: OriginOffset,
     sigma: Sigma,
+}
+
+/// A level's pixel-(0,0) center in base-image coordinates: **finite** along
+/// both axes.
+///
+/// The invariant carrier for [`ScaledImage`]'s origin, in the same family
+/// as [`PixelDistance`] and [`Sigma`](crate::Sigma): a NaN or infinite
+/// origin would poison every [`Decimated::to_base`] lift while the
+/// constructor's totality claim promised nothing can fail, so the claim is
+/// carried by the type instead. Negative offsets are valid — a level padded
+/// past its base's origin sits at one.
+///
+/// [`ZERO`](Self::ZERO) is the unshifted origin, which is what `pyr_down`
+/// levels have and most call sites want.
+///
+/// # Example
+///
+/// ```
+/// use fovea::image::OriginOffset;
+///
+/// const UNSHIFTED: OriginOffset = OriginOffset::ZERO;
+/// assert_eq!(UNSHIFTED.get().x, 0.0);
+///
+/// // Literals: checked at compile time in a const context.
+/// const HALF: OriginOffset = OriginOffset::new(0.5, 0.5).unwrap();
+/// assert_eq!(HALF.get().y, 0.5);
+///
+/// assert!(OriginOffset::new(f64::NAN, 0.0).is_none());
+/// assert!(OriginOffset::try_new(f64::INFINITY, 0.0).is_err());
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OriginOffset(CoordinateF64);
+
+impl OriginOffset {
+    /// The unshifted origin: this level's pixel (0, 0) sits exactly on the
+    /// base image's.
+    pub const ZERO: Self = Self(CoordinateF64 { x: 0.0, y: 0.0 });
+
+    /// Creates an origin offset, returning `None` if either component is
+    /// NaN or infinite.
+    ///
+    /// `const`, so binding the result to a `const` item checks literals at
+    /// compile time. For computed values use [`try_new`](Self::try_new).
+    #[must_use]
+    pub const fn new(x: f64, y: f64) -> Option<Self> {
+        if x.is_finite() && y.is_finite() {
+            Some(Self(CoordinateF64 { x, y }))
+        } else {
+            None
+        }
+    }
+
+    /// Creates an origin offset from computed values, validating them.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidParameter`] if either component is NaN or
+    /// infinite.
+    pub fn try_new(x: f64, y: f64) -> Result<Self, Error> {
+        Self::new(x, y).ok_or_else(|| {
+            Error::InvalidParameter(format!(
+                "origin offset must be finite along both axes, got ({x}, {y})"
+            ))
+        })
+    }
+
+    /// Returns the offset as a coordinate in base-image units.
+    #[inline]
+    #[must_use]
+    pub const fn get(self) -> CoordinateF64 {
+        self.0
+    }
 }
 
 impl<P: Copy> ScaledImage<P> {
@@ -421,14 +493,15 @@ impl<P: Copy> ScaledImage<P> {
     /// - `sigma` — absolute Gaussian σ in base-image pixels (see
     ///   [`ScaleLevel::sigma`]).
     ///
-    /// This constructor is **total**: the parameter invariants live in
-    /// [`PixelDistance`] and [`Sigma`] and were checked when those values
-    /// were constructed — literals via their const `new`, computed values
-    /// via their `try_new`. Nothing can fail here.
+    /// This constructor is **total**: every parameter invariant lives in
+    /// its type — [`PixelDistance`], [`OriginOffset`] and [`Sigma`] — and
+    /// was checked when those values were constructed, literals via their
+    /// const `new`, computed values via their `try_new`. Nothing can fail
+    /// here.
     pub fn new(
         image: Image<P>,
         pixel_distance: PixelDistance,
-        origin_offset: CoordinateF64,
+        origin_offset: OriginOffset,
         sigma: Sigma,
     ) -> Self {
         Self {
@@ -472,7 +545,7 @@ impl<P: Copy> Decimated for ScaledImage<P> {
 
     #[inline]
     fn origin_offset(&self) -> CoordinateF64 {
-        self.origin_offset
+        self.origin_offset.get()
     }
 }
 
@@ -633,7 +706,7 @@ mod tests {
         let level = ScaledImage::new(
             Image::fill(4, 4, MonoF32::new(0.5)),
             pixel_distance!(2.0),
-            CoordinateF64::new(0.0, 0.0),
+            OriginOffset::ZERO,
             sigma!(1.0),
         );
         assert_eq!(level.size(), Size::new(4, 4));
@@ -651,7 +724,7 @@ mod tests {
         let level = ScaledImage::new(
             Image::<MonoF32>::zero(4, 4),
             pixel_distance!(2.0),
-            CoordinateF64::new(0.0, 0.0),
+            OriginOffset::ZERO,
             sigma!(1.0),
         );
         assert_eq!(
@@ -671,7 +744,7 @@ mod tests {
         let level = ScaledImage::new(
             Image::<MonoF32>::zero(4, 4),
             pixel_distance!(2.0),
-            CoordinateF64::new(0.5, 0.5),
+            OriginOffset::new(0.5, 0.5).unwrap(),
             sigma!(1.0),
         );
         assert_eq!(
@@ -690,7 +763,7 @@ mod tests {
         let level = ScaledImage::new(
             Image::<MonoF32>::zero(16, 16),
             pixel_distance!(0.5),
-            CoordinateF64::new(0.0, 0.0),
+            OriginOffset::ZERO,
             sigma!(0.8),
         );
         assert_eq!(
@@ -706,7 +779,7 @@ mod tests {
         let level = ScaledImage::new(
             Image::<MonoF32>::zero(4, 4),
             pixel_distance!(2.0),
-            CoordinateF64::new(0.5, 0.5),
+            OriginOffset::new(0.5, 0.5).unwrap(),
             sigma!(1.0),
         );
         for local in [
@@ -723,7 +796,7 @@ mod tests {
         let level = ScaledImage::new(
             Image::<MonoF32>::zero(4, 4),
             pixel_distance!(2.0),
-            CoordinateF64::new(0.0, 0.0),
+            OriginOffset::ZERO,
             sigma!(1.0),
         );
         assert_eq!(
@@ -742,7 +815,7 @@ mod tests {
         let level = ScaledImage::new(
             Image::<MonoF32>::zero(16, 16),
             pixel_distance!(0.5),
-            CoordinateF64::new(0.0, 0.0),
+            OriginOffset::ZERO,
             sigma!(0.8),
         );
         assert_eq!(
@@ -758,13 +831,13 @@ mod tests {
             ScaledImage::new(
                 Image::<MonoF32>::zero(8, 8),
                 pixel_distance!(1.0),
-                CoordinateF64::new(0.0, 0.0),
+                OriginOffset::ZERO,
                 sigma!(0.5),
             ),
             ScaledImage::new(
                 Image::<MonoF32>::zero(4, 4),
                 pixel_distance!(2.0),
-                CoordinateF64::new(0.0, 0.0),
+                OriginOffset::ZERO,
                 sigma!(1.0),
             ),
         ];

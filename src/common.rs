@@ -174,6 +174,88 @@ impl From<(f64, f64)> for CoordinateF64 {
     }
 }
 
+/// A **signed** pixel position: a point that may legitimately lie outside
+/// the frame on any side.
+///
+/// The third member of the coordinate family. [`Coordinate`] addresses
+/// pixels that exist, so it is unsigned; [`CoordinateF64`] carries
+/// sub-pixel positions; `CoordinateI32` names whole-pixel positions in the
+/// unbounded drawing plane, which is what the [`draw`](crate::draw)
+/// primitives clip against — a marker centred near the frame edge extends
+/// past it as a matter of course.
+///
+/// Tuples convert with `.into()`, so call sites stay terse; the typed
+/// fields are what make a `(y, x)` transposition visible when shapes are
+/// stored or built from data. An in-frame [`Coordinate`] converts with
+/// `try_from` (fallible only past `i32::MAX`).
+///
+/// # Example
+/// ```
+/// # use fovea::{Coordinate, CoordinateI32};
+/// let p = CoordinateI32::new(-3, 7);
+/// assert_eq!(p.x, -3);
+///
+/// let q: CoordinateI32 = (4, 5).into();
+/// assert_eq!(q, CoordinateI32::new(4, 5));
+///
+/// let r = CoordinateI32::try_from(Coordinate::new(10, 20))?;
+/// assert_eq!(r, CoordinateI32::new(10, 20));
+/// # Ok::<(), fovea::Error>(())
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct CoordinateI32 {
+    /// Horizontal position; negative is left of the frame.
+    pub x: i32,
+    /// Vertical position; negative is above the frame.
+    pub y: i32,
+}
+
+impl CoordinateI32 {
+    /// Creates a `CoordinateI32` at the given `(x, y)` position.
+    #[inline]
+    #[must_use]
+    pub const fn new(x: i32, y: i32) -> Self {
+        Self { x, y }
+    }
+}
+
+impl From<(i32, i32)> for CoordinateI32 {
+    #[inline]
+    fn from(value: (i32, i32)) -> Self {
+        Self::new(value.0, value.1)
+    }
+}
+
+impl From<&(i32, i32)> for CoordinateI32 {
+    #[inline]
+    fn from(value: &(i32, i32)) -> Self {
+        Self::new(value.0, value.1)
+    }
+}
+
+impl From<&CoordinateI32> for CoordinateI32 {
+    #[inline]
+    fn from(value: &CoordinateI32) -> Self {
+        *value
+    }
+}
+
+impl TryFrom<Coordinate> for CoordinateI32 {
+    type Error = Error;
+
+    /// Fails only for a position past `i32::MAX` along either axis, which
+    /// no image this crate can hold in memory produces.
+    fn try_from(value: Coordinate) -> Result<Self, Error> {
+        match (i32::try_from(value.x), i32::try_from(value.y)) {
+            (Ok(x), Ok(y)) => Ok(Self { x, y }),
+            _ => Err(Error::InvalidParameter(format!(
+                "coordinate ({}, {}) does not fit a signed 32-bit position",
+                value.x, value.y
+            ))),
+        }
+    }
+}
+
 impl From<Coordinate> for CoordinateF64 {
     #[inline]
     fn from(value: Coordinate) -> Self {

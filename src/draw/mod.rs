@@ -134,9 +134,9 @@ use crate::image::ImageViewMut;
 ///     fn draw_into(&self, image: &mut impl ImageViewMut<Pixel = Mono8>) {
 ///         let (cx, cy) = self.center;
 ///         let a = self.arm;
-///         Line { from: (cx - a, cy - a), to: (cx + a, cy + a), color: self.color }
+///         Line { from: (cx - a, cy - a).into(), to: (cx + a, cy + a).into(), color: self.color }
 ///             .draw_into(image);
-///         Line { from: (cx - a, cy + a), to: (cx + a, cy - a), color: self.color }
+///         Line { from: (cx - a, cy + a).into(), to: (cx + a, cy - a).into(), color: self.color }
 ///             .draw_into(image);
 ///     }
 /// }

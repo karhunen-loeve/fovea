@@ -554,7 +554,7 @@ where
 /// use fovea::border::Skip;
 /// use fovea::features::HasPosition;
 /// use fovea::features::detect::{fast_in_level, FastParams, NmsRadius, SegmentTest};
-/// use fovea::image::{Image, ScaledImage};
+/// use fovea::image::{Image, OriginOffset, ScaledImage};
 /// use fovea::pixel::MonoF32;
 /// use fovea::{pixel_distance, sigma};
 /// use fovea::transform::pyr_down;
@@ -567,7 +567,7 @@ where
 /// let level = ScaledImage::new(
 ///     pyr_down(&base),
 ///     pixel_distance!(2.0),
-///     CoordinateF64::new(0.0, 0.0),
+///     OriginOffset::ZERO,
 ///     sigma!(1.0),
 /// );
 ///
@@ -874,7 +874,7 @@ mod tests {
     use crate::Coordinate;
     use crate::border::{Clamp, Constant, Mirror, Skip};
     use crate::features::{HasPosition, HasResponse, retain_top_n};
-    use crate::image::{Pyramid, ScaledImage};
+    use crate::image::{OriginOffset, Pyramid, ScaledImage};
     use crate::pixel::{Mono8, Mono16, MonoF64};
     use crate::transform::{pyr_down, rotate_90};
     use crate::{pixel_distance, sigma};
@@ -1849,7 +1849,7 @@ mod tests {
         let level = ScaledImage::new(
             image.clone(),
             pixel_distance!(1.0),
-            CoordinateF64::new(0.0, 0.0),
+            OriginOffset::ZERO,
             sigma!(0.5),
         );
         let params = FastParams::new(
@@ -1868,7 +1868,7 @@ mod tests {
         let level = ScaledImage::new(
             pyr_down(&base),
             pixel_distance!(2.0),
-            CoordinateF64::new(0.0, 0.0),
+            OriginOffset::ZERO,
             sigma!(1.0),
         );
         let params = FastParams::new(
@@ -1899,13 +1899,13 @@ mod tests {
         let unshifted = ScaledImage::new(
             coarse.clone(),
             pixel_distance!(2.0),
-            CoordinateF64::new(0.0, 0.0),
+            OriginOffset::ZERO,
             sigma!(1.0),
         );
         let shifted = ScaledImage::new(
             coarse,
             pixel_distance!(2.0),
-            CoordinateF64::new(0.5, 0.5),
+            OriginOffset::new(0.5, 0.5).unwrap(),
             sigma!(1.0),
         );
 
@@ -1926,13 +1926,13 @@ mod tests {
             ScaledImage::new(
                 base.clone(),
                 pixel_distance!(1.0),
-                CoordinateF64::new(0.0, 0.0),
+                OriginOffset::ZERO,
                 sigma!(0.5),
             ),
             ScaledImage::new(
                 pyr_down(&base),
                 pixel_distance!(2.0),
-                CoordinateF64::new(0.0, 0.0),
+                OriginOffset::ZERO,
                 sigma!(1.0),
             ),
         ];

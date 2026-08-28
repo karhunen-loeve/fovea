@@ -1,6 +1,7 @@
 //! Circles — midpoint algorithm, outline and filled.
 
 use super::{Drawable, hspan, put};
+use crate::CoordinateI32;
 use crate::image::ImageViewMut;
 
 /// A circle around a center point, outlined or filled.
@@ -22,7 +23,7 @@ use crate::image::ImageViewMut;
 /// use fovea::pixel::Mono8;
 ///
 /// let mut image: Image<Mono8> = Image::zero(9, 9);
-/// let circle = Circle { center: (4, 4), radius: 3, color: Mono8::new(255), fill: false };
+/// let circle = Circle { center: (4, 4).into(), radius: 3, color: Mono8::new(255), fill: false };
 /// circle.draw_into(&mut image);
 /// assert_eq!(image.pixel_at(7, 4), Mono8::new(255)); // on the ring
 /// assert_eq!(image.pixel_at(4, 4), Mono8::new(0)); // center stays clear
@@ -30,7 +31,7 @@ use crate::image::ImageViewMut;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Circle<P> {
     /// Center of the circle.
-    pub center: (i32, i32),
+    pub center: CoordinateI32,
     /// Radius in pixels, measured from `center` to the ring.
     pub radius: u32,
     /// Pixel value written on the ring, or over the whole disk when
@@ -44,7 +45,7 @@ impl<P: Copy> Drawable<P> for Circle<P> {
     fn draw_into(&self, image: &mut impl ImageViewMut<Pixel = P>) {
         let size = image.size();
         let (w, h) = (size.width as i64, size.height as i64);
-        let (cx, cy) = (i64::from(self.center.0), i64::from(self.center.1));
+        let (cx, cy) = (i64::from(self.center.x), i64::from(self.center.y));
         let r = i64::from(self.radius);
         // A circle whose bounding box misses the image has no visible pixels.
         if cx + r < 0 || cx - r >= w || cy + r < 0 || cy - r >= h {
@@ -216,13 +217,13 @@ fn isqrt(v: i128) -> i64 {
 /// ```
 pub fn draw_circle<P: Copy>(
     image: &mut impl ImageViewMut<Pixel = P>,
-    center: (i32, i32),
+    center: impl Into<CoordinateI32>,
     radius: u32,
     color: P,
     fill: bool,
 ) {
     Circle {
-        center,
+        center: center.into(),
         radius,
         color,
         fill,

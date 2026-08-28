@@ -1,8 +1,8 @@
 //! Axis-aligned rectangles — outline and filled.
 
 use super::{Drawable, hspan, vspan};
-use crate::Size;
 use crate::image::ImageViewMut;
+use crate::{CoordinateI32, Size};
 
 /// An axis-aligned rectangle, outlined or filled.
 ///
@@ -26,7 +26,7 @@ use crate::image::ImageViewMut;
 ///
 /// let mut image: Image<Mono8> = Image::zero(8, 8);
 /// let rect = Rect {
-///     top_left: (1, 1),
+///     top_left: (1, 1).into(),
 ///     size: Size::new(5, 4),
 ///     color: Mono8::new(255),
 ///     fill: false,
@@ -39,7 +39,7 @@ use crate::image::ImageViewMut;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Rect<P> {
     /// Top-left corner of the covered region.
-    pub top_left: (i32, i32),
+    pub top_left: CoordinateI32,
     /// Width and height of the covered region, in pixels.
     pub size: Size,
     /// Pixel value written along the border, or over the whole region
@@ -54,7 +54,7 @@ impl<P: Copy> Drawable<P> for Rect<P> {
         if self.size.width == 0 || self.size.height == 0 {
             return;
         }
-        let (x0, y0) = (i64::from(self.top_left.0), i64::from(self.top_left.1));
+        let (x0, y0) = (i64::from(self.top_left.x), i64::from(self.top_left.y));
         // `Size` performs no validation, and a width past i64::MAX would
         // wrap the plain cast negative (usize::MAX as i64 is -1), painting
         // a span to the *left* of the anchor instead of clipping a huge
@@ -108,13 +108,13 @@ impl<P: Copy> Drawable<P> for Rect<P> {
 /// ```
 pub fn draw_rect<P: Copy>(
     image: &mut impl ImageViewMut<Pixel = P>,
-    top_left: (i32, i32),
+    top_left: impl Into<CoordinateI32>,
     size: Size,
     color: P,
     fill: bool,
 ) {
     Rect {
-        top_left,
+        top_left: top_left.into(),
         size,
         color,
         fill,

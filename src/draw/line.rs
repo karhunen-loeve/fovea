@@ -1,6 +1,7 @@
 //! Straight line segments — Bresenham's algorithm.
 
 use super::{Drawable, put};
+use crate::CoordinateI32;
 use crate::image::ImageViewMut;
 
 /// A straight line segment between two points, drawn one pixel wide.
@@ -21,16 +22,16 @@ use crate::image::ImageViewMut;
 /// use fovea::pixel::Mono8;
 ///
 /// let mut image: Image<Mono8> = Image::zero(8, 8);
-/// Line { from: (0, 0), to: (7, 7), color: Mono8::new(255) }.draw_into(&mut image);
+/// Line { from: (0, 0).into(), to: (7, 7).into(), color: Mono8::new(255) }.draw_into(&mut image);
 /// assert_eq!(image.pixel_at(3, 3), Mono8::new(255));
 /// assert_eq!(image.pixel_at(3, 4), Mono8::new(0));
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Line<P> {
     /// First endpoint, drawn.
-    pub from: (i32, i32),
+    pub from: CoordinateI32,
     /// Second endpoint, drawn.
-    pub to: (i32, i32),
+    pub to: CoordinateI32,
     /// Pixel value written along the stroke.
     pub color: P,
 }
@@ -60,11 +61,16 @@ impl<P: Copy> Drawable<P> for Line<P> {
 /// ```
 pub fn draw_line<P: Copy>(
     image: &mut impl ImageViewMut<Pixel = P>,
-    from: (i32, i32),
-    to: (i32, i32),
+    from: impl Into<CoordinateI32>,
+    to: impl Into<CoordinateI32>,
     color: P,
 ) {
-    Line { from, to, color }.draw_into(image);
+    Line {
+        from: from.into(),
+        to: to.into(),
+        color,
+    }
+    .draw_into(image);
 }
 
 /// Bresenham walk shared by [`Line`], [`Polyline`](super::Polyline), and the
@@ -80,14 +86,14 @@ pub fn draw_line<P: Copy>(
 /// walk_exactly` pins that equivalence against a reference walk.
 pub(super) fn segment<P: Copy>(
     image: &mut impl ImageViewMut<Pixel = P>,
-    from: (i32, i32),
-    to: (i32, i32),
+    from: CoordinateI32,
+    to: CoordinateI32,
     color: P,
 ) {
     let size = image.size();
     let (w, h) = (size.width as i64, size.height as i64);
-    let (x0, y0) = (i64::from(from.0), i64::from(from.1));
-    let (x1, y1) = (i64::from(to.0), i64::from(to.1));
+    let (x0, y0) = (i64::from(from.x), i64::from(from.y));
+    let (x1, y1) = (i64::from(to.x), i64::from(to.y));
     // A segment whose bounding box misses the image has no visible pixels;
     // skip the walk entirely instead of clipping it pixel by pixel.
     if x0.max(x1) < 0 || x0.min(x1) >= w || y0.max(y1) < 0 || y0.min(y1) >= h {

@@ -60,7 +60,9 @@ pub use neighborhood::{
     Neighborhood, PositionsIter,
 };
 pub use planar::ImagePlanes;
-pub use pyramid::{Decimated, GaussianPyramid, Pyramid, PyramidLevel, ScaleLevel, ScaledImage};
+pub use pyramid::{
+    Decimated, GaussianPyramid, OriginOffset, Pyramid, PyramidLevel, ScaleLevel, ScaledImage,
+};
 pub use separable::{
     GaussianKernel1D, MAX_RADIUS, SeparableKernel, SeparableWeights, gaussian_kernel_1d,
     gaussian_kernel_size,

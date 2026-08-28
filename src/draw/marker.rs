@@ -1,6 +1,7 @@
 //! Point markers — the crosshair.
 
 use super::{Drawable, hspan, vspan};
+use crate::CoordinateI32;
 use crate::image::ImageViewMut;
 
 /// A `+`-shaped marker centred on a point.
@@ -24,7 +25,7 @@ use crate::image::ImageViewMut;
 /// use fovea::pixel::Mono8;
 ///
 /// let mut image: Image<Mono8> = Image::zero(9, 9);
-/// let marker = Crosshair { center: (4, 4), arm_length: 3, color: Mono8::new(255) };
+/// let marker = Crosshair { center: (4, 4).into(), arm_length: 3, color: Mono8::new(255) };
 /// marker.draw_into(&mut image);
 /// assert_eq!(image.pixel_at(4, 4), Mono8::new(255)); // center
 /// assert_eq!(image.pixel_at(1, 4), Mono8::new(255)); // arm tip
@@ -33,7 +34,7 @@ use crate::image::ImageViewMut;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Crosshair<P> {
     /// Center of the marker, drawn.
-    pub center: (i32, i32),
+    pub center: CoordinateI32,
     /// Pixels each arm extends from the center, in all four directions.
     pub arm_length: u32,
     /// Pixel value written along both strokes.
@@ -42,7 +43,7 @@ pub struct Crosshair<P> {
 
 impl<P: Copy> Drawable<P> for Crosshair<P> {
     fn draw_into(&self, image: &mut impl ImageViewMut<Pixel = P>) {
-        let (cx, cy) = (i64::from(self.center.0), i64::from(self.center.1));
+        let (cx, cy) = (i64::from(self.center.x), i64::from(self.center.y));
         let arm = i64::from(self.arm_length);
         hspan(image, cx - arm, cx + arm, cy, self.color);
         vspan(image, cx, cy - arm, cy + arm, self.color);
@@ -67,12 +68,12 @@ impl<P: Copy> Drawable<P> for Crosshair<P> {
 /// ```
 pub fn draw_crosshair<P: Copy>(
     image: &mut impl ImageViewMut<Pixel = P>,
-    center: (i32, i32),
+    center: impl Into<CoordinateI32>,
     arm_length: u32,
     color: P,
 ) {
     Crosshair {
-        center,
+        center: center.into(),
         arm_length,
         color,
     }

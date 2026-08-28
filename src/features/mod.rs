@@ -88,7 +88,7 @@
 //! ```
 //! use fovea::CoordinateF64;
 //! use fovea::features::{retain_top_n, Corner, HasPosition};
-//! use fovea::image::{Image, ImageView, ScaledImage};
+//! use fovea::image::{Image, ImageView, OriginOffset, ScaledImage};
 //! use fovea::pixel::MonoF32;
 //! use fovea::{pixel_distance, sigma};
 //! use fovea::transform::pyr_down;
@@ -100,7 +100,7 @@
 //! let level = ScaledImage::new(
 //!     coarse,
 //!     pixel_distance!(2.0),
-//!     CoordinateF64::new(0.0, 0.0),
+//!     OriginOffset::ZERO,
 //!     sigma!(1.0),
 //! );
 //! assert_eq!(level.size().width, 8);

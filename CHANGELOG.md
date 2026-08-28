@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `OriginOffset`: the invariant carrier for a pyramid level's origin,
+  finite along both axes, with a const `ZERO` for the unshifted case that
+  is what `pyr_down` levels have. `ScaledImage::new` takes it in place of
+  a raw `CoordinateF64` (**breaking**), which makes the constructor's
+  documented totality true: a NaN or infinite origin used to poison every
+  `to_base` lift while the docs said nothing could fail.
+- `CoordinateI32`: the signed member of the coordinate family, for
+  whole-pixel positions that may legitimately lie off-frame. The five
+  `draw` shapes carry it in their fields (**breaking** for struct
+  literals: add `.into()`), while the free functions take
+  `impl Into<CoordinateI32>`, so tuple call sites keep compiling.
+  `TryFrom<Coordinate>` bridges from contour and component output, and a
+  `(y, x)` transposition is now visible wherever shapes are stored or
+  built from data.
 - The seven public parameter and angle newtypes (`Sigma`, `PixelDistance`,
   `Tolerance`, `OddWindowSide`, `Orientation`, `AxialOrientation`,
   `PeakValue`) and `NmsRadius` are `#[repr(transparent)]`, making the

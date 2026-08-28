@@ -2,6 +2,7 @@
 
 use super::Drawable;
 use super::line::segment;
+use crate::CoordinateI32;
 use crate::image::ImageViewMut;
 
 /// A chain of line segments through a list of points, open or closed.
@@ -27,7 +28,7 @@ use crate::image::ImageViewMut;
 /// use fovea::pixel::Mono8;
 ///
 /// let triangle = Polyline {
-///     points: vec![(1, 1), (6, 1), (1, 6)],
+///     points: [(1, 1), (6, 1), (1, 6)].map(Into::into).to_vec(),
 ///     color: Mono8::new(255),
 ///     closed: true,
 /// };
@@ -40,7 +41,7 @@ use crate::image::ImageViewMut;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Polyline<P> {
     /// Vertices of the chain, connected in order.
-    pub points: Vec<(i32, i32)>,
+    pub points: Vec<CoordinateI32>,
     /// Pixel value written along every segment.
     pub color: P,
     /// `true` connects the last point back to the first.
@@ -69,9 +70,9 @@ impl<P: Copy> Drawable<P> for Polyline<P> {
 /// draw_polyline(&mut image, &[(0, 4), (3, 1), (7, 5)], Mono8::new(255), false);
 /// assert_eq!(image.pixel_at(3, 1), Mono8::new(255));
 /// ```
-pub fn draw_polyline<P: Copy>(
+pub fn draw_polyline<P: Copy, C: Into<CoordinateI32> + Copy>(
     image: &mut impl ImageViewMut<Pixel = P>,
-    points: &[(i32, i32)],
+    points: &[C],
     color: P,
     closed: bool,
 ) {
@@ -80,17 +81,22 @@ pub fn draw_polyline<P: Copy>(
 
 /// Segment chain shared by [`Polyline`] and [`draw_polyline`], so the free
 /// function does not have to clone borrowed points into a `Vec`.
-fn draw_path<P: Copy>(
+fn draw_path<P: Copy, C: Into<CoordinateI32> + Copy>(
     image: &mut impl ImageViewMut<Pixel = P>,
-    points: &[(i32, i32)],
+    points: &[C],
     color: P,
     closed: bool,
 ) {
     for pair in points.windows(2) {
-        segment(image, pair[0], pair[1], color);
+        segment(image, pair[0].into(), pair[1].into(), color);
     }
     if closed && points.len() >= 3 {
-        segment(image, points[points.len() - 1], points[0], color);
+        segment(
+            image,
+            points[points.len() - 1].into(),
+            points[0].into(),
+            color,
+        );
     }
 }
 
@@ -132,8 +138,9 @@ mod tests {
     #[test]
     fn degenerate_inputs_are_no_ops() {
         let mut image: Image<Mono8> = Image::zero(5, 5);
-        draw_polyline(&mut image, &[], ink(), false);
-        draw_polyline(&mut image, &[], ink(), true);
+        let empty: &[(i32, i32)] = &[];
+        draw_polyline(&mut image, empty, ink(), false);
+        draw_polyline(&mut image, empty, ink(), true);
         draw_polyline(&mut image, &[(2, 2)], ink(), true);
         assert!(inked(&image).is_empty());
     }
@@ -147,7 +154,7 @@ mod tests {
 
     #[test]
     fn struct_and_free_function_agree() {
-        let points = vec![(0, 5), (3, 0), (6, 5), (0, 5)];
+        let points: Vec<CoordinateI32> = [(0, 5), (3, 0), (6, 5), (0, 5)].map(Into::into).to_vec();
         let mut via_struct: Image<Mono8> = Image::zero(7, 7);
         Polyline {
             points: points.clone(),

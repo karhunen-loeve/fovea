@@ -218,7 +218,7 @@ impl Corner {
     /// ```
     /// use fovea::CoordinateF64;
     /// use fovea::features::{Corner, HasPosition};
-    /// use fovea::image::{Image, ScaledImage};
+    /// use fovea::image::{Image, OriginOffset, ScaledImage};
     /// use fovea::pixel::MonoF32;
     /// use fovea::{pixel_distance, sigma};
     ///
@@ -226,7 +226,7 @@ impl Corner {
     /// let level = ScaledImage::new(
     ///     Image::<MonoF32>::zero(8, 8),
     ///     pixel_distance!(2.0),
-    ///     CoordinateF64::new(0.0, 0.0),
+    ///     OriginOffset::ZERO,
     ///     sigma!(1.0),
     /// );
     ///
@@ -321,14 +321,14 @@ impl ScaleKeypoint {
     /// ```
     /// use fovea::CoordinateF64;
     /// use fovea::features::{HasPosition, HasScale, ScaleKeypoint};
-    /// use fovea::image::{Image, ScaledImage};
+    /// use fovea::image::{Image, OriginOffset, ScaledImage};
     /// use fovea::pixel::MonoF32;
     /// use fovea::{pixel_distance, sigma};
     ///
     /// let level = ScaledImage::new(
     ///     Image::<MonoF32>::zero(8, 8),
     ///     pixel_distance!(2.0),
-    ///     CoordinateF64::new(0.0, 0.0),
+    ///     OriginOffset::ZERO,
     ///     sigma!(1.6),
     /// );
     ///
@@ -484,7 +484,7 @@ where
 mod tests {
     use super::*;
     use crate::PixelDistance;
-    use crate::image::{Image, ScaledImage};
+    use crate::image::{Image, OriginOffset, ScaledImage};
     use crate::pixel::MonoF32;
     use crate::sigma;
 
@@ -492,7 +492,7 @@ mod tests {
         ScaledImage::new(
             Image::<MonoF32>::zero(4, 4),
             PixelDistance::new(distance).unwrap(),
-            CoordinateF64::new(offset.0, offset.1),
+            OriginOffset::try_new(offset.0, offset.1).unwrap(),
             Sigma::new(sigma).unwrap(),
         )
     }

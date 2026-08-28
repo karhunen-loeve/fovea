@@ -312,7 +312,7 @@ where
 mod tests {
     use super::*;
     use crate::CoordinateF64;
-    use crate::image::{Decimated, PyramidLevel, ScaledImage};
+    use crate::image::{Decimated, OriginOffset, PyramidLevel, ScaledImage};
     use crate::pixel::{Mono8, MonoF32};
     use crate::{pixel_distance, sigma};
 
@@ -640,7 +640,7 @@ mod tests {
         let scaled = ScaledImage::new(
             level,
             pixel_distance!(4.0),
-            CoordinateF64::new(0.0, 0.0),
+            OriginOffset::ZERO,
             sigma!(2.236),
         );
 
