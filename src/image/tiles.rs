@@ -2159,4 +2159,30 @@ mod bayer_roi_tests {
         // Extents are not part of the rule.
         assert!(cfa_phase_preserved(Rectangle::new((0, 0), (3, 7))));
     }
+
+    #[test]
+    fn a_tiles_shared_roi_survives_a_write_through_a_sibling_tile() {
+        // The v0.4.0 review's D11 scenario: two live sibling tiles, a
+        // shared roi taken from one, a write through the other, then a
+        // read through the still-held roi. The accessed elements are
+        // disjoint; what this pins (under `cargo +nightly miri test`) is
+        // that the shared-roi construction does not assert a borrow over
+        // the sibling's territory.
+        use crate::image::RasterImageMut;
+        use crate::pixel::Mono8;
+
+        let mut image: Image<Mono8> = Image::zero(8, 4);
+        let mut tiles: Vec<ImageRefMut<'_, Mono8>> =
+            (&mut image).into_tiles_mut(Size::new(4, 4)).collect();
+        assert_eq!(tiles.len(), 2);
+        let (left, right) = tiles.split_at_mut(1);
+
+        let roi = left[0]
+            .roi(Rectangle::new(Coordinate::new(0, 0), Size::new(2, 2)))
+            .unwrap();
+        right[0].row_mut(0)[0] = Mono8::new(7);
+        assert_eq!(roi.pixel_at(0, 0), Mono8::new(0));
+        assert_eq!(roi.pixel_at(1, 1), Mono8::new(0));
+        assert_eq!(right[0].pixel_at(0, 0), Mono8::new(7));
+    }
 }

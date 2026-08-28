@@ -873,10 +873,30 @@ impl<T> ImageRefMut<'_, T> {
     #[inline]
     fn strided_roi(&self, rect: Rectangle) -> Option<ImageRef<'_, T>> {
         let offset = strided_roi_offset(self.size, self.stride, self.offset, rect)?;
-        // SAFETY: we only produce a shared reference; the raw pointer is
-        // valid for reads over `data_len` elements.
-        let slice = unsafe { std::slice::from_raw_parts(self.data, self.data_len) };
-        ImageRef::strided(rect.size, self.stride, offset, slice)
+        // The elements the sub-view can address: its first element through
+        // its last, `(h-1)*stride + w` in total. Zero for an empty rect.
+        let span = if rect.size.width == 0 || rect.size.height == 0 {
+            0
+        } else {
+            (rect.size.height - 1) * self.stride + rect.size.width
+        };
+        // SAFETY, validity: `strided_roi_offset` proved the rect lies
+        // inside this view and this view's own construction proved it lies
+        // inside the allocation, so `offset + span <= data_len` and the
+        // pointer is valid for reads over the whole slice for the returned
+        // lifetime. Exclusivity: several views can share one allocation
+        // (`TileIterMut` hands out sibling `ImageRefMut` tiles), and this
+        // span still crosses a sibling's columns through the row
+        // remainders of a strided rect, so the slice is deliberately the
+        // *minimal* addressable span, and the aliasing argument is
+        // per-element: a sibling's write invalidates the shared borrow
+        // only at the elements it writes, all of which lie outside `rect`,
+        // and every accessor of the returned view reads inside `rect`
+        // only. Verified under miri, default and
+        // `-Zmiri-retag-fields=all -Zmiri-strict-provenance`, by
+        // `a_tiles_shared_roi_survives_a_write_through_a_sibling_tile`.
+        let slice = unsafe { std::slice::from_raw_parts(self.data.add(offset), span) };
+        ImageRef::strided(rect.size, self.stride, 0, slice)
     }
 
     /// Compute a checked element offset within the underlying allocation.
