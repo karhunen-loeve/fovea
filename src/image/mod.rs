@@ -15,11 +15,29 @@
 //! | [`ContiguousImage`](crate::image::ContiguousImage) | one dense pixel slice | You need the fastest whole-buffer path. |
 //! | [`PlainImage`](crate::image::PlainImage) | byte access to `PlainPixel` storage | You write camera, file, FFI, or GPU boundaries. |
 //!
+//! ## Multi-image structures
+//!
+//! [`ImagePlanes`](crate::image::ImagePlanes) holds one plane per channel,
+//! [`ImageArray`](crate::image::ImageArray) is a compile-time-sized image, and
+//! [`Pyramid`](crate::image::Pyramid) chains levels at decreasing resolution
+//! (built via [`PyramidMethod`](crate::transform::PyramidMethod) strategies
+//! in [`crate::transform`]). Levels opt into scale metadata through the
+//! [`Decimated`](crate::image::Decimated) /
+//! [`ScaleLevel`](crate::image::ScaleLevel) capability traits.
+//!
 //! ## Views do not allocate
 //!
 //! [`SubView::roi`](crate::image::SubView::roi) returns a borrowed region of interest. [`SubView::tiles`](crate::image::SubView::tiles)
 //! splits an image into borrowed immutable tiles. [`IntoTilesMut`](crate::image::IntoTilesMut) yields
 //! disjoint mutable tiles for safe chunked in-place processing.
+//!
+//! Those three are gated on
+//! [`OriginInvariantPixel`](crate::pixel::OriginInvariantPixel), so images of
+//! [Bayer CFA samples](crate::pixel::bayer) do not have them — cropping such
+//! an image at an odd origin changes what every sample means. They use
+//! [`BayerSubView::aligned_bayer_roi`](crate::image::BayerSubView::aligned_bayer_roi)
+//! and [`BayerSubViewMut`](crate::image::BayerSubViewMut) instead, which
+//! check the 2×2 phase and return `None` rather than a mislabelled view.
 //!
 //! Do not use this module for pixel semantics. If the question is "is this
 //! gamma-encoded?" or "can this be interpolated?", look in [`crate::pixel`].
@@ -28,6 +46,7 @@
 pub mod border;
 mod image_view;
 mod neighborhood;
+mod pyramid;
 mod separable;
 pub(crate) mod tiles;
 mod zip;
@@ -41,16 +60,20 @@ pub use neighborhood::{
     Neighborhood, PositionsIter,
 };
 pub use planar::ImagePlanes;
+pub use pyramid::{
+    Decimated, GaussianPyramid, OriginOffset, Pyramid, PyramidLevel, ScaleLevel, ScaledImage,
+};
 pub use separable::{
-    GaussianKernel1D, MAX_RADIUS, SeparableKernel, gaussian_kernel_1d, gaussian_kernel_size,
+    GaussianKernel1D, MAX_RADIUS, SeparableKernel, SeparableWeights, gaussian_kernel_1d,
+    gaussian_kernel_size,
 };
 pub use sequential::{
     ContiguousImage, ContiguousImageMut, Image, ImageArray, ImageRef, ImageRefMut, PlainImage,
     PlainImageMut,
 };
 pub use tiles::{
-    EnumeratePositions, IntoTilesMut, SlidingWindow, SlidingWindowIter, SubView, SubViewMut,
-    TileIter, TileIterMut,
+    BayerSubView, BayerSubViewMut, EnumeratePositions, IntoTilesMut, SlidingWindow,
+    SlidingWindowIter, SubView, SubViewMut, TileIter, TileIterMut,
 };
 pub use zip::{ZipPixelsIter, zip_pixels};
 

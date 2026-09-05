@@ -32,6 +32,7 @@ mod internal;
 /// - [`SubView`](image::SubView), [`SubViewMut`](image::SubViewMut) — region-of-interest access
 /// - [`Neighborhood`](image::Neighborhood), [`Kernel`](image::Kernel) — kernel/mask types
 /// - [`ImagePlanes`](image::ImagePlanes) — planar image representation
+/// - [`Pyramid`](image::Pyramid), [`PyramidLevel`](image::PyramidLevel) — multi-resolution pyramids and their level traits
 /// - [`zip_pixels`](image::zip_pixels) — pixel-pair iteration
 pub mod image;
 
@@ -58,6 +59,7 @@ pub use fovea_derive::ZeroablePixel;
 ///
 /// Start with [`pixel::Srgb8`] (gamma-encoded display/file data),
 /// [`pixel::RgbF32`] (linear-light float), or [`pixel::Mono8`] (grayscale).
+/// For raw single-sensor colour data, see [`pixel::bayer`].
 /// For choosing between types, see [`guide::pixel_types`].
 /// For conversion strategies and common paths, see [`guide::pixel_conversions`].
 pub mod pixel;
@@ -75,9 +77,39 @@ pub mod transform;
 /// data *about* an image (counts, scalars, descriptors), not new images.
 pub mod analyze;
 
+/// Feature detection: the detectors, plus the keypoint types they produce
+/// and descriptors consume.
+///
+/// Start with [`features::detect::detect_corners`] and a response strategy
+/// ([`features::detect::Harris`], [`features::detect::ShiTomasi`]) to find
+/// corners from the gradient, or with [`features::detect::fast`] and a
+/// [`features::detect::SegmentTest`] to find them from raw intensities on a
+/// ring; and with [`features::Corner`] /
+/// [`features::ScaleKeypoint`] to understand what comes back — both families
+/// produce the same type and share the same peak stage. Consumers
+/// bind the minimum capability they need — [`features::HasPosition`],
+/// [`features::HasResponse`], [`features::HasScale`],
+/// [`features::HasOrientation`] — instead of accepting one struct with
+/// conditionally-valid fields.
+pub mod features;
+
+/// Drawing primitives that burn annotations into image pixels.
+///
+/// Start with the free functions — [`draw::draw_line`], [`draw::draw_rect`],
+/// [`draw::draw_circle`], [`draw::draw_polyline`],
+/// [`draw::draw_crosshair`] — to annotate a cloned image for archiving or
+/// review. The shape structs ([`draw::Line`], [`draw::Rect`],
+/// [`draw::Circle`], [`draw::Polyline`], [`draw::Crosshair`]) and the
+/// [`draw::Drawable`] trait carry the same operations as storable values,
+/// and `Drawable` is the extension point for custom markers.
+pub mod draw;
+
 #[cfg(doc)]
 pub mod guide;
 
 // ── Core vocabulary types (module-agnostic, kept at root) ────────────────────
-pub use common::{Coordinate, CoordinateF64, Rectangle, Size, Stride};
+pub use common::{
+    AxialOrientation, Coordinate, CoordinateF64, CoordinateI32, Extremum, OddWindowSide, Offset,
+    Orientation, PixelDistance, Rectangle, Sigma, Size, Stride, Tolerance,
+};
 pub use error::Error;

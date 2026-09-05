@@ -1,7 +1,9 @@
 use std::marker::PhantomData;
 use std::ops::{Index, IndexMut};
 
-use crate::image::tiles::{SubView, SubViewMut};
+use crate::image::tiles::{
+    BayerSubView, BayerSubViewMut, SubView, SubViewMut, cfa_phase_preserved,
+};
 use crate::image::{ImageView, ImageViewMut, RasterImage, RasterImageMut};
 use crate::{Coordinate, Rectangle, Size, internal};
 
@@ -55,10 +57,39 @@ fn strided_checked_row_start_or_panic(
         })
 }
 
+/// Resolves `rect` against a strided view and returns the element offset of
+/// its top-left corner, or `None` if the rectangle escapes the view or the
+/// index arithmetic would wrap `usize`.
+///
+/// This is the one place the crate turns a [`Rectangle`] into a sub-view
+/// origin. Every region-producing entry point shares it — ordinary
+/// [`SubView::roi`] / [`SubViewMut::roi_mut`] and the CFA-phase-preserving
+/// [`BayerSubView::aligned_bayer_roi`](crate::image::BayerSubView::aligned_bayer_roi)
+/// alike. The Bayer path cannot *delegate* to `roi` (Bayer pixels
+/// deliberately fail its `OriginInvariantPixel` bound), so sharing has to
+/// happen here, below the trait, rather than by one calling the other.
+#[inline]
+fn strided_roi_offset(
+    size: Size,
+    stride: usize,
+    base_offset: usize,
+    rect: Rectangle,
+) -> Option<usize> {
+    let right = rect.checked_right()?;
+    let bottom = rect.checked_bottom()?;
+    if right > size.width || bottom > size.height {
+        return None;
+    }
+    base_offset
+        .checked_add(rect.top().checked_mul(stride)?)?
+        .checked_add(rect.left())
+}
+
 use std::borrow::Cow;
 use std::fmt;
 
 use crate::error::Error;
+use crate::pixel::bayer::BayerPixel;
 use crate::pixel::{OriginInvariantPixel, PlainChannel, PlainPixel, ZeroablePixel};
 
 /// Sealed helper — compile-time gate for zero-copy byte reinterpretation.
@@ -340,6 +371,39 @@ where
         let data = unsafe { uninit_data.assume_init() };
         Self { data }
     }
+
+    /// The strided sub-view construction shared by [`SubView::roi`] and the
+    /// CFA-phase-preserving Bayer ROI. See [`strided_roi_offset`].
+    ///
+    /// The stride is `W` and the base offset is always zero: an
+    /// `ImageArray` is its own full frame, never a window into something
+    /// larger.
+    ///
+    /// The return type is spelled through `ImageView::Pixel` rather than
+    /// `T` so that this block needs no `_Array2D<Pixel = T>` projection —
+    /// the two unify wherever a caller does supply it.
+    #[inline]
+    fn strided_roi(&self, rect: Rectangle) -> Option<ImageRef<'_, <Self as ImageView>::Pixel>> {
+        let offset = strided_roi_offset(Size::new(W, H), W, 0, rect)?;
+        ImageRef::strided(rect.size, W, offset, self.as_slice())
+    }
+
+    /// The strided mutable sub-view construction shared by
+    /// [`SubViewMut::roi_mut`] and the CFA-phase-preserving Bayer ROI.
+    #[inline]
+    fn strided_roi_mut(
+        &mut self,
+        rect: Rectangle,
+    ) -> Option<ImageRefMut<'_, <Self as ImageView>::Pixel>> {
+        let offset = strided_roi_offset(Size::new(W, H), W, 0, rect)?;
+        let slice = self.as_mut_slice();
+        let len = slice.len();
+        let ptr = slice.as_mut_ptr();
+        // SAFETY: `ptr` comes from this array's own `&mut [T]` of length
+        // `len`, `strided_roi_offset` proved `rect` lies inside it, and
+        // `&mut self` guarantees exclusivity for the returned lifetime.
+        Some(unsafe { ImageRefMut::strided(rect.size, W, offset, ptr, len) })
+    }
 }
 
 impl<T: Copy, const W: usize, const H: usize> ImageView for ImageArray<T, W, H>
@@ -404,14 +468,7 @@ where
         Self: 'a;
 
     fn roi(&self, rect: Rectangle) -> Option<Self::Sub<'_>> {
-        let right = rect.checked_right()?;
-        let bottom = rect.checked_bottom()?;
-        if right <= W && bottom <= H {
-            let offset = rect.top().checked_mul(W)?.checked_add(rect.left())?;
-            ImageRef::strided(rect.size, W, offset, self.as_slice())
-        } else {
-            None
-        }
+        self.strided_roi(rect)
     }
 }
 
@@ -425,21 +482,43 @@ where
         Self: 'a;
 
     fn roi_mut(&mut self, rect: Rectangle) -> Option<Self::SubMut<'_>> {
-        let right = rect.checked_right()?;
-        let bottom = rect.checked_bottom()?;
-        if right <= W && bottom <= H {
-            let stride = W;
-            let offset = rect.top().checked_mul(W)?.checked_add(rect.left())?;
-            let slice = self.as_mut_slice();
-            let len = slice.len();
-            let ptr = slice.as_mut_ptr();
-            // SAFETY: ptr comes from a valid &mut [T] of length len.
-            // rect is within image bounds (checked above).
-            // Exclusive access is guaranteed by &mut self.
-            Some(unsafe { ImageRefMut::strided(rect.size, stride, offset, ptr, len) })
-        } else {
-            None
-        }
+        self.strided_roi_mut(rect)
+    }
+}
+
+// The `_Array2D<Pixel = T>` projection is spelled out here — and not on the
+// `SubView` / `SubViewMut` impls above — because `BayerSubView` carries a
+// `Self::Pixel: BayerPixel` bound, and `ImageArray`'s `ImageView::Pixel` is
+// the associated projection rather than `T` itself. Every `_Array2D` impl
+// sets `Pixel = T`, so the extra bound narrows nothing; it only tells the
+// compiler what the macro already guarantees.
+impl<T: BayerPixel, const W: usize, const H: usize> BayerSubView for ImageArray<T, W, H>
+where
+    private::Dim<T, W, H>: private::_Array2D<Pixel = T>,
+{
+    type Sub<'a>
+        = ImageRef<'a, Self::Pixel>
+    where
+        Self: 'a;
+
+    fn aligned_bayer_roi(&self, rect: Rectangle) -> Option<Self::Sub<'_>> {
+        cfa_phase_preserved(rect).then_some(())?;
+        self.strided_roi(rect)
+    }
+}
+
+impl<T: BayerPixel, const W: usize, const H: usize> BayerSubViewMut for ImageArray<T, W, H>
+where
+    private::Dim<T, W, H>: private::_Array2D<Pixel = T>,
+{
+    type SubMut<'a>
+        = ImageRefMut<'a, Self::Pixel>
+    where
+        Self: 'a;
+
+    fn aligned_bayer_roi_mut(&mut self, rect: Rectangle) -> Option<Self::SubMut<'_>> {
+        cfa_phase_preserved(rect).then_some(())?;
+        self.strided_roi_mut(rect)
     }
 }
 
@@ -617,6 +696,14 @@ impl<'a, T> ImageRef<'a, T> {
         }
     }
 
+    /// The strided sub-view construction shared by [`SubView::roi`] and the
+    /// CFA-phase-preserving Bayer ROI. See [`strided_roi_offset`].
+    #[inline]
+    fn strided_roi(&self, rect: Rectangle) -> Option<ImageRef<'_, T>> {
+        let offset = strided_roi_offset(self.size, self.stride, self.offset, rect)?;
+        ImageRef::strided(rect.size, self.stride, offset, self.data)
+    }
+
     /// Returns true when stride == size.width && offset == 0.
     #[inline]
     pub fn is_contiguous(&self) -> bool {
@@ -669,17 +756,19 @@ impl<T: OriginInvariantPixel> SubView for ImageRef<'_, T> {
         Self: 'b;
 
     fn roi(&self, rect: Rectangle) -> Option<ImageRef<'_, T>> {
-        let right = rect.checked_right()?;
-        let bottom = rect.checked_bottom()?;
-        if right <= self.size.width && bottom <= self.size.height {
-            let offset = self
-                .offset
-                .checked_add(rect.top().checked_mul(self.stride)?)?
-                .checked_add(rect.left())?;
-            ImageRef::strided(rect.size, self.stride, offset, self.data)
-        } else {
-            None
-        }
+        self.strided_roi(rect)
+    }
+}
+
+impl<T: BayerPixel> BayerSubView for ImageRef<'_, T> {
+    type Sub<'b>
+        = ImageRef<'b, T>
+    where
+        Self: 'b;
+
+    fn aligned_bayer_roi(&self, rect: Rectangle) -> Option<ImageRef<'_, T>> {
+        cfa_phase_preserved(rect).then_some(())?;
+        self.strided_roi(rect)
     }
 }
 
@@ -766,6 +855,50 @@ impl<'a, T> ImageRefMut<'a, T> {
 }
 
 impl<T> ImageRefMut<'_, T> {
+    /// The strided sub-view construction shared by [`SubViewMut::roi_mut`]
+    /// and the CFA-phase-preserving Bayer ROI. See [`strided_roi_offset`].
+    #[inline]
+    fn strided_roi_mut(&mut self, rect: Rectangle) -> Option<ImageRefMut<'_, T>> {
+        let offset = strided_roi_offset(self.size, self.stride, self.offset, rect)?;
+        // SAFETY: `strided_roi_offset` proved `rect` lies inside this view,
+        // whose own construction proved it lies inside the allocation;
+        // `&mut self` guarantees exclusivity for the returned lifetime.
+        Some(unsafe {
+            ImageRefMut::strided(rect.size, self.stride, offset, self.data, self.data_len)
+        })
+    }
+
+    /// The strided read-only sub-view construction shared by
+    /// [`SubView::roi`] and the CFA-phase-preserving Bayer ROI.
+    #[inline]
+    fn strided_roi(&self, rect: Rectangle) -> Option<ImageRef<'_, T>> {
+        let offset = strided_roi_offset(self.size, self.stride, self.offset, rect)?;
+        // The elements the sub-view can address: its first element through
+        // its last, `(h-1)*stride + w` in total. Zero for an empty rect.
+        let span = if rect.size.width == 0 || rect.size.height == 0 {
+            0
+        } else {
+            (rect.size.height - 1) * self.stride + rect.size.width
+        };
+        // SAFETY, validity: `strided_roi_offset` proved the rect lies
+        // inside this view and this view's own construction proved it lies
+        // inside the allocation, so `offset + span <= data_len` and the
+        // pointer is valid for reads over the whole slice for the returned
+        // lifetime. Exclusivity: several views can share one allocation
+        // (`TileIterMut` hands out sibling `ImageRefMut` tiles), and this
+        // span still crosses a sibling's columns through the row
+        // remainders of a strided rect, so the slice is deliberately the
+        // *minimal* addressable span, and the aliasing argument is
+        // per-element: a sibling's write invalidates the shared borrow
+        // only at the elements it writes, all of which lie outside `rect`,
+        // and every accessor of the returned view reads inside `rect`
+        // only. Verified under miri, default and
+        // `-Zmiri-retag-fields=all -Zmiri-strict-provenance`, by
+        // `a_tiles_shared_roi_survives_a_write_through_a_sibling_tile`.
+        let slice = unsafe { std::slice::from_raw_parts(self.data.add(offset), span) };
+        ImageRef::strided(rect.size, self.stride, 0, slice)
+    }
+
     /// Compute a checked element offset within the underlying allocation.
     ///
     /// Returns `Some(idx)` iff `offset + y*stride + x` does not overflow
@@ -910,20 +1043,7 @@ impl<T: OriginInvariantPixel> SubViewMut for ImageRefMut<'_, T> {
         Self: 'b;
 
     fn roi_mut(&mut self, rect: Rectangle) -> Option<ImageRefMut<'_, T>> {
-        let right = rect.checked_right()?;
-        let bottom = rect.checked_bottom()?;
-        if right <= self.size.width && bottom <= self.size.height {
-            let offset = self
-                .offset
-                .checked_add(rect.top().checked_mul(self.stride)?)?
-                .checked_add(rect.left())?;
-            // SAFETY: rect within bounds (checked above); &mut self guarantees exclusivity.
-            Some(unsafe {
-                ImageRefMut::strided(rect.size, self.stride, offset, self.data, self.data_len)
-            })
-        } else {
-            None
-        }
+        self.strided_roi_mut(rect)
     }
 }
 
@@ -935,19 +1055,31 @@ impl<T: OriginInvariantPixel> SubView for ImageRefMut<'_, T> {
         Self: 'b;
 
     fn roi(&self, rect: Rectangle) -> Option<ImageRef<'_, T>> {
-        let right = rect.checked_right()?;
-        let bottom = rect.checked_bottom()?;
-        if right <= self.size.width && bottom <= self.size.height {
-            let offset = self
-                .offset
-                .checked_add(rect.top().checked_mul(self.stride)?)?
-                .checked_add(rect.left())?;
-            // SAFETY: we only produce a shared reference; the raw pointer is valid for reads
-            let slice = unsafe { std::slice::from_raw_parts(self.data, self.data_len) };
-            ImageRef::strided(rect.size, self.stride, offset, slice)
-        } else {
-            None
-        }
+        self.strided_roi(rect)
+    }
+}
+
+impl<T: BayerPixel> BayerSubView for ImageRefMut<'_, T> {
+    type Sub<'b>
+        = ImageRef<'b, T>
+    where
+        Self: 'b;
+
+    fn aligned_bayer_roi(&self, rect: Rectangle) -> Option<ImageRef<'_, T>> {
+        cfa_phase_preserved(rect).then_some(())?;
+        self.strided_roi(rect)
+    }
+}
+
+impl<T: BayerPixel> BayerSubViewMut for ImageRefMut<'_, T> {
+    type SubMut<'b>
+        = ImageRefMut<'b, T>
+    where
+        Self: 'b;
+
+    fn aligned_bayer_roi_mut(&mut self, rect: Rectangle) -> Option<ImageRefMut<'_, T>> {
+        cfa_phase_preserved(rect).then_some(())?;
+        self.strided_roi_mut(rect)
     }
 }
 
@@ -994,6 +1126,29 @@ pub struct Image<T> {
 }
 
 impl<T> Image<T> {
+    /// The strided sub-view construction shared by [`SubView::roi`] and the
+    /// CFA-phase-preserving Bayer ROI. See [`strided_roi_offset`].
+    #[inline]
+    fn strided_roi(&self, rect: Rectangle) -> Option<ImageRef<'_, T>> {
+        let stride = self.size.width;
+        let offset = strided_roi_offset(self.size, stride, 0, rect)?;
+        ImageRef::strided(rect.size, stride, offset, &self.data)
+    }
+
+    /// The strided mutable sub-view construction shared by
+    /// [`SubViewMut::roi_mut`] and the CFA-phase-preserving Bayer ROI.
+    #[inline]
+    fn strided_roi_mut(&mut self, rect: Rectangle) -> Option<ImageRefMut<'_, T>> {
+        let stride = self.size.width;
+        let offset = strided_roi_offset(self.size, stride, 0, rect)?;
+        let len = self.data.len();
+        let ptr = self.data.as_mut_ptr();
+        // SAFETY: `ptr` comes from this image's own boxed slice of `len`
+        // elements, `strided_roi_offset` proved `rect` lies inside it, and
+        // `&mut self` guarantees exclusivity for the returned lifetime.
+        Some(unsafe { ImageRefMut::strided(rect.size, stride, offset, ptr, len) })
+    }
+
     /// Create an `Image` from a `Vec` of pixel data.
     ///
     /// Returns `Err` if `data.len() != width * height`.
@@ -1288,15 +1443,7 @@ impl<T: OriginInvariantPixel> SubView for Image<T> {
         Self: 'a;
 
     fn roi(&self, rect: Rectangle) -> Option<ImageRef<'_, T>> {
-        let right = rect.checked_right()?;
-        let bottom = rect.checked_bottom()?;
-        if right <= self.width() && bottom <= self.height() {
-            let width = self.width();
-            let offset = rect.top().checked_mul(width)?.checked_add(rect.left())?;
-            ImageRef::strided(rect.size, width, offset, self.as_slice())
-        } else {
-            None
-        }
+        self.strided_roi(rect)
     }
 }
 
@@ -1307,18 +1454,31 @@ impl<T: OriginInvariantPixel> SubViewMut for Image<T> {
         Self: 'a;
 
     fn roi_mut(&mut self, rect: Rectangle) -> Option<ImageRefMut<'_, T>> {
-        let right = rect.checked_right()?;
-        let bottom = rect.checked_bottom()?;
-        if right <= self.width() && bottom <= self.height() {
-            let stride = self.width();
-            let offset = rect.top().checked_mul(stride)?.checked_add(rect.left())?;
-            let slice = self.as_mut_slice();
-            let len = slice.len();
-            let ptr = slice.as_mut_ptr();
-            Some(unsafe { ImageRefMut::strided(rect.size, stride, offset, ptr, len) })
-        } else {
-            None
-        }
+        self.strided_roi_mut(rect)
+    }
+}
+
+impl<T: BayerPixel> BayerSubView for Image<T> {
+    type Sub<'a>
+        = ImageRef<'a, T>
+    where
+        Self: 'a;
+
+    fn aligned_bayer_roi(&self, rect: Rectangle) -> Option<ImageRef<'_, T>> {
+        cfa_phase_preserved(rect).then_some(())?;
+        self.strided_roi(rect)
+    }
+}
+
+impl<T: BayerPixel> BayerSubViewMut for Image<T> {
+    type SubMut<'a>
+        = ImageRefMut<'a, T>
+    where
+        Self: 'a;
+
+    fn aligned_bayer_roi_mut(&mut self, rect: Rectangle) -> Option<ImageRefMut<'_, T>> {
+        cfa_phase_preserved(rect).then_some(())?;
+        self.strided_roi_mut(rect)
     }
 }
 

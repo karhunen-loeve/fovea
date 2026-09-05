@@ -12,7 +12,8 @@
 //! `f64`. All of it comes from the *same* single accumulation pass — no
 //! separate contour extraction.
 
-use crate::{Coordinate, CoordinateF64, Rectangle, Size};
+use crate::analyze::statistics::moments::{axis_eccentricity, axis_orientation};
+use crate::{AxialOrientation, Coordinate, CoordinateF64, Rectangle, Size};
 
 /// Shape descriptors for one connected component.
 ///
@@ -30,25 +31,25 @@ use crate::{Coordinate, CoordinateF64, Rectangle, Size};
 /// - `sum_x` / `sum_y` — first raw moments (`Σx`, `Σy`), for the centroid.
 /// - `sum_x2` / `sum_y2` / `sum_xy` — second raw moments (`Σx²`, `Σy²`,
 ///   `Σxy`), for the central second moments.
-/// - `perimeter` — count of 4-connected boundary pixels (see below).
+/// - `boundary_pixels` — count of 4-connected boundary pixels (see below).
 ///
 /// # Two non-obvious contracts
 ///
-/// 1. **The perimeter boundary test is 4-connected, independent of the
+/// 1. **The boundary test is 4-connected, independent of the
 ///    labeling [`Connectivity`](super::Connectivity).** The connectivity
 ///    parameter decides *which pixels form a blob*; the boundary test
 ///    decides *how a blob's outline is counted* once the blob exists.
 ///    They are orthogonal — a `Connectivity8` caller still gets a
-///    4-connected perimeter, which is correct because perimeter is a
-///    property of the blob's pixel set, not of the rule that grouped it.
+///    4-connected boundary count, which is correct because the boundary is
+///    a property of the blob's pixel set, not of the rule that grouped it.
 ///    A pixel is a boundary pixel iff at least one of its four orthogonal
 ///    neighbours is background or off the analyzed view.
 ///
 /// 2. **All measurements are view-relative.** A blob clipped by the view
 ///    edge is measured *as clipped*: its cut edges count toward the
-///    perimeter, and `area` / `bbox` / centroid describe only the in-view
+///    boundary, and `area` / `bbox` / centroid describe only the in-view
 ///    part. This matches [`ComponentStats`](super::ComponentStats) on an
-///    ROI; the perimeter merely makes it more visible. When tiling a
+///    ROI; the boundary count merely makes it more visible. When tiling a
 ///    large image, give each tile an overlapping margin and keep only
 ///    blobs whose full extent lies inside the non-overlapped core.
 ///
@@ -86,7 +87,13 @@ pub struct BlobMeasurements {
     /// Mixed second raw moment `Σ(x·y)`.
     pub sum_xy: u64,
     /// Count of 4-connected boundary pixels (see type docs).
-    pub perimeter: u64,
+    ///
+    /// Deliberately **not** named "perimeter": a pixel *count* is not a
+    /// geometric length (it undercounts diagonal outline). For a true
+    /// polygon perimeter, trace the blob's border with
+    /// [`extract_contours`](crate::analyze::contours::extract_contours)
+    /// and use [`Contour::perimeter`](crate::analyze::contours::Contour::perimeter).
+    pub boundary_pixels: u64,
 }
 
 impl BlobMeasurements {
@@ -106,7 +113,7 @@ impl BlobMeasurements {
             sum_x2: xu * xu,
             sum_y2: yu * yu,
             sum_xy: xu * yu,
-            perimeter: is_boundary as u64,
+            boundary_pixels: is_boundary as u64,
         }
     }
 
@@ -142,7 +149,7 @@ impl BlobMeasurements {
         self.sum_x2 += x2;
         self.sum_y2 += y2;
         self.sum_xy += xy;
-        self.perimeter += is_boundary as u64;
+        self.boundary_pixels += is_boundary as u64;
     }
 
     /// Centroid (centre of mass) as a sub-pixel [`CoordinateF64`].
@@ -192,7 +199,7 @@ impl BlobMeasurements {
         2.0 * (self.area as f64 / std::f64::consts::PI).sqrt()
     }
 
-    /// Orientation of the major axis, in radians.
+    /// Orientation of the major axis, as an [`AxialOrientation`].
     ///
     /// `orientation = ½·atan2(2·μ11, μ20 − μ02)`, giving a value in
     /// `(−π/2, π/2]` measured from the +x axis **in image (y-down)
@@ -200,9 +207,16 @@ impl BlobMeasurements {
     /// screen). Note the y-down flip versus math-convention plots, or the
     /// sign reads backwards. A rotationally-symmetric or single-pixel blob
     /// returns `0`.
-    pub fn orientation(&self) -> f64 {
+    ///
+    /// The return type is *axial*, not directed: an ellipse's major axis has
+    /// no head and no tail, so `+80°` and `−100°` are the same axis. That is
+    /// why comparing two blobs' orientations goes through
+    /// [`AxialOrientation::signed_difference`], which wraps at π — a raw
+    /// subtraction would read those two as `160°` apart instead of `20°`.
+    /// Call [`AxialOrientation::radians`] for the bare angle.
+    pub fn orientation(&self) -> AxialOrientation {
         let (mu20, mu02, mu11) = self.central_moments();
-        0.5 * (2.0 * mu11).atan2(mu20 - mu02)
+        axis_orientation(mu20, mu02, mu11)
     }
 
     /// Eccentricity of the equivalent ellipse, in `[0, 1]`.
@@ -215,34 +229,28 @@ impl BlobMeasurements {
     /// (single pixel, `λ₁ = 0`) returns `0` rather than `NaN`.
     pub fn eccentricity(&self) -> f64 {
         let (mu20, mu02, mu11) = self.central_moments();
-        let avg = 0.5 * (mu20 + mu02);
-        let diff = 0.5 * (mu20 - mu02);
-        let disc = (diff * diff + mu11 * mu11).sqrt();
-        let l1 = avg + disc; // larger eigenvalue
-        let l2 = avg - disc; // smaller eigenvalue
-        if l1 <= 0.0 {
-            return 0.0;
-        }
-        // Clamp guards tiny negatives from float error at the extremes.
-        (1.0 - l2 / l1).max(0.0).sqrt()
+        axis_eccentricity(mu20, mu02, mu11)
     }
 
-    /// Circularity (roundness): `4π·area / perimeter²`.
+    /// Circularity (roundness): `4π·area / boundary_pixels²` — the cheap,
+    /// single-pass relative score.
     ///
-    /// `1` is the continuous-geometry ideal for a disc. Because the
-    /// perimeter is a 4-connected boundary-*pixel* count, which undercounts
-    /// diagonal outline (a √2 Euclidean rim step counts as one pixel), a
-    /// rasterised disc actually reads slightly *above* 1 (≈1.25), while an
-    /// axis-aligned square reads ≈π/4. Treat circularity as a relative
-    /// shape score compared within a tolerance band, not an absolute.
-    /// Returns `0` for a zero perimeter (which the engine never produces,
-    /// since every foreground pixel of an in-view blob has at least one
-    /// boundary pixel).
+    /// `1` is the continuous-geometry ideal for a disc. Because
+    /// `boundary_pixels` is a pixel *count*, which undercounts diagonal
+    /// outline (a √2 Euclidean rim step counts as one pixel), a rasterised
+    /// disc actually reads slightly *above* 1 (≈1.25), while an
+    /// axis-aligned square reads ≈π/4. Treat this circularity as a relative
+    /// shape score compared within a tolerance band, not an absolute; for
+    /// the geometric score computed from a traced polygon, use
+    /// [`Contour::circularity`](crate::analyze::contours::Contour::circularity).
+    /// Returns `0` for a zero boundary count (which the engine never
+    /// produces, since every foreground pixel of an in-view blob has at
+    /// least one boundary pixel).
     pub fn circularity(&self) -> f64 {
-        if self.perimeter == 0 {
+        if self.boundary_pixels == 0 {
             return 0.0;
         }
-        let p = self.perimeter as f64;
+        let p = self.boundary_pixels as f64;
         4.0 * std::f64::consts::PI * self.area as f64 / (p * p)
     }
 }
@@ -295,25 +303,25 @@ mod tests {
     fn from_seed_single_pixel_is_finite() {
         let m = BlobMeasurements::from_seed(Coordinate::new(3, 5), true);
         assert_eq!(m.area, 1);
-        assert_eq!(m.perimeter, 1);
+        assert_eq!(m.boundary_pixels, 1);
         assert_eq!(m.sum_x2, 9);
         assert_eq!(m.sum_y2, 25);
         assert_eq!(m.sum_xy, 15);
         assert_eq!(m.centroid(), CoordinateF64::new(3.0, 5.0));
         // No NaN / div-by-zero for a degenerate blob.
         assert_eq!(m.eccentricity(), 0.0);
-        assert_eq!(m.orientation(), 0.0);
+        assert_eq!(m.orientation().radians(), 0.0);
         assert!(m.circularity().is_finite());
         let (mu20, mu02, mu11) = m.central_moments();
         assert_eq!((mu20, mu02, mu11), (0.0, 0.0, 0.0));
     }
 
     #[test]
-    fn perimeter_of_square_is_4n_minus_4() {
+    fn boundary_pixels_of_square_is_4n_minus_4() {
         for n in 1..=10usize {
             let m = from_pixels(&square(n));
             let expected = if n == 1 { 1 } else { (4 * n - 4) as u64 };
-            assert_eq!(m.perimeter, expected, "N={n}");
+            assert_eq!(m.boundary_pixels, expected, "N={n}");
         }
     }
 
@@ -327,7 +335,7 @@ mod tests {
 
     #[test]
     fn square_circularity_below_one() {
-        // 4-connected perimeter biases circularity below 1; for a large
+        // 4-connected boundary count biases circularity below 1; for a large
         // square it approaches 4π·N²/(4N)² = π/4 ≈ 0.785.
         let m = from_pixels(&square(40));
         let c = m.circularity();
@@ -340,7 +348,11 @@ mod tests {
         // 11-wide, 1-tall bar → major axis along x → orientation ≈ 0.
         let pixels: Vec<(usize, usize)> = (0..11).map(|x| (x, 0)).collect();
         let m = from_pixels(&pixels);
-        assert!(m.orientation().abs() < 1e-9, "got {}", m.orientation());
+        assert!(
+            m.orientation().radians().abs() < 1e-9,
+            "got {:?}",
+            m.orientation()
+        );
     }
 
     #[test]
@@ -349,8 +361,8 @@ mod tests {
         let pixels: Vec<(usize, usize)> = (0..11).map(|y| (0, y)).collect();
         let m = from_pixels(&pixels);
         assert!(
-            (m.orientation().abs() - PI / 2.0).abs() < 1e-9,
-            "got {}",
+            (m.orientation().radians().abs() - PI / 2.0).abs() < 1e-9,
+            "got {:?}",
             m.orientation()
         );
     }
@@ -361,18 +373,20 @@ mod tests {
         // y-down image coords) → orientation +π/4. Pins the sign convention.
         let pixels: Vec<(usize, usize)> = (0..11).map(|i| (i, i)).collect();
         let m = from_pixels(&pixels);
+        let expected = AxialOrientation::from_radians(PI / 4.0).unwrap();
         assert!(
-            (m.orientation() - PI / 4.0).abs() < 1e-9,
-            "got {}",
+            m.orientation().signed_difference(expected).abs() < 1e-9,
+            "got {:?}",
             m.orientation()
         );
 
         // Anti-diagonal along x==-y (top-right → bottom-left) → −π/4.
         let pixels: Vec<(usize, usize)> = (0..11).map(|i| (10 - i, i)).collect();
         let m = from_pixels(&pixels);
+        let expected = AxialOrientation::from_radians(-PI / 4.0).unwrap();
         assert!(
-            (m.orientation() + PI / 4.0).abs() < 1e-9,
-            "got {}",
+            m.orientation().signed_difference(expected).abs() < 1e-9,
+            "got {:?}",
             m.orientation()
         );
     }

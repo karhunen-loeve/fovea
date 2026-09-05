@@ -2192,7 +2192,9 @@ mod tests {
             (1e6, 1e6),
             (1e-6, 3e-7),
         ] {
-            let direct = Magnitude.combine(&MonoF32::new(a), &MonoF32::new(b)).value();
+            let direct = Magnitude
+                .combine(&MonoF32::new(a), &MonoF32::new(b))
+                .value();
             let safe = MagnitudeHypot
                 .combine(&MonoF32::new(a), &MonoF32::new(b))
                 .value();

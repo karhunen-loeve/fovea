@@ -431,24 +431,24 @@ pub(crate) mod single_channel_sealed {
 /// A single-channel pixel is accepted:
 ///
 /// ```
-/// use fovea::analyze::threshold::hysteresis_threshold;
+/// use fovea::analyze::threshold::{HysteresisThresholds, hysteresis_threshold};
 /// use fovea::image::Image;
 /// use fovea::pixel::MonoF32;
 ///
 /// let img = Image::fill(4, 4, MonoF32::new(0.5));
-/// let _mask = hysteresis_threshold(&img, 0.2f32, 0.8f32);
+/// let _mask = hysteresis_threshold(&img, HysteresisThresholds::try_new(0.2f32, 0.8).unwrap());
 /// ```
 ///
 /// A multi-channel pixel is rejected at compile time, not at runtime:
 ///
 /// ```compile_fail
-/// use fovea::analyze::threshold::hysteresis_threshold;
+/// use fovea::analyze::threshold::{HysteresisThresholds, hysteresis_threshold};
 /// use fovea::image::Image;
 /// use fovea::pixel::RgbF32;
 ///
 /// let img = Image::fill(4, 4, RgbF32::new(0.5, 0.5, 0.5));
 /// // ERROR: `RgbF32: SingleChannel` is not satisfied.
-/// let _mask = hysteresis_threshold(&img, 0.2f32, 0.8f32);
+/// let _mask = hysteresis_threshold(&img, HysteresisThresholds::try_new(0.2f32, 0.8).unwrap());
 /// ```
 pub trait SingleChannel: HomogeneousPixel + single_channel_sealed::Sealed {}
 
@@ -516,23 +516,25 @@ impl_single_channel!(u8, u16, u32, u64, i8, i16, i32, i64);
 /// label-specific concept from `BoundedChannel::MAX`.
 pub trait LabelPixel: Copy + Eq + Ord + core::hash::Hash + ZeroablePixel {
     /// The largest distinct foreground label this pixel type can
-    /// encode, expressed as `u64` for uniform capacity arithmetic
-    /// across all shipped and future label widths.
+    /// encode, expressed as `u32` — the labeling engine's own label
+    /// width. The engine's provisional-label buffers are `u32`, so no
+    /// labeling pass can ever produce an index above `u32::MAX`; a wider
+    /// index type here would advertise capacity nothing can deliver.
     ///
     /// Background (= [`Self::zero()`](ZeroablePixel::zero)) is **not**
     /// counted; the valid foreground range is `1 ..= MAX_LABEL`.
-    const MAX_LABEL: u64;
+    const MAX_LABEL: u32;
 
     /// Construct a label from a 1-based foreground index.
     ///
     /// Returns `None` if `index == 0` (background is not produced by
     /// this constructor; use [`Self::zero()`](ZeroablePixel::zero)
     /// instead) or `index > MAX_LABEL`.
-    fn from_label_index(index: u64) -> Option<Self>;
+    fn from_label_index(index: u32) -> Option<Self>;
 
-    /// Read the label back as a `u64`. [`Self::zero()`](ZeroablePixel::zero)
+    /// Read the label back as a `u32`. [`Self::zero()`](ZeroablePixel::zero)
     /// returns `0`; any foreground label `i` returns `i`.
-    fn to_label_index(self) -> u64;
+    fn to_label_index(self) -> u32;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

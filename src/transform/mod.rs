@@ -70,6 +70,31 @@
 //! [`image_max`](crate::transform::image_max)) are provided as
 //! discoverability shortcuts.
 //!
+//! ## Pyramids
+//!
+//! [`pyr_down`](crate::transform::pyr_down) blurs with the pinned binomial
+//! 5×5 kernel and decimates by 2;
+//! [`pyr_up`](crate::transform::pyr_up) zero-inserts and interpolates back
+//! to an explicit target size. The
+//! [`Gaussian`](crate::transform::Gaussian) strategy composes `pyr_down`
+//! into a [`Pyramid`](crate::image::Pyramid) via the
+//! [`PyramidMethod`](crate::transform::PyramidMethod) trait.
+//!
+//! ## Demosaicing
+//!
+//! [`demosaic`](crate::transform::demosaic) turns a raw
+//! [Bayer mosaic](crate::pixel::bayer) into RGB at the depth the sensor
+//! sampled, with [`BayerBilinear`](crate::transform::BayerBilinear) as the
+//! reference algorithm and
+//! [`MalvarHeCutler`](crate::transform::MalvarHeCutler) as the quality path.
+//! [`white_balance`](crate::transform::white_balance) applies per-colour
+//! [`BayerGains`](crate::transform::BayerGains) to the mosaic first — the
+//! industrial order, and the one that matters for a gradient-corrected
+//! algorithm. Unlike the other neighbourhood operations these take **no
+//! border policy**: reflection without edge duplication is the only
+//! treatment that preserves a CFA sample's colour, so it is pinned into the
+//! contract.
+//!
 //! ## Neighbourhood transforms
 //!
 //! Each output pixel is computed from a window of input pixels centred at
@@ -96,11 +121,13 @@ mod combine;
 mod convert;
 mod convolve;
 mod convolve_separable;
+mod demosaic;
 mod filters;
 mod fold;
 mod geometry;
 mod map_neighborhood;
 mod morphology;
+mod pyramid;
 mod resize;
 mod template_match;
 
@@ -112,20 +139,26 @@ pub use combine::{
     image_max, image_min, subtract,
 };
 pub use convert::{
-    AddAlpha, BinaryMask, BinaryThreshold, BinaryThresholdInv, BrightnessContrast, Broadcast,
-    ChannelLut, Clamp, ColorSwap, ConvertPixel, ConvertPixelExt, Depalettize, FullRange, Invert,
-    Luminance, Lut, Narrow, PixelMap, SrgbGamma, Then, ToZeroThreshold, ToZeroThresholdInv,
+    AddAlpha, BayerToMono, BinaryMask, BinaryThreshold, BinaryThresholdInv, BrightnessContrast,
+    Broadcast, ChannelLut, Clamp, ColorSwap, ConvertPixel, ConvertPixelExt, Depalettize, FullRange,
+    Invert, Luminance, Lut, Narrow, PixelMap, SrgbGamma, Then, ToZeroThreshold, ToZeroThresholdInv,
     TruncateThreshold, convert_image, convert_image_into,
 };
 pub use convolve::{convolve, convolve_into, correlate, correlate_into};
-pub use convolve_separable::{convolve_separable, convolve_separable_into};
+pub use convolve_separable::{SeparableScratch, convolve_separable, convolve_separable_into};
+pub use demosaic::{
+    BayerBilinear, BayerGains, DemosaicMethod, MalvarHeCutler, demosaic, demosaic_into,
+    white_balance, white_balance_into,
+};
 pub use filters::{
     DEFAULT_TRUNCATE, box_blur_3x3, box_blur_5x5, emboss, gaussian_blur, gaussian_blur_3x3,
-    gaussian_blur_5x5, gaussian_blur_into, gaussian_blur_with, gaussian_blur_with_into,
-    gradient_direction, gradient_magnitude, laplacian, laplacian_8, non_maximum_suppression,
-    prewitt_x, prewitt_y, scharr_x, scharr_y, sharpen, sobel_x, sobel_y,
+    gaussian_blur_5x5, gaussian_blur_into, gradient_direction, gradient_magnitude, laplacian,
+    laplacian_8, non_maximum_suppression, prewitt_x, prewitt_y, scharr_x, scharr_y, sharpen,
+    sobel_x, sobel_y,
 };
-pub(crate) use filters::non_maximum_suppression_from_gradients;
+pub(crate) use filters::{
+    nms_sector, nms_sector_from_gradient, non_maximum_suppression_from_gradients,
+};
 pub use fold::{
     ClosureFold, FoldItem, FoldOp, fold_neighborhood, fold_neighborhood_fn,
     fold_neighborhood_fn_into, fold_neighborhood_into,
@@ -142,5 +175,8 @@ pub use morphology::{
     black_hat, closing, closing_into, dilate, dilate_into, erode, erode_into, median_filter,
     morphological_gradient, opening, opening_into, top_hat,
 };
+pub use pyramid::{Gaussian, PyramidMethod, pyr_down, pyr_up};
 pub use resize::{Bilinear, NearestNeighbor, ResizeMethod, resize, resize_into};
-pub use template_match::{MatchMethod, NCC, SAD, SSD, match_template, match_template_into};
+pub use template_match::{
+    MatchMethod, NCC, SAD, SSD, ScorePolarity, match_template, match_template_into,
+};

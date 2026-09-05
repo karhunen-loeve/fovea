@@ -338,6 +338,10 @@ pub fn map_neighborhood_into<I, MI, B, O, M, P>(
     // anchor.  Only these positions are yielded to `op.map`; false entries
     // are silently skipped.  For typical mask sizes (3×3 .. 7×7) this Vec
     // stays in L1.
+    // Deliberately a bare `(isize, isize)` displacement rather than the
+    // `Offset` vocabulary type: this feeds the dilate/erode hot loop, and
+    // converting it is a measured performance change for an optimization
+    // pass, not a cleanup.
     let mask_positions: Vec<(isize, isize)> = {
         let mut positions = Vec::with_capacity(mask_size.width * mask_size.height);
         for ky in 0..mask_size.height {

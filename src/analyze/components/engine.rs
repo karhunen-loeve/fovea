@@ -4,8 +4,8 @@
 //! for the public surface and the worked 4×4 example.
 
 use crate::image::{Image, ImageView, ImageViewMut, RasterImage};
-use crate::{Coordinate, Error};
 use crate::pixel::LabelPixel;
+use crate::{Coordinate, Error};
 
 use super::Labeling;
 use super::connectivity::Connectivity;
@@ -24,7 +24,13 @@ use super::union_find::UnionFind;
 /// # Errors — Tier 2
 ///
 /// Returns [`Error::LabelOverflow`] if the input contains more
-/// connected components than `L::MAX_LABEL` can encode.
+/// connected components than `L::MAX_LABEL` can encode. The count is of
+/// final components, not provisional labels, so an image whose components
+/// merge through many provisional labels is not rejected. Also returned,
+/// with `label_capacity == u32::MAX`, when the engine's own `u32`
+/// provisional-label space is exhausted, which takes more than
+/// `u32::MAX` disconnected foreground sites and is out of practical
+/// reach.
 ///
 /// # Examples
 ///
@@ -55,6 +61,10 @@ where
 /// Compute the connected-component labeling of `image`, writing the
 /// label image into `out` and returning `label_count`.
 ///
+/// On an `Err` return the contents of `out` are unspecified: the
+/// capacity check runs while labels are being written, so a prefix of
+/// the buffer may already carry labels from the failed run.
+///
 /// # Panics
 ///
 /// Panics if `out.size() != image.size()` (Tier 3 — programmer bug).
@@ -62,11 +72,17 @@ where
 /// # Errors \u2014 Tier 2
 ///
 /// Returns [`Error::LabelOverflow`] if the input contains more
-/// connected components than `L::MAX_LABEL` can encode.
+/// connected components than `L::MAX_LABEL` can encode. The count is of
+/// final components, not provisional labels, so an image whose components
+/// merge through many provisional labels is not rejected. Also returned,
+/// with `label_capacity == u32::MAX`, when the engine's own `u32`
+/// provisional-label space is exhausted, which takes more than
+/// `u32::MAX` disconnected foreground sites and is out of practical
+/// reach.
 pub fn connected_components_into<L, C>(
     image: &impl RasterImage<Pixel = bool>,
     out: &mut Image<L>,
-) -> Result<u64, Error>
+) -> Result<u32, Error>
 where
     L: LabelPixel,
     C: Connectivity,
@@ -92,7 +108,13 @@ where
 /// # Errors \u2014 Tier 2
 ///
 /// Returns [`Error::LabelOverflow`] if the input contains more
-/// connected components than `L::MAX_LABEL` can encode.
+/// connected components than `L::MAX_LABEL` can encode. The count is of
+/// final components, not provisional labels, so an image whose components
+/// merge through many provisional labels is not rejected. Also returned,
+/// with `label_capacity == u32::MAX`, when the engine's own `u32`
+/// provisional-label space is exhausted, which takes more than
+/// `u32::MAX` disconnected foreground sites and is out of practical
+/// reach.
 ///
 /// # Examples
 ///
@@ -124,7 +146,7 @@ where
         let mut sink = WithStats { out: &mut stats };
         run::<L, C, _, WithStats<'_>>(image, &mut labels, &mut sink)?
     };
-    debug_assert_eq!(stats.len() as u64, label_count);
+    debug_assert_eq!(stats.len(), label_count as usize);
     Ok((
         Labeling {
             labels,
@@ -137,7 +159,7 @@ where
 /// Compute the connected-component labeling of `image`, plus one
 /// [`BlobMeasurements`] per foreground component: area, bounding box,
 /// centroid sums, the raw second-order moment sums, and a 4-connected
-/// boundary-pixel perimeter count. From these the shape descriptors
+/// boundary-pixel count. From these the shape descriptors
 /// (equivalent diameter, orientation, eccentricity, circularity) are
 /// derived on demand — see [`BlobMeasurements`].
 ///
@@ -145,19 +167,19 @@ where
 /// there is no separate contour extraction. This is the heavier sibling
 /// of [`connected_components_with_stats`]: it additionally runs a
 /// per-foreground-pixel 4-neighbour boundary check to count the
-/// perimeter. Reach for [`connected_components_with_stats`] when you only
-/// need area / bounding box / centroid.
+/// boundary pixels. Reach for [`connected_components_with_stats`] when
+/// you only need area / bounding box / centroid.
 ///
 /// # Two non-obvious contracts
 ///
-/// - **The perimeter boundary test is 4-connected regardless of the
+/// - **The boundary test is 4-connected regardless of the
 ///   labeling [`Connectivity`] `C`.** `C` decides which pixels form a
 ///   blob; the boundary test decides how its outline is counted. A
-///   `Connectivity8` caller still gets a 4-connected perimeter — correct,
-///   because perimeter is a property of the blob's pixel set, not of the
-///   grouping rule.
+///   `Connectivity8` caller still gets a 4-connected boundary count —
+///   correct, because the boundary is a property of the blob's pixel set,
+///   not of the grouping rule.
 /// - **Measurements are view-relative.** A blob clipped by the view edge
-///   is measured as clipped: its cut edge counts toward the perimeter and
+///   is measured as clipped: its cut edge counts toward the boundary and
 ///   `area` / `bbox` / centroid cover only the in-view part. When tiling,
 ///   use an overlapping margin and keep only blobs whose full extent lies
 ///   in the non-overlapped core.
@@ -165,7 +187,13 @@ where
 /// # Errors — Tier 2
 ///
 /// Returns [`Error::LabelOverflow`] if the input contains more connected
-/// components than `L::MAX_LABEL` can encode.
+/// components than `L::MAX_LABEL` can encode. The count is of final
+/// components, not provisional labels, so an image whose components merge
+/// through many provisional labels is not rejected. Also returned, with
+/// `label_capacity == u32::MAX`, when the engine's own `u32`
+/// provisional-label space is exhausted, which takes more than
+/// `u32::MAX` disconnected foreground sites and is out of practical
+/// reach.
 ///
 /// # Examples
 ///
@@ -176,13 +204,13 @@ where
 /// use fovea::image::BinaryImage;
 /// use fovea::pixel::Label32;
 ///
-/// // A solid 3x3 square: area 9, perimeter 8 (4·3 − 4).
+/// // A solid 3x3 square: area 9, boundary pixels 8 (4·3 − 4).
 /// let img = BinaryImage::fill(3, 3, true);
 /// let (lab, m) =
 ///     connected_components_with_measurements::<Label32, Connectivity4>(&img).unwrap();
 /// assert_eq!(lab.label_count, 1);
 /// assert_eq!(m[0].area, 9);
-/// assert_eq!(m[0].perimeter, 8);
+/// assert_eq!(m[0].boundary_pixels, 8);
 /// ```
 pub fn connected_components_with_measurements<L, C>(
     image: &impl RasterImage<Pixel = bool>,
@@ -199,7 +227,7 @@ where
         };
         run::<L, C, _, WithMeasurements<'_>>(image, &mut labels, &mut sink)?
     };
-    debug_assert_eq!(measurements.len() as u64, label_count);
+    debug_assert_eq!(measurements.len(), label_count as usize);
     Ok((
         Labeling {
             labels,
@@ -216,12 +244,12 @@ where
 /// Maximum number of raster-preceding neighbours examined per pixel
 /// across every shipped [`Connectivity`]. Currently 4 (for
 /// [`Connectivity8`](super::Connectivity8)). The pass-1 inner buffer
-/// `others: [u64; MAX_NEIGHBOURS]` hardcodes this constant. Adding a
+/// `others: [u32; MAX_NEIGHBOURS]` hardcodes this constant. Adding a
 /// connectivity with more predecessors requires lifting this and is
 /// flagged for follow-up design.
 const MAX_NEIGHBOURS: usize = 4;
 
-fn run<L, C, I, S>(image: &I, out: &mut Image<L>, sink: &mut S) -> Result<u64, Error>
+fn run<L, C, I, S>(image: &I, out: &mut Image<L>, sink: &mut S) -> Result<u32, Error>
 where
     L: LabelPixel,
     C: Connectivity,
@@ -235,9 +263,12 @@ where
     }
 
     // ── Pass 1 ───────────────────────────────────────────────────────
-    // Provisional labels live in a flat W*H Vec<u64>, raster-scan
-    // order. Zero is the background sentinel.
-    let mut prov: Vec<u64> = vec![0; w * h];
+    // Provisional labels live in a flat W*H Vec<u32>, raster-scan
+    // order. Zero is the background sentinel. `u32` is the width of
+    // `LabelPixel::MAX_LABEL`, and this buffer is read and written by
+    // both full-image passes, so its width is the engine's memory
+    // traffic.
+    let mut prov: Vec<u32> = vec![0; w * h];
     // Capacity hint: pathological all-stripes input produces ~W*H/4
     // labels; using that as the initial allocation keeps `make_set`
     // amortised cheap without over-allocating in the common case.
@@ -254,26 +285,31 @@ where
             // Collect provisional labels of the already-visited
             // foreground neighbours. The smallest is tracked
             // separately; everything else goes in `others`, which is
-            // unioned with `smallest` at the end.
-            let mut smallest: u64 = u64::MAX;
-            let mut others: [u64; MAX_NEIGHBOURS] = [0; MAX_NEIGHBOURS];
+            // unioned with `smallest` at the end. `0` doubles as the
+            // "none seen yet" sentinel: provisional labels start at 1,
+            // so no foreground neighbour can carry it (`u32::MAX` could
+            // not serve — it is itself a valid label).
+            let mut smallest: u32 = 0;
+            let mut others: [u32; MAX_NEIGHBOURS] = [0; MAX_NEIGHBOURS];
             let mut other_count = 0usize;
 
-            for &(dx, dy) in C::OFFSETS {
-                let nx = x as i64 + dx as i64;
-                let ny = y as i64 + dy as i64;
-                if nx < 0 || ny < 0 || nx >= w as i64 || ny >= h as i64 {
+            let site = Coordinate::new(x, y);
+            for &offset in C::OFFSETS {
+                let Some(n) = site.checked_add(offset) else {
+                    continue;
+                };
+                if n.x >= w || n.y >= h {
                     continue;
                 }
-                let p = prov[ny as usize * w + nx as usize];
+                let p = prov[n.y * w + n.x];
                 if p == 0 {
                     continue;
                 }
-                if p < smallest {
-                    if smallest != u64::MAX {
-                        others[other_count] = smallest;
-                        other_count += 1;
-                    }
+                if smallest == 0 {
+                    smallest = p;
+                } else if p < smallest {
+                    others[other_count] = smallest;
+                    other_count += 1;
                     smallest = p;
                 } else if p != smallest {
                     others[other_count] = p;
@@ -281,14 +317,22 @@ where
                 }
             }
 
-            let label = if smallest == u64::MAX {
-                let new_label = uf.make_set();
-                if new_label > L::MAX_LABEL {
-                    return Err(Error::LabelOverflow {
-                        label_capacity: L::MAX_LABEL,
-                    });
+            let label = if smallest == 0 {
+                // `make_set` returns `None` only when the u32 label
+                // space itself is spent: more than `u32::MAX` provisional
+                // labels, the engine's own width. The capacity of the
+                // target type `L` is deliberately NOT checked here:
+                // provisional labels routinely exceed the final component
+                // count (merging them is what pass 2 is for), so `L` is
+                // checked in pass 2 against the compacted count.
+                match uf.make_set() {
+                    Some(new_label) => new_label,
+                    None => {
+                        return Err(Error::LabelOverflow {
+                            label_capacity: u32::MAX,
+                        });
+                    }
                 }
-                new_label
             } else {
                 for &o in &others[..other_count] {
                     uf.union(smallest, o);
@@ -304,8 +348,11 @@ where
     // Resolve roots and compact labels to a dense `1..=label_count`,
     // writing the output pixels and forwarding `(label, first, x, y)`
     // to the stats sink.
-    let mut compact: Vec<u64> = vec![0; uf.len() as usize];
-    let mut compact_counter: u64 = 1;
+    let mut compact: Vec<u32> = vec![0; uf.len()];
+    // Compact labels assigned so far. `label_count + 1` cannot wrap:
+    // a new root only appears while `label_count` is strictly below
+    // the provisional-label total, which pass 1 capped at `u32::MAX`.
+    let mut label_count: u32 = 0;
 
     for y in 0..h {
         for x in 0..w {
@@ -317,15 +364,25 @@ where
                 let root = uf.find(p);
                 let existing = compact[root as usize];
                 let (c, first) = if existing == 0 {
-                    let assigned = compact_counter;
+                    // The `L` capacity check lives here, on the compacted
+                    // count, because this is the first point at which the
+                    // *final* number of components is known. Checking the
+                    // provisional counter in pass 1 would reject images
+                    // whose components merely merge through many labels.
+                    if label_count == L::MAX_LABEL {
+                        return Err(Error::LabelOverflow {
+                            label_capacity: L::MAX_LABEL,
+                        });
+                    }
+                    let assigned = label_count + 1;
                     compact[root as usize] = assigned;
-                    compact_counter += 1;
+                    label_count = assigned;
                     (assigned, true)
                 } else {
                     (existing, false)
                 };
-                // Invariant: 0 < c <= compact_counter - 1 <= L::MAX_LABEL
-                // (the pass-1 overflow check guarantees this).
+                // Invariant: 0 < c <= label_count <= L::MAX_LABEL
+                // (the capacity check just above guarantees this).
                 debug_assert!(
                     c <= L::MAX_LABEL,
                     "internal invariant violated: compact label {} > MAX_LABEL {}",
@@ -334,7 +391,7 @@ where
                 );
                 *cell = L::from_label_index(c).expect(
                     "internal error: compact label exceeds L::MAX_LABEL despite \
-                     pass-1 overflow check (analyze::components engine)",
+                     the pass-2 capacity check (analyze::components engine)",
                 );
                 // The boundary neighbour-check is gated behind the sink's
                 // `NEEDS_BOUNDARY` const so it is const-folded away (and
@@ -350,7 +407,7 @@ where
         }
     }
 
-    Ok(compact_counter - 1)
+    Ok(label_count)
 }
 
 /// Returns `true` if the foreground pixel at `(x, y)` is a 4-connected
@@ -360,10 +417,10 @@ where
 /// The caller guarantees `(x, y)` is itself foreground. Off-view
 /// neighbours (`image.get` → `None`) count as boundary — this is what
 /// makes measurements *view-relative*: a blob clipped by the view edge
-/// has its cut edge counted as perimeter.
+/// has its cut edge counted as boundary.
 ///
 /// This test is fixed at 4-connectivity regardless of the labeling
-/// [`Connectivity`], because a blob's perimeter is a property of its
+/// [`Connectivity`], because a blob's boundary is a property of its
 /// pixel *set*, not of the rule that grouped the pixels.
 #[inline]
 fn is_4_boundary<I>(image: &I, x: usize, y: usize) -> bool
@@ -666,7 +723,7 @@ mod tests {
         let (_, stats) = connected_components_with_stats::<Label32, Connectivity4>(&img).unwrap();
         let total_area: u64 = stats.iter().map(|s| s.area).sum();
         assert_eq!(total_area as usize, fg);
-        assert_eq!(stats.len() as u64, r.label_count);
+        assert_eq!(stats.len(), r.label_count as usize);
     }
 
     // Stats tests ─────────────────────────────────────────────────────
@@ -759,16 +816,16 @@ mod tests {
     }
 
     impl LabelPixel for TinyLabel {
-        const MAX_LABEL: u64 = 3;
-        fn from_label_index(i: u64) -> Option<Self> {
+        const MAX_LABEL: u32 = 3;
+        fn from_label_index(i: u32) -> Option<Self> {
             if i == 0 || i > 3 {
                 None
             } else {
                 Some(TinyLabel(i as u8))
             }
         }
-        fn to_label_index(self) -> u64 {
-            self.0 as u64
+        fn to_label_index(self) -> u32 {
+            self.0 as u32
         }
     }
 
@@ -805,6 +862,47 @@ mod tests {
         assert_eq!(out.pixel_at(4, 0), TinyLabel(3));
     }
 
+    #[test]
+    fn label_overflow_counts_final_components_not_provisional_labels() {
+        // Row 0 alone creates four provisional labels, all merged into
+        // one component by row 1. TinyLabel holds 3 labels, so a check
+        // against the provisional counter would reject this ordinary
+        // image; the documented contract counts final components (one).
+        let img = img_from_str(
+            r#"
+            #.#.#.#
+            #######
+        "#,
+        );
+        let r = connected_components::<Label32, Connectivity4>(&img).unwrap();
+        assert_eq!(r.label_count, 1);
+
+        let mut out: Image<TinyLabel> = Image::zero(7, 2);
+        let n = connected_components_into::<TinyLabel, Connectivity4>(&img, &mut out).unwrap();
+        assert_eq!(n, 1);
+    }
+
+    #[test]
+    fn label_overflow_still_fires_on_merged_components_over_capacity() {
+        // Eight provisional labels merging down to four components, one
+        // more than TinyLabel can hold: still an overflow, reported with
+        // the label type's capacity.
+        let img = img_from_str(
+            r#"
+            #.#.#.#.#.#.#.#
+            ###.###.###.###
+        "#,
+        );
+        let r = connected_components::<Label32, Connectivity4>(&img).unwrap();
+        assert_eq!(r.label_count, 4);
+
+        let err = connected_components::<TinyLabel, Connectivity4>(&img).unwrap_err();
+        match err {
+            Error::LabelOverflow { label_capacity } => assert_eq!(label_capacity, 3),
+            other => panic!("expected LabelOverflow, got {:?}", other),
+        }
+    }
+
     // Step 9 \u2014 trait audit on Labeling ────────────────────────────────
 
     #[test]
@@ -820,7 +918,7 @@ mod tests {
     // Measurements entry-point tests ──────────────────────────────────
 
     #[test]
-    fn measurements_perimeter_of_square_is_exact() {
+    fn measurements_boundary_pixels_of_square_is_exact() {
         // Solid 5x5 square → boundary-pixel count = 4·5 − 4 = 16.
         let img = BinaryImage::fill(5, 5, true);
         let (lab, m) =
@@ -828,7 +926,7 @@ mod tests {
         assert_eq!(lab.label_count, 1);
         assert_eq!(m.len(), 1);
         assert_eq!(m[0].area, 25);
-        assert_eq!(m[0].perimeter, 16);
+        assert_eq!(m[0].boundary_pixels, 16);
         // Moments match the cheap path for the shared fields.
         assert_eq!(m[0].centroid(), crate::CoordinateF64::new(2.0, 2.0));
     }
@@ -842,9 +940,9 @@ mod tests {
             connected_components_with_measurements::<Label32, Connectivity4>(&img).unwrap();
         assert_eq!(m.len(), 1);
         assert_eq!(m[0].area, 1);
-        assert_eq!(m[0].perimeter, 1);
+        assert_eq!(m[0].boundary_pixels, 1);
         assert_eq!(m[0].eccentricity(), 0.0);
-        assert!(m[0].orientation().is_finite());
+        assert!(m[0].orientation().radians().is_finite());
         assert!(m[0].circularity().is_finite());
     }
 
@@ -877,10 +975,10 @@ mod tests {
     }
 
     #[test]
-    fn measurements_connectivity4_vs_8_perimeter() {
+    fn measurements_connectivity4_vs_8_boundary_pixels() {
         // Two pixels touching only diagonally. Under Connectivity4 they
-        // are two separate 1-pixel blobs (perimeter 1 each); under
-        // Connectivity8 they form one blob whose perimeter is the
+        // are two separate 1-pixel blobs (boundary count 1 each); under
+        // Connectivity8 they form one blob whose boundary count is the
         // 4-connected boundary count of the two-pixel set = 2 (each pixel
         // has a background 4-neighbour, so both are boundary pixels). The
         // boundary test stays 4-connected regardless of the labeling C.
@@ -897,7 +995,7 @@ mod tests {
         assert_eq!(m4.len(), 2);
         for m in &m4 {
             assert_eq!(m.area, 1);
-            assert_eq!(m.perimeter, 1);
+            assert_eq!(m.boundary_pixels, 1);
         }
 
         let (lab8, m8) =
@@ -905,16 +1003,16 @@ mod tests {
         assert_eq!(lab8.label_count, 1);
         assert_eq!(m8.len(), 1);
         assert_eq!(m8[0].area, 2);
-        assert_eq!(m8[0].perimeter, 2);
+        assert_eq!(m8[0].boundary_pixels, 2);
     }
 
     #[test]
-    fn measurements_roi_clips_perimeter() {
+    fn measurements_roi_clips_boundary_pixels() {
         // A solid 3-wide, full-height bar in a 5x5 image; the ROI is the
         // left 3x3 corner. Inside the ROI the visible blob is a 3x3 solid
         // square, but its right and bottom edges are cut by the view, so
         // those pixels still count as boundary (off-view neighbour). The
-        // clipped square measures area 9, perimeter 8 — as if it were a
+        // clipped square measures area 9, boundary count 8 — as if it were a
         // standalone 3x3 square — confirming the view-relative contract.
         let img = img_from_str(
             r#"
@@ -933,8 +1031,11 @@ mod tests {
         assert_eq!(lab.label_count, 1);
         assert_eq!(m[0].area, 9);
         // 3x3 block with all four view edges cutting it → every pixel is a
-        // boundary pixel except the centre → perimeter 8.
-        assert_eq!(m[0].perimeter, 8);
-        assert_eq!(m[0].bbox(), Rectangle::new(Coordinate::new(0, 0), Size::new(3, 3)));
+        // boundary pixel except the centre → boundary count 8.
+        assert_eq!(m[0].boundary_pixels, 8);
+        assert_eq!(
+            m[0].bbox(),
+            Rectangle::new(Coordinate::new(0, 0), Size::new(3, 3))
+        );
     }
 }

@@ -33,7 +33,7 @@ use std::mem::size_of;
 /// });
 ///
 /// // 4. Replace the processed plane
-/// let _old = planes.replace_plane(0, inverted_r);
+/// let _old = planes.replace_plane(0, inverted_r)?;
 ///
 /// // 5. Merge back to interleaved
 /// let result = planes.to_interleaved();
@@ -42,6 +42,7 @@ use std::mem::size_of;
 /// assert_eq!(result.pixel_at(0, 0).r, Saturating(255));
 /// assert_eq!(result.pixel_at(0, 0).g, original.pixel_at(0, 0).g);
 /// assert_eq!(result.pixel_at(0, 0).b, original.pixel_at(0, 0).b);
+/// # Ok::<(), fovea::Error>(())
 /// ```
 pub struct ImagePlanes<P: HomogeneousPixel> {
     size: Size,
@@ -141,9 +142,18 @@ impl<P: HomogeneousPixel> ImagePlanes<P> {
 
     /// Replaces the plane at `index` with `new_plane`, returning the old plane.
     ///
+    /// # Errors
+    ///
+    /// Returns [`Error::SizeMismatch`] if `new_plane.size() != self.size()` —
+    /// the incoming plane is image data that may originate anywhere, so a
+    /// wrong size is a data error, not a caller contract. (The same split
+    /// as `i32::from_str_radix`: the data half errors, the constant half
+    /// panics.)
+    ///
     /// # Panics
     ///
-    /// Panics if `index >= P::CHANNEL_COUNT` or if `new_plane.size() != self.size()`.
+    /// Panics if `index >= P::CHANNEL_COUNT` — an indexed access with a
+    /// locally obvious valid range, like `slice[i]`.
     ///
     /// # Example
     /// ```
@@ -151,29 +161,29 @@ impl<P: HomogeneousPixel> ImagePlanes<P> {
     /// # use fovea::pixel::Rgb8;
     /// let mut planes = ImagePlanes::<Rgb8>::zero(4, 4);
     /// let new_red = Image::fill(4, 4, std::num::Saturating(255u8));
-    /// let old_red = planes.replace_plane(0, new_red);
+    /// let old_red = planes.replace_plane(0, new_red)?;
     /// // old_red is the previous R plane (all zeros)
     /// // planes now has a saturated R channel
+    /// # Ok::<(), fovea::Error>(())
     /// ```
     pub fn replace_plane(
         &mut self,
         index: usize,
         new_plane: Image<P::Channel>,
-    ) -> Image<P::Channel> {
+    ) -> Result<Image<P::Channel>, Error> {
         assert!(
             index < P::CHANNEL_COUNT,
             "plane index {index} out of bounds for {} channels",
             P::CHANNEL_COUNT
         );
-        assert_eq!(
-            new_plane.size(),
-            self.size,
-            "new plane has size {:?}, expected {:?}",
-            new_plane.size(),
-            self.size
-        );
+        if new_plane.size() != self.size {
+            return Err(Error::SizeMismatch {
+                expected: self.size,
+                actual: new_plane.size(),
+            });
+        }
         let slot = &mut self.planes.as_mut()[index];
-        std::mem::replace(slot, new_plane)
+        Ok(std::mem::replace(slot, new_plane))
     }
 
     /// Constructs an `ImagePlanes` from an array of per-channel images.
@@ -1208,7 +1218,7 @@ mod tests {
     fn image_planes_replace_plane_returns_old() {
         let mut planes = ImagePlanes::<Rgb8>::fill(2, 2, Rgb8::new(10, 20, 30));
         let new_r = Image::fill(2, 2, Saturating(255u8));
-        let old_r = planes.replace_plane(0, new_r);
+        let old_r = planes.replace_plane(0, new_r).unwrap();
 
         // Old plane should have the original R value
         assert_eq!(old_r.pixel_at(0, 0), Saturating(10));
@@ -1224,11 +1234,17 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "new plane has size")]
-    fn image_planes_replace_plane_wrong_size_panics() {
+    fn image_planes_replace_plane_wrong_size_is_error() {
         let mut planes = ImagePlanes::<Rgb8>::zero(4, 4);
         let wrong_size = Image::fill(3, 3, Saturating(255u8));
-        planes.replace_plane(0, wrong_size);
+        let result = planes.replace_plane(0, wrong_size);
+        assert_eq!(
+            result.unwrap_err(),
+            Error::SizeMismatch {
+                expected: Size::new(4, 4),
+                actual: Size::new(3, 3),
+            }
+        );
     }
 
     #[test]
@@ -1236,14 +1252,14 @@ mod tests {
     fn image_planes_replace_plane_out_of_bounds_panics() {
         let mut planes = ImagePlanes::<Rgb8>::zero(2, 2);
         let new_plane = Image::fill(2, 2, Saturating(0u8));
-        planes.replace_plane(3, new_plane);
+        let _ = planes.replace_plane(3, new_plane);
     }
 
     #[test]
     fn image_planes_replace_plane_then_to_interleaved() {
         let mut planes = ImagePlanes::<Rgb8>::fill(2, 2, Rgb8::new(10, 20, 30));
         let new_r = Image::fill(2, 2, Saturating(100u8));
-        planes.replace_plane(0, new_r);
+        planes.replace_plane(0, new_r).unwrap();
 
         let image = planes.to_interleaved();
         assert_eq!(image.pixel_at(0, 0), Rgb8::new(100, 20, 30));
@@ -1341,7 +1357,7 @@ mod tests {
         });
 
         // 4. Replace the processed plane back
-        let _old_r = planes.replace_plane(0, inverted_r);
+        let _old_r = planes.replace_plane(0, inverted_r).unwrap();
 
         // 5. Merge back to interleaved
         let result = planes.to_interleaved();

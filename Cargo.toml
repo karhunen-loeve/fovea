@@ -29,7 +29,7 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
-fovea-derive = { version = "0.3.0", path = "../fovea-derive" }
+fovea-derive = { version = "0.4.0", path = "../fovea-derive" }
 
 [dev-dependencies]
 criterion = { version = "0.7.0", features = ["html_reports"] }
@@ -44,6 +44,14 @@ harness = false
 
 [[bench]]
 name = "geometry"
+harness = false
+
+[[bench]]
+name = "features"
+harness = false
+
+[[bench]]
+name = "demosaic"
 harness = false
 
 [[example]]

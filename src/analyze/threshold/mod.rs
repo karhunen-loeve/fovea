@@ -23,4 +23,4 @@ mod adaptive;
 mod hysteresis;
 
 pub use adaptive::{AdaptiveAccumulator, Bias, adaptive_threshold, adaptive_threshold_into};
-pub use hysteresis::{hysteresis_threshold, hysteresis_threshold_into};
+pub use hysteresis::{HysteresisThresholds, hysteresis_threshold, hysteresis_threshold_into};

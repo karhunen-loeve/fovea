@@ -22,18 +22,94 @@
 //! assert_eq!(result.width(), 8);
 //! assert_eq!(result.height(), 8);
 //! ```
+//!
+//! # Locating the match between pixels
+//!
+//! The score map is sampled on the pixel grid, so the best-scoring
+//! *position* is at best the nearest whole-pixel offset to where the
+//! template actually sits: a report accurate to plus or minus half a pixel,
+//! whatever the underlying alignment. Fitting a quadratic to the scores
+//! around the winner recovers the rest, via
+//! [`analyze::peak::interpolate_peak`](crate::analyze::peak::interpolate_peak).
+//!
+//! Which extremum to fit is a property of the method, and the method
+//! carries it as [`ScorePolarity::EXTREMUM`]: [`SAD`] and [`SSD`] are
+//! *minimized* at the best match, [`NCC`] is maximized, and asking the
+//! method (`SSD::EXTREMUM`) cannot disagree with the map it produced.
+//!
+//! ```
+//! use fovea::Coordinate;
+//! use fovea::analyze::peak::interpolate_peak;
+//! use fovea::image::{Image, ImageView};
+//! use fovea::pixel::MonoF32;
+//! use fovea::transform::{match_template, ScorePolarity, SSD};
+//!
+//! // A blob sitting half a pixel right of a pixel centre, and a template
+//! // of the same blob centred on one.
+//! let image: Image<MonoF32> = Image::generate(9, 9, |x, y| {
+//!     let (dx, dy) = (x as f64 - 4.5, y as f64 - 4.0);
+//!     MonoF32::new((-(dx * dx + dy * dy) / 4.5).exp() as f32)
+//! });
+//! let template: Image<MonoF32> = Image::generate(3, 3, |x, y| {
+//!     let (dx, dy) = (x as f64 - 1.0, y as f64 - 1.0);
+//!     MonoF32::new((-(dx * dx + dy * dy) / 4.5).exp() as f32)
+//! });
+//!
+//! let scores: Image<MonoF32> = match_template(&image, &template, SSD)?;
+//!
+//! // The lowest score. Offsets 3 and 4 tie, so no single pixel is right.
+//! let mut best = Coordinate::new(0, 0);
+//! for y in 0..scores.height() {
+//!     for x in 0..scores.width() {
+//!         if scores.pixel_at(x, y).value() < scores.pixel_at(best.x, best.y).value() {
+//!             best = Coordinate::new(x, y);
+//!         }
+//!     }
+//! }
+//!
+//! // SSD is minimized at the match, and its polarity says so.
+//! let at = interpolate_peak(&scores, best, SSD::EXTREMUM)
+//!     .expect("a smooth score valley has a vertex");
+//! assert!((at.x - 3.5).abs() < 1e-3, "{at:?}");
+//! assert!((at.y - 3.0).abs() < 1e-3, "{at:?}");
+//! # Ok::<(), fovea::Error>(())
+//! ```
 
 use core::marker::PhantomData;
 use std::ops::Sub as StdSub;
 
 use super::fold::{FoldItem, FoldOp, fold_neighborhood_into};
 use crate::border::Skip;
+use crate::common::Extremum;
 use crate::error::Error;
 use crate::image::sequential::Image;
 use crate::image::{ImageView, ImageViewMut, RasterImage, RasterImageMut};
 use crate::pixel::{HomogeneousPixel, LinearChannel, MonoF32, ZeroablePixel};
 
-// ─── MatchMethod trait ───────────────────────────────────────────────────────
+// ─── ScorePolarity and MatchMethod traits ────────────────────────────────────
+
+/// Where a match method's score map marks the best match: at its
+/// smallest value or its largest.
+///
+/// Every [`MatchMethod`] carries its polarity as `Self::EXTREMUM`, so a
+/// caller fitting the score surface with
+/// [`interpolate_peak`](crate::analyze::peak::interpolate_peak) asks the
+/// method instead of remembering the convention: `SSD::EXTREMUM` is
+/// [`Extremum::Minimum`], and passing it cannot disagree with the method
+/// that produced the scores.
+///
+/// # Why a supertrait rather than a const on `MatchMethod`
+///
+/// `MatchMethod` is parameterized over the three image types, and an
+/// associated const on a generic trait cannot be read without naming
+/// all of its parameters: `SSD::EXTREMUM` compiles only if the const
+/// lives on a non-generic trait. The polarity is a property of the
+/// scoring rule alone, so it gets the non-generic home.
+pub trait ScorePolarity {
+    /// The stationary point at which this method's score map marks the
+    /// best match.
+    const EXTREMUM: Extremum;
+}
 
 /// Strategy trait for template matching algorithms.
 ///
@@ -41,8 +117,10 @@ use crate::pixel::{HomogeneousPixel, LinearChannel, MonoF32, ZeroablePixel};
 /// patch and a template. The trait is parameterized over input, template,
 /// and output image types so that each strategy can express its own
 /// pixel-level constraints in its `impl` block — following the same
-/// pattern as [`ResizeMethod`](crate::transform::ResizeMethod).
-pub trait MatchMethod<I: ImageView, T: ImageView, O: ImageViewMut> {
+/// pattern as [`ResizeMethod`](crate::transform::ResizeMethod). The
+/// [`ScorePolarity`] supertrait makes every implementor state where its
+/// score map marks the best match.
+pub trait MatchMethod<I: ImageView, T: ImageView, O: ImageViewMut>: ScorePolarity {
     /// Compute the per-position similarity score map.
     ///
     /// # Errors
@@ -72,26 +150,25 @@ pub trait MatchMethod<I: ImageView, T: ImageView, O: ImageViewMut> {
 ///
 /// # Errors
 ///
-/// Returns [`Error::TemplateTooLarge`] if the template does not fit in
-/// `image` along either axis. Tier-2 (data-dependent) per
-/// `AGENTS.md`.
+/// - [`Error::EmptyTemplate`] if the template has zero width or height —
+///   a degenerate template (for example an empty user crop) is a property
+///   of the template data, not a locally decidable caller contract.
+/// - [`Error::TemplateTooLarge`] if the template does not fit in `image`
+///   along either axis.
 ///
-/// # Panics
-///
-/// Panics if the template has zero width or height (Tier-3 programmer
-/// bug).
+/// Both are Tier-2 (data-dependent) failures: the template is an image
+/// value that typically originates outside the caller's code.
 #[inline]
 pub(super) fn match_template_preflight<I, T>(image: &I, template: &T) -> Result<(), Error>
 where
     I: ImageView,
     T: ImageView,
 {
-    assert!(
-        template.width() > 0 && template.height() > 0,
-        "template must have non-zero dimensions, got {}x{}",
-        template.width(),
-        template.height()
-    );
+    if template.width() == 0 || template.height() == 0 {
+        return Err(Error::EmptyTemplate {
+            template_size: template.size(),
+        });
+    }
     if template.width() > image.width() || template.height() > image.height() {
         return Err(Error::TemplateTooLarge {
             image_size: image.size(),
@@ -109,15 +186,17 @@ where
 ///
 /// # Errors
 ///
-/// Returns [`Error::TemplateTooLarge`] if the template does not fit inside
-/// `image` (data-dependent failure — Tier 2).
+/// - [`Error::EmptyTemplate`] if the template has zero width or height.
+/// - [`Error::TemplateTooLarge`] if the template does not fit inside
+///   `image`.
+///
+/// Both are data-dependent failures (Tier 2): the template is an image
+/// value, typically from a crop or a file.
 ///
 /// # Panics
 ///
 /// Panics if `output` dimensions do not match the expected score map size
-/// (programmer precondition — Tier 3).
-///
-/// Panics if the template has zero width or height (Tier 3).
+/// (programmer precondition — Tier 3: the caller allocated the buffer).
 pub fn match_template_into<I, T, O, M>(
     image: &I,
     template: &T,
@@ -130,18 +209,7 @@ where
     O: ImageViewMut,
     M: MatchMethod<I, T, O>,
 {
-    assert!(
-        template.width() > 0 && template.height() > 0,
-        "template must have non-zero dimensions, got {}x{}",
-        template.width(),
-        template.height()
-    );
-    if template.width() > image.width() || template.height() > image.height() {
-        return Err(Error::TemplateTooLarge {
-            image_size: image.size(),
-            template_size: template.size(),
-        });
-    }
+    match_template_preflight(image, template)?;
     method.match_into(image, template, output)
 }
 
@@ -150,12 +218,14 @@ where
 /// The returned image has dimensions
 /// `(image_w - template_w + 1, image_h - template_h + 1)`.
 ///
-/// Returns `Err` if the template is larger than the image in either
-/// dimension (Tier 2 — data-dependent failure).
+/// # Errors
 ///
-/// # Panics
+/// - [`Error::EmptyTemplate`] if the template has zero width or height.
+/// - [`Error::TemplateTooLarge`] if the template is larger than the image
+///   in either dimension.
 ///
-/// Panics if the template has zero width or height (Tier 3 — programmer bug).
+/// Both are data-dependent failures (Tier 2): the template is an image
+/// value, typically from a crop or a file.
 ///
 /// # Examples
 ///
@@ -176,19 +246,7 @@ where
     S: ZeroablePixel,
     M: MatchMethod<I, T, Image<S>>,
 {
-    assert!(
-        template.width() > 0 && template.height() > 0,
-        "template must have non-zero dimensions, got {}x{}",
-        template.width(),
-        template.height()
-    );
-
-    if template.width() > image.width() || template.height() > image.height() {
-        return Err(Error::TemplateTooLarge {
-            image_size: image.size(),
-            template_size: template.size(),
-        });
-    }
+    match_template_preflight(image, template)?;
 
     let out_w = image.width() - template.width() + 1;
     let out_h = image.height() - template.height() + 1;
@@ -345,6 +403,11 @@ where
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct SAD;
 
+impl ScorePolarity for SAD {
+    /// A sum of absolute differences is zero at a perfect match.
+    const EXTREMUM: Extremum = Extremum::Minimum;
+}
+
 impl<I, T, O> MatchMethod<I, T, O> for SAD
 where
     I: RasterImage,
@@ -413,6 +476,11 @@ where
 /// ```
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct SSD;
+
+impl ScorePolarity for SSD {
+    /// A sum of squared differences is zero at a perfect match.
+    const EXTREMUM: Extremum = Extremum::Minimum;
+}
 
 impl<I, T, O> MatchMethod<I, T, O> for SSD
 where
@@ -562,6 +630,12 @@ where
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct NCC;
 
+impl ScorePolarity for NCC {
+    /// A normalized cross-correlation is largest (up to `1.0`) at a
+    /// perfect match.
+    const EXTREMUM: Extremum = Extremum::Maximum;
+}
+
 impl<I, T, O> MatchMethod<I, T, O> for NCC
 where
     I: RasterImage,
@@ -625,6 +699,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Size;
     use crate::image::{Image, ImageView};
     use crate::pixel::{Mono8, Rgb8};
     use std::num::Saturating;
@@ -633,6 +708,19 @@ mod tests {
 
     fn make_5x5_u8() -> Image<Mono8> {
         Image::generate(5, 5, |x, y| Mono8::new((x + y * 5) as u8))
+    }
+
+    // ── ScorePolarity ────────────────────────────────────────────────
+
+    #[test]
+    fn each_method_states_where_its_best_match_sits() {
+        // Difference sums are zero at a perfect match; a correlation is
+        // largest there. A wrong polarity here would send every
+        // `interpolate_peak(_, _, M::EXTREMUM)` caller to the wrong
+        // stationary point.
+        assert_eq!(SAD::EXTREMUM, Extremum::Minimum);
+        assert_eq!(SSD::EXTREMUM, Extremum::Minimum);
+        assert_eq!(NCC::EXTREMUM, Extremum::Maximum);
     }
 
     // ── SAD tests ───────────────────────────────────────────────────
@@ -963,11 +1051,18 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
-    fn zero_size_template_panics() {
+    fn zero_size_template_is_error() {
+        // A degenerate template (e.g. an empty user crop) is data, not a
+        // caller contract: reported as a value, not a crash.
         let image = Image::fill(5, 5, Mono8::new(0));
         let template = Image::<Mono8>::zero(0, 3);
-        let _ = match_template(&image, &template, SAD);
+        let result = match_template(&image, &template, SAD);
+        assert_eq!(
+            result.unwrap_err(),
+            Error::EmptyTemplate {
+                template_size: Size::new(0, 3),
+            }
+        );
     }
 
     // ── NCC tests ───────────────────────────────────────────────────

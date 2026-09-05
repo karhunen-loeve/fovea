@@ -62,7 +62,7 @@ use crate::pixel::{LabelPixel, impl_origin_invariant_pixel, impl_single_channel}
 /// // Background and capacity.
 /// assert_eq!(Label32::BACKGROUND.value(), 0);
 /// assert_eq!(<Label32 as ZeroablePixel>::zero(), Label32::BACKGROUND);
-/// assert_eq!(<Label32 as LabelPixel>::MAX_LABEL, u32::MAX as u64);
+/// assert_eq!(<Label32 as LabelPixel>::MAX_LABEL, u32::MAX);
 /// ```
 #[repr(transparent)]
 #[derive(
@@ -101,21 +101,22 @@ impl Label32 {
 }
 
 impl LabelPixel for Label32 {
-    const MAX_LABEL: u64 = u32::MAX as u64;
+    const MAX_LABEL: u32 = u32::MAX;
 
     #[inline]
-    fn from_label_index(index: u64) -> Option<Self> {
-        if index == 0 || index > Self::MAX_LABEL {
+    fn from_label_index(index: u32) -> Option<Self> {
+        // `MAX_LABEL == u32::MAX`, so every non-zero index is in range;
+        // only the background index is rejected.
+        if index == 0 {
             None
         } else {
-            // Cast is exact: `0 < index <= u32::MAX`.
-            Some(Label32::new(index as u32))
+            Some(Label32::new(index))
         }
     }
 
     #[inline]
-    fn to_label_index(self) -> u64 {
-        self.value() as u64
+    fn to_label_index(self) -> u32 {
+        self.value()
     }
 }
 
@@ -159,23 +160,23 @@ mod tests {
 
     #[test]
     fn label_pixel_round_trip() {
-        for &i in &[1u64, 2, 42, 1_000_000, u32::MAX as u64] {
+        for &i in &[1u32, 2, 42, 1_000_000, u32::MAX] {
             let l = Label32::from_label_index(i).expect("in range");
             assert_eq!(l.to_label_index(), i);
         }
     }
 
     #[test]
-    fn from_label_index_rejects_zero_and_overflow() {
+    fn from_label_index_rejects_zero() {
+        // Zero is the only rejectable index: an over-`MAX_LABEL` index is
+        // not representable as a `u32` argument in the first place.
         assert_eq!(Label32::from_label_index(0), None);
-        assert_eq!(Label32::from_label_index((u32::MAX as u64) + 1), None);
-        assert_eq!(Label32::from_label_index(u64::MAX), None);
     }
 
     #[test]
     fn from_label_index_accepts_boundary() {
         assert!(Label32::from_label_index(1).is_some());
-        assert!(Label32::from_label_index(u32::MAX as u64).is_some());
+        assert!(Label32::from_label_index(u32::MAX).is_some());
     }
 
     #[test]
@@ -208,7 +209,7 @@ mod tests {
 
     #[test]
     fn max_label_is_u32_max() {
-        assert_eq!(<Label32 as LabelPixel>::MAX_LABEL, u32::MAX as u64);
+        assert_eq!(<Label32 as LabelPixel>::MAX_LABEL, u32::MAX);
     }
 
     #[test]

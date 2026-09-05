@@ -224,7 +224,7 @@ fn bench_convolve_separable(c: &mut Criterion) {
             &(&img, &sep_gauss3),
             |b, &(img, kernel)| {
                 b.iter(|| {
-                    black_box(convolve_separable::<_, _, _, MonoF32, MonoF32, 3, 3>(
+                    black_box(convolve_separable::<_, _, _, _, MonoF32, MonoF32>(
                         img, kernel, &Clamp,
                     ))
                 });
@@ -236,7 +236,7 @@ fn bench_convolve_separable(c: &mut Criterion) {
             &(&img, &sep_gauss5),
             |b, &(img, kernel)| {
                 b.iter(|| {
-                    black_box(convolve_separable::<_, _, _, MonoF32, MonoF32, 5, 5>(
+                    black_box(convolve_separable::<_, _, _, _, MonoF32, MonoF32>(
                         img, kernel, &Clamp,
                     ))
                 });

@@ -15,6 +15,9 @@
 //!
 //! - [`convolve_separable`] — allocates the output
 //! - [`convolve_separable_into`] — writes into an existing output
+//! - [`SeparableScratch::convolve_separable_into`] — writes into an existing
+//!   output *and* reuses a caller-owned working set, so a convolution in a
+//!   hot loop allocates nothing after warm-up
 //!
 //! These perform true **convolution**: the kernel is flipped via
 //! [`SeparableKernel::flipped`], which is entirely stack-based, and the
@@ -30,12 +33,19 @@
 //! blur filters delegate to; callers that need true convolution flip first.
 //!
 //! The intermediate image between the two passes uses the pixel's
-//! [`LinearPixel::Accumulator`] type, avoiding premature quantisation.
+//! [`LinearPixel::Accumulator`] type, avoiding premature quantisation. It is
+//! the largest per-call allocation on this path, which is what
+//! [`SeparableScratch`] exists to reuse.
 
 use crate::border::BorderPolicy;
-use crate::image::{Image, ImageRef, ImageView, RasterImage, RasterImageMut, SeparableKernel};
+use crate::image::{
+    Image, ImageRef, ImageRefMut, ImageView, RasterImage, RasterImageMut, SeparableWeights,
+};
 use crate::pixel::{FromLinear, LinearPixel, ZeroablePixel};
-use crate::transform::fold::{FoldItem, FoldOp, fold_neighborhood, fold_neighborhood_into};
+use crate::transform::fold::{
+    FoldItem, FoldOp, FoldScratch, fold_neighborhood, fold_neighborhood_into,
+    fold_neighborhood_into_with_scratch,
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // FoldOp implementations for separable passes
@@ -122,7 +132,7 @@ where
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// Ergonomic API: SeparableKernel
+// Ergonomic API: any SeparableWeights value
 // ═════════════════════════════════════════════════════════════════════════════
 
 /// Write the result of a separable convolution into `output`.
@@ -136,9 +146,16 @@ where
 ///    image with the kernel's vertical weights, converting back to the
 ///    output pixel type via [`FromLinear`].
 ///
-/// Both passes flip the kernel (true convolution). For symmetric kernels
-/// the flip is a no-op. Flipping uses [`SeparableKernel::flipped`],
-/// which is entirely stack-based — zero heap allocation.
+/// `kernel` is any [`SeparableWeights`] value — a
+/// [`SeparableKernel`](crate::image::SeparableKernel) with compile-time tap
+/// counts, or a σ-derived
+/// [`GaussianKernel1D`](crate::image::GaussianKernel1D) from
+/// [`gaussian_kernel_1d`](crate::image::gaussian_kernel_1d). The kernel *is*
+/// the variant: there is no differently-named function per kernel flavour.
+///
+/// Both passes flip the kernel (true convolution) via
+/// [`SeparableWeights::flipped`], which is entirely stack-based — zero heap
+/// allocation. For symmetric kernels the flip is a no-op.
 ///
 /// # Panics
 ///
@@ -166,13 +183,33 @@ where
 ///     }
 /// }
 /// ```
-pub fn convolve_separable_into<I, B, O, P, Acc, Out, const HK: usize, const VK: usize>(
+///
+/// A σ-derived kernel goes through the same call — this is what the removed
+/// `gaussian_blur_with_into` used to spell:
+///
+/// ```
+/// use fovea::border::Clamp;
+/// use fovea::image::{Image, ImageView, gaussian_kernel_1d};
+/// use fovea::pixel::MonoF32;
+/// use fovea::sigma;
+/// use fovea::transform::convolve_separable_into;
+///
+/// let src = Image::fill(16, 16, MonoF32(0.5));
+/// let kernel = gaussian_kernel_1d(sigma!(1.5), 3.0); // explicit truncate
+/// let mut out = Image::<MonoF32>::zero(16, 16);
+///
+/// convolve_separable_into(&src, &kernel, &Clamp, &mut out);
+///
+/// assert!((out.pixel_at(8, 8).0 - 0.5).abs() < 1e-4);
+/// ```
+pub fn convolve_separable_into<I, B, K, O, P, Acc, Out>(
     image: &I,
-    kernel: &SeparableKernel<HK, VK>,
+    kernel: &K,
     border: &B,
     output: &mut O,
 ) where
     I: RasterImage<Pixel = P>,
+    K: SeparableWeights,
     P: Copy + LinearPixel<f32, Accumulator = Acc>,
     Acc: Copy
         + Default
@@ -184,12 +221,11 @@ pub fn convolve_separable_into<I, B, O, P, Acc, Out, const HK: usize, const VK: 
     Out: FromLinear<Acc>,
 {
     // True convolution = correlation with the 180°-flipped kernel.
-    // `SeparableKernel::flipped()` is allocation-free (stack arrays), and the
+    // `SeparableWeights::flipped()` is allocation-free (stack values), and the
     // flipped weights are fed to the correlation core through borrowed
     // `ImageRef` views — so the kernel never touches the heap.
     let flipped = kernel.flipped();
-    let h = ImageRef::new(HK, 1, flipped.h_weights()).expect("h kernel view: len == HK");
-    let v = ImageRef::new(1, VK, flipped.v_weights()).expect("v kernel view: len == VK");
+    let (h, v) = weight_views(&flipped);
     correlate_separable_raw_into(
         image,
         &h,
@@ -199,6 +235,39 @@ pub fn convolve_separable_into<I, B, O, P, Acc, Out, const HK: usize, const VK: 
         border,
         output,
     );
+}
+
+/// Borrow a [`SeparableWeights`] value's two axes as `ImageRef` views — the
+/// shape the correlation core consumes. Zero-copy: the views point into the
+/// kernel's own storage.
+///
+/// This is also the boundary where the trait's prose contract is checked,
+/// once per call rather than per pixel: a downstream implementor returning
+/// an empty axis or an out-of-bounds anchor is reported here by trait and
+/// method name, instead of underflowing the interior-region arithmetic
+/// several frames deeper in a panic that names neither.
+fn weight_views<K: SeparableWeights>(kernel: &K) -> (ImageRef<'_, f32>, ImageRef<'_, f32>) {
+    let h_weights = kernel.h_weights();
+    let v_weights = kernel.v_weights();
+    assert!(
+        !h_weights.is_empty() && !v_weights.is_empty(),
+        "SeparableWeights contract violated: h_weights() and v_weights() must be non-empty \
+         (h has {} taps, v has {})",
+        h_weights.len(),
+        v_weights.len(),
+    );
+    assert!(
+        kernel.h_anchor() < h_weights.len() && kernel.v_anchor() < v_weights.len(),
+        "SeparableWeights contract violated: anchors must index their own axis \
+         (h_anchor() {} of {} taps, v_anchor() {} of {})",
+        kernel.h_anchor(),
+        h_weights.len(),
+        kernel.v_anchor(),
+        v_weights.len(),
+    );
+    let h = ImageRef::new(h_weights.len(), 1, h_weights).expect("h kernel view: 1 row");
+    let v = ImageRef::new(1, v_weights.len(), v_weights).expect("v kernel view: 1 column");
+    (h, v)
 }
 
 /// Perform a separable convolution and return a newly allocated output
@@ -228,13 +297,10 @@ pub fn convolve_separable_into<I, B, O, P, Acc, Out, const HK: usize, const VK: 
 /// }
 /// ```
 #[must_use]
-pub fn convolve_separable<I, B, P, Acc, Out, const HK: usize, const VK: usize>(
-    image: &I,
-    kernel: &SeparableKernel<HK, VK>,
-    border: &B,
-) -> Image<Out>
+pub fn convolve_separable<I, B, K, P, Acc, Out>(image: &I, kernel: &K, border: &B) -> Image<Out>
 where
     I: RasterImage<Pixel = P>,
+    K: SeparableWeights,
     P: Copy + LinearPixel<f32, Accumulator = Acc>,
     Acc: Copy
         + Default
@@ -247,8 +313,7 @@ where
     // Flip on the stack, borrow the weights as `ImageRef` views, correlate.
     // No heap allocation for the kernel.
     let flipped = kernel.flipped();
-    let h = ImageRef::new(HK, 1, flipped.h_weights()).expect("h kernel view: len == HK");
-    let v = ImageRef::new(1, VK, flipped.v_weights()).expect("v kernel view: len == VK");
+    let (h, v) = weight_views(&flipped);
     correlate_separable_raw(
         image,
         &h,
@@ -257,6 +322,162 @@ where
         flipped.v_anchor(),
         border,
     )
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Reusable working set
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// Reusable working memory for separable convolution.
+///
+/// A two-pass separable convolution needs three image- or kernel-shaped
+/// working buffers: the inter-pass intermediate (in accumulator
+/// precision), a per-row accumulator, and the kernel-position list. The
+/// one-shot entry points ([`convolve_separable_into`],
+/// [`gaussian_blur_into`](crate::transform::gaussian_blur_into)) allocate
+/// them per call. A `SeparableScratch` owns them instead, so a blur in a
+/// hot loop — video frames, pyramid levels, scale-space octaves —
+/// allocates **nothing after warm-up**.
+///
+/// Reuse is explicit: the scratch is a value you construct and pass in.
+/// There is no hidden pool.
+///
+/// # Growth
+///
+/// Buffers grow to fit and are **never shrunk** (high-water mark). A
+/// larger frame grows them; a smaller frame afterwards reuses the larger
+/// buffers as-is. Only their capacity survives between calls — contents
+/// are always overwritten, so the same scratch can be shared across
+/// different images, kernels, sigmas and border policies without
+/// affecting results.
+///
+/// `Acc` is the accumulator pixel type of the convolution — the input
+/// pixel's [`LinearPixel::Accumulator`] (`MonoF32` for `Mono8`,
+/// `RgbF32` for `Rgb8`). One scratch serves one accumulator type.
+///
+/// # Example
+///
+/// ```
+/// use fovea::border::Clamp;
+/// use fovea::image::{Image, ImageView, SeparableKernel};
+/// use fovea::pixel::{Mono8, MonoF32};
+/// use fovea::transform::SeparableScratch;
+///
+/// let kernel = SeparableKernel::gaussian_5();
+/// let mut scratch = SeparableScratch::<MonoF32>::new();
+/// let mut out = Image::<Mono8>::zero(64, 64);
+///
+/// // Steady state: the second and later frames allocate nothing.
+/// for level in 0..4 {
+///     let frame = Image::fill(64, 64, Mono8::new(10 * level + 5));
+///     scratch.convolve_separable_into(&frame, &kernel, &Clamp, &mut out);
+///     assert_eq!(out.pixel_at(32, 32), Mono8::new(10 * level + 5));
+/// }
+/// ```
+#[derive(Debug, Clone)]
+pub struct SeparableScratch<Acc> {
+    /// Inter-pass intermediate storage; `len` is the high-water pixel
+    /// count, and each call views the leading `region.area()` elements as
+    /// a contiguous image.
+    intermediate: Vec<Acc>,
+    /// The fold engine's accumulator row and kernel-position list, borrowed
+    /// by both passes. Separable weights are always `f32`, so one buffer
+    /// serves every kernel.
+    fold: FoldScratch<Acc, f32>,
+}
+
+impl<Acc> SeparableScratch<Acc> {
+    /// An empty scratch. The buffers are allocated on first use and sized
+    /// to whatever the first call needs.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            intermediate: Vec::new(),
+            fold: FoldScratch::new(),
+        }
+    }
+}
+
+impl<Acc> Default for SeparableScratch<Acc> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<Acc> SeparableScratch<Acc>
+where
+    Acc: Copy
+        + Default
+        + ZeroablePixel
+        + LinearPixel<f32, Accumulator = Acc>
+        + std::ops::Add<Output = Acc>,
+{
+    /// Separable convolution into a caller-owned output, reusing this
+    /// scratch.
+    ///
+    /// Identical in result to the free
+    /// [`convolve_separable_into`] — same two passes, same stack-based
+    /// kernel flip, same border handling — but the inter-pass intermediate
+    /// and the engine's working buffers come from `self` instead of the
+    /// heap. The first call sizes them; every later call that needs no more
+    /// room than the largest so far allocates nothing.
+    ///
+    /// The border policy must also apply to the borrowed intermediate,
+    /// which is why its bound is stated over [`ImageRef`]; every built-in
+    /// policy ([`Clamp`](crate::border::Clamp),
+    /// [`Mirror`](crate::border::Mirror), [`Wrap`](crate::border::Wrap),
+    /// [`Skip`](crate::border::Skip),
+    /// [`Constant`](crate::border::Constant)) is implemented for every
+    /// image view and satisfies it.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `output` is too small for the region produced by the
+    /// border policy after both passes.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use fovea::border::Clamp;
+    /// use fovea::image::{Image, ImageView, SeparableKernel};
+    /// use fovea::pixel::MonoF32;
+    /// use fovea::transform::SeparableScratch;
+    ///
+    /// let src = Image::fill(8, 8, MonoF32(1.0));
+    /// let kernel = SeparableKernel::box_blur_3();
+    /// let mut scratch = SeparableScratch::new();
+    /// let mut out = Image::<MonoF32>::zero(8, 8);
+    ///
+    /// scratch.convolve_separable_into(&src, &kernel, &Clamp, &mut out);
+    ///
+    /// assert!((out.pixel_at(4, 4).0 - 1.0).abs() < 1e-5);
+    /// ```
+    pub fn convolve_separable_into<I, B, K, O, P, Out>(
+        &mut self,
+        image: &I,
+        kernel: &K,
+        border: &B,
+        output: &mut O,
+    ) where
+        I: RasterImage<Pixel = P>,
+        K: SeparableWeights,
+        P: Copy + LinearPixel<f32, Accumulator = Acc>,
+        B: BorderPolicy<I> + for<'r> BorderPolicy<ImageRef<'r, Acc>>,
+        O: RasterImageMut<Pixel = Out>,
+        Out: FromLinear<Acc>,
+    {
+        // True convolution = correlation with the 180°-flipped kernel; the
+        // flip is stack-based, exactly as in `convolve_separable_into`.
+        let flipped = kernel.flipped();
+        let (h, v) = weight_views(&flipped);
+        self.correlate_separable_raw_into(
+            image,
+            (&h, flipped.h_anchor()),
+            (&v, flipped.v_anchor()),
+            border,
+            output,
+        );
+    }
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -269,12 +490,16 @@ where
 /// so this is correlation, not convolution. It performs **no kernel-shaped
 /// heap allocation**: both passes consume the `ImageView` weights as-is. The
 /// flipping `convolve_separable_*` functions are thin wrappers that arrange
-/// the flip — on the stack for [`SeparableKernel`], via [`flip_1d`] for raw
-/// borrowed weights — and delegate here.
+/// the flip on the stack through [`SeparableWeights::flipped`] and delegate
+/// here.
 ///
 /// (The inter-pass intermediate image and the per-row accumulator inside
-/// [`fold_neighborhood`] are still allocated; eliminating *those* is a
-/// separate, deferred concern — see the allocation-free separable blur plan.)
+/// [`fold_neighborhood`] are allocated per call *here*;
+/// [`SeparableScratch::correlate_separable_raw_into`] is the variant that
+/// reuses both across calls.)
+///
+/// [`SeparableWeights::flipped`]: crate::image::SeparableWeights::flipped
+/// [`SeparableScratch::correlate_separable_raw_into`]: crate::transform::SeparableScratch::correlate_separable_raw_into
 pub(crate) fn correlate_separable_raw_into<I, HW, VW, B, O, P, Acc, Out>(
     image: &I,
     h_weights: &HW,
@@ -315,6 +540,101 @@ pub(crate) fn correlate_separable_raw_into<I, HW, VW, B, O, P, Acc, Out>(
         output,
         VFold::<Acc, Out>::new(),
     );
+}
+
+impl<Acc> SeparableScratch<Acc>
+where
+    Acc: Copy
+        + Default
+        + ZeroablePixel
+        + LinearPixel<f32, Accumulator = Acc>
+        + std::ops::Add<Output = Acc>,
+{
+    /// Separable **correlation** into a caller-owned output, reusing this
+    /// scratch — the no-flip core behind
+    /// [`convolve_separable_into`](Self::convolve_separable_into) and the
+    /// scratch-aware blurs.
+    ///
+    /// Same result as the free [`correlate_separable_raw_into`], but the
+    /// inter-pass intermediate is a view over `self.intermediate` (grown to
+    /// fit, never shrunk) rather than a fresh `Image<Acc>`, and both passes
+    /// borrow the engine's accumulator row and kernel-position list from
+    /// `self.fold`. After warm-up on a given shape, this path performs **no
+    /// heap allocation at all**.
+    ///
+    /// Each pass is given as a `(weights, anchor)` pair: `h` is the row of
+    /// weights with its x-anchor, `v` the column with its y-anchor.
+    pub(crate) fn correlate_separable_raw_into<I, HW, VW, B, O, P, Out>(
+        &mut self,
+        image: &I,
+        h: (&HW, usize),
+        v: (&VW, usize),
+        border: &B,
+        output: &mut O,
+    ) where
+        I: RasterImage<Pixel = P>,
+        P: Copy + LinearPixel<f32, Accumulator = Acc>,
+        HW: ImageView<Pixel = f32>,
+        VW: ImageView<Pixel = f32>,
+        B: BorderPolicy<I> + for<'r> BorderPolicy<ImageRef<'r, Acc>>,
+        O: RasterImageMut<Pixel = Out>,
+        Out: FromLinear<Acc>,
+    {
+        let (h_weights, h_anchor) = h;
+        let (v_weights, v_anchor) = v;
+
+        // The intermediate is exactly the pass-1 output region: pass 1
+        // writes every pixel of it, so no stale content from an earlier call
+        // survives.
+        let mid = <B as BorderPolicy<I>>::output_region(
+            border,
+            image.size(),
+            h_weights.size(),
+            (h_anchor, 0),
+        )
+        .size;
+        let area = mid
+            .checked_area()
+            .expect("intermediate area overflows usize");
+
+        // Destructured so the intermediate and the engine's buffers can be
+        // borrowed independently.
+        let Self { intermediate, fold } = self;
+
+        // Grow to the high-water mark; `Vec::resize` upwards keeps the
+        // existing elements and never shrinks capacity.
+        if intermediate.len() < area {
+            intermediate.resize(area, Acc::default());
+        }
+
+        // ── Pass 1: horizontal correlation into the borrowed intermediate ─
+        {
+            let mut mid_view = ImageRefMut::new(mid.width, mid.height, &mut intermediate[..area])
+                .expect("intermediate view: len == area");
+            fold_neighborhood_into_with_scratch(
+                image,
+                h_weights,
+                (h_anchor, 0),
+                border,
+                &mut mid_view,
+                HFold::<P, Acc>::new(),
+                fold,
+            );
+        }
+
+        // ── Pass 2: vertical correlation ──────────────────────────────────
+        let mid_view = ImageRef::new(mid.width, mid.height, &intermediate[..area])
+            .expect("intermediate view: len == area");
+        fold_neighborhood_into_with_scratch(
+            &mid_view,
+            v_weights,
+            (0, v_anchor),
+            border,
+            output,
+            VFold::<Acc, Out>::new(),
+            fold,
+        );
+    }
 }
 
 /// Separable correlation returning a newly allocated output (no-flip core).
@@ -370,7 +690,7 @@ where
 mod tests {
     use super::*;
     use crate::border::{Clamp, Constant, Skip};
-    use crate::image::{ImageView, Neighborhood};
+    use crate::image::{ImageView, Neighborhood, SeparableKernel};
     use crate::pixel::{Mono8, MonoF32};
     use crate::transform::convolve;
 
@@ -670,6 +990,159 @@ mod tests {
                     (result.pixel_at(x, y).0 - raw.pixel_at(x, y).0).abs() < 1e-4,
                     "mismatch at ({x}, {y})",
                 );
+            }
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════════════════
+    // Tests for the reusable working set
+    // ═════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn scratch_reuse_matches_owned() {
+        let src = make_6x6_monof32();
+        let sep = SeparableKernel::gaussian_5();
+
+        let expected: Image<MonoF32> = convolve_separable(&src, &sep, &Clamp);
+
+        // Two successive calls on one scratch: the first sizes the buffers,
+        // the second reuses them. Both must equal the allocating path.
+        let mut scratch = SeparableScratch::new();
+        for round in 0..2 {
+            let mut actual = Image::<MonoF32>::zero(expected.width(), expected.height());
+            scratch.convolve_separable_into(&src, &sep, &Clamp, &mut actual);
+
+            for y in 0..expected.height() {
+                for x in 0..expected.width() {
+                    assert!(
+                        (expected.pixel_at(x, y).0 - actual.pixel_at(x, y).0).abs() < 1e-6,
+                        "round {round}: mismatch at ({x}, {y}): owned={}, scratch={}",
+                        expected.pixel_at(x, y).0,
+                        actual.pixel_at(x, y).0,
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn scratch_handles_size_change() {
+        // Grow, then shrink: the buffers are never shrunk, so the third
+        // call runs on over-sized storage and must still be correct — the
+        // intermediate view is sized to the pass-1 region, not the buffer.
+        let sizes = [(6usize, 6usize), (13, 11), (4, 5)];
+        let sep = SeparableKernel::gaussian_3();
+        let mut scratch = SeparableScratch::new();
+
+        for (w, h) in sizes {
+            let src = Image::generate(w, h, |x, y| MonoF32((x * 3 + y * 7) as f32));
+            let expected: Image<MonoF32> = convolve_separable(&src, &sep, &Clamp);
+
+            let mut actual = Image::<MonoF32>::zero(expected.width(), expected.height());
+            scratch.convolve_separable_into(&src, &sep, &Clamp, &mut actual);
+
+            for y in 0..expected.height() {
+                for x in 0..expected.width() {
+                    assert!(
+                        (expected.pixel_at(x, y).0 - actual.pixel_at(x, y).0).abs() < 1e-4,
+                        "{w}×{h}: mismatch at ({x}, {y}): owned={}, scratch={}",
+                        expected.pixel_at(x, y).0,
+                        actual.pixel_at(x, y).0,
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn scratch_matches_owned_for_shrinking_border() {
+        // `Skip` gives the intermediate an offset origin and a smaller
+        // region than the image — the case where a mis-sized intermediate
+        // view would silently read the wrong rows.
+        let src = Image::generate(9, 7, |x, y| MonoF32((x + y * 9) as f32));
+        let sep = SeparableKernel::box_blur_5();
+
+        let expected: Image<MonoF32> = convolve_separable(&src, &sep, &Skip);
+
+        let mut scratch = SeparableScratch::new();
+        let mut actual = Image::<MonoF32>::zero(expected.width(), expected.height());
+        scratch.convolve_separable_into(&src, &sep, &Skip, &mut actual);
+
+        assert!(expected.width() < src.width() && expected.height() < src.height());
+        for y in 0..expected.height() {
+            for x in 0..expected.width() {
+                assert!(
+                    (expected.pixel_at(x, y).0 - actual.pixel_at(x, y).0).abs() < 1e-4,
+                    "mismatch at ({x}, {y})",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn scratch_shared_across_kernels_and_pixel_types() {
+        // One scratch, one accumulator type, different kernels and
+        // different input/output pixel types.
+        let mut scratch = SeparableScratch::<MonoF32>::new();
+
+        let f32_src = make_6x6_monof32();
+        let sep3 = SeparableKernel::gaussian_3();
+        let f32_expected: Image<MonoF32> = convolve_separable(&f32_src, &sep3, &Clamp);
+        let mut f32_out = Image::<MonoF32>::zero(6, 6);
+        scratch.convolve_separable_into(&f32_src, &sep3, &Clamp, &mut f32_out);
+
+        let u8_src = Image::fill(8, 8, Mono8::new(100));
+        let sep5 = SeparableKernel::box_blur_5();
+        let mut u8_out = Image::<Mono8>::zero(8, 8);
+        scratch.convolve_separable_into(&u8_src, &sep5, &Clamp, &mut u8_out);
+
+        for y in 0..6 {
+            for x in 0..6 {
+                assert!((f32_expected.pixel_at(x, y).0 - f32_out.pixel_at(x, y).0).abs() < 1e-6);
+            }
+        }
+        for y in 0..8 {
+            for x in 0..8 {
+                assert_eq!(u8_out.pixel_at(x, y), Mono8::new(100));
+            }
+        }
+    }
+
+    #[test]
+    fn scratch_handles_empty_region() {
+        // `Skip` with a kernel wider than the image leaves no valid
+        // position at all: the intermediate is zero-area, so the views over
+        // the scratch must be constructible from an empty slice.
+        let src = Image::generate(3, 3, |x, y| MonoF32((x + y) as f32));
+        let sep = SeparableKernel::box_blur_5();
+
+        let expected: Image<MonoF32> = convolve_separable(&src, &sep, &Skip);
+        assert_eq!(expected.width(), 0);
+
+        let mut scratch = SeparableScratch::new();
+        let mut actual = Image::<MonoF32>::zero(expected.width(), expected.height());
+        scratch.convolve_separable_into(&src, &sep, &Skip, &mut actual);
+
+        assert_eq!(actual.width(), expected.width());
+        assert_eq!(actual.height(), expected.height());
+    }
+
+    #[test]
+    fn scratch_default_matches_new() {
+        let src = make_4x4_monof32();
+        let sep = SeparableKernel::box_blur_3();
+
+        let mut from_new = SeparableScratch::new();
+        let mut out_new = Image::<MonoF32>::zero(4, 4);
+        from_new.convolve_separable_into(&src, &sep, &Clamp, &mut out_new);
+
+        let mut from_default = SeparableScratch::default();
+        let mut out_default = Image::<MonoF32>::zero(4, 4);
+        from_default.convolve_separable_into(&src, &sep, &Clamp, &mut out_default);
+
+        for y in 0..4 {
+            for x in 0..4 {
+                assert_eq!(out_new.pixel_at(x, y).0, out_default.pixel_at(x, y).0);
             }
         }
     }
@@ -1089,5 +1562,61 @@ mod tests {
             differ,
             "swapping asymmetric kernels should produce different results"
         );
+    }
+
+    // ── The SeparableWeights contract is checked at the boundary ────────
+
+    /// A downstream implementor that breaks the "never empty" clause.
+    struct EmptyAxis;
+    impl crate::image::SeparableWeights for EmptyAxis {
+        fn h_weights(&self) -> &[f32] {
+            &[]
+        }
+        fn h_anchor(&self) -> usize {
+            0
+        }
+        fn v_weights(&self) -> &[f32] {
+            &[1.0]
+        }
+        fn v_anchor(&self) -> usize {
+            0
+        }
+        fn flipped(&self) -> Self {
+            EmptyAxis
+        }
+    }
+
+    /// A downstream implementor whose anchor points past its axis.
+    struct WildAnchor;
+    impl crate::image::SeparableWeights for WildAnchor {
+        fn h_weights(&self) -> &[f32] {
+            &[1.0, 1.0, 1.0]
+        }
+        fn h_anchor(&self) -> usize {
+            3
+        }
+        fn v_weights(&self) -> &[f32] {
+            &[1.0]
+        }
+        fn v_anchor(&self) -> usize {
+            0
+        }
+        fn flipped(&self) -> Self {
+            WildAnchor
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "SeparableWeights contract violated")]
+    fn an_empty_weight_axis_is_reported_by_trait_and_method_name() {
+        let src: Image<MonoF32> = Image::fill(4, 4, MonoF32::new(1.0));
+        let _: Image<MonoF32> = convolve_separable(&src, &EmptyAxis, &Clamp);
+    }
+
+    #[test]
+    #[should_panic(expected = "SeparableWeights contract violated")]
+    fn an_out_of_bounds_anchor_is_reported_by_trait_and_method_name() {
+        let src: Image<MonoF32> = Image::fill(4, 4, MonoF32::new(1.0));
+        let _: Image<MonoF32> = convolve_separable(&src, &WildAnchor, &Clamp);
     }
 }

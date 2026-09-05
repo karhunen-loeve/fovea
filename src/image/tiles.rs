@@ -99,6 +99,131 @@ pub trait SubViewMut: SubView + ImageViewMut {
     fn roi_mut(&mut self, rect: Rectangle) -> Option<Self::SubMut<'_>>;
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// CFA-phase-preserving region access
+// ──────────────────────────────────────────────────────────────────────────
+
+/// Whether cropping at `rect` leaves every sample's CFA colour unchanged.
+///
+/// The rule is just "even `left`, even `top`". A shift of one column or one
+/// row re-labels every sample in the crop (RGGB becomes GRBG, GBRG, or BGGR
+/// depending on which parities changed), which is why an odd origin cannot
+/// return the source pixel type.
+///
+/// Even *width* and *height* are deliberately **not** required: truncating a
+/// crop mid-tile drops samples but does not move the ones that remain.
+/// Algorithms that need whole 2×2 tiles must say so themselves.
+#[inline]
+pub(crate) fn cfa_phase_preserved(rect: Rectangle) -> bool {
+    rect.left() % 2 == 0 && rect.top() % 2 == 0
+}
+
+/// Phase-preserving region access for images of Bayer CFA samples.
+///
+/// This is the Bayer replacement for [`SubView`]. Bayer pixels deliberately
+/// do not implement
+/// [`OriginInvariantPixel`](crate::pixel::OriginInvariantPixel) — the colour
+/// a sample carries depends on where it sits — so `roi`, `tiles`, and
+/// `sliding_windows` do not exist for `Image<BayerRggb12>` and friends.
+/// `aligned_bayer_roi` is the named, checked alternative.
+///
+/// # Examples
+///
+/// ```
+/// use fovea::image::{BayerSubView, Image, ImageView};
+/// use fovea::pixel::bayer::BayerRggb12;
+/// use fovea::Rectangle;
+///
+/// let img = Image::generate(8, 8, |x, y| BayerRggb12::new((x + y * 8) as u16));
+///
+/// // Even origin: the crop is still RGGB, so it keeps the source pixel type.
+/// let roi = img.aligned_bayer_roi(Rectangle::new((2, 4), (4, 2))).unwrap();
+/// assert_eq!(roi.size(), fovea::Size::new(4, 2));
+/// assert_eq!(roi.pixel_at(0, 0), BayerRggb12::new(34));
+/// ```
+///
+/// An odd origin would shift the CFA phase, so it is refused rather than
+/// silently mislabelled:
+///
+/// ```
+/// # use fovea::image::{BayerSubView, Image};
+/// # use fovea::pixel::bayer::BayerRggb12;
+/// # use fovea::Rectangle;
+/// # let img = Image::generate(8, 8, |x, y| BayerRggb12::new((x + y * 8) as u16));
+/// assert!(img.aligned_bayer_roi(Rectangle::new((1, 0), (4, 4))).is_none());
+/// assert!(img.aligned_bayer_roi(Rectangle::new((0, 3), (4, 4))).is_none());
+/// // Out of bounds is `None` too — same Tier 1 answer, same method.
+/// assert!(img.aligned_bayer_roi(Rectangle::new((6, 6), (4, 4))).is_none());
+/// ```
+///
+/// Ordinary `roi` is not merely discouraged here, it does not compile:
+///
+/// ```compile_fail
+/// use fovea::image::{Image, SubView};
+/// use fovea::pixel::bayer::BayerRggb12;
+/// use fovea::Rectangle;
+///
+/// let img = Image::generate(8, 8, |x, y| BayerRggb12::new((x + y * 8) as u16));
+/// // ERROR: `BayerRggb12: OriginInvariantPixel` is not satisfied.
+/// let _ = img.roi(Rectangle::new((2, 2), (4, 4)));
+/// ```
+pub trait BayerSubView: ImageView
+where
+    Self::Pixel: crate::pixel::bayer::BayerPixel,
+{
+    /// The immutable sub-view type returned by
+    /// [`aligned_bayer_roi`](BayerSubView::aligned_bayer_roi).
+    type Sub<'a>: ImageView<Pixel = Self::Pixel>
+    where
+        Self: 'a;
+
+    /// Returns a region of interest that preserves the 2×2 CFA phase, so the
+    /// view keeps the source Bayer pixel type.
+    ///
+    /// Returns `None` if `rect` has an odd `left` or `top`, or if it exceeds
+    /// the image bounds. Both are ordinary absence, the same answer
+    /// [`SubView::roi`] gives an out-of-bounds rectangle: a rectangle
+    /// computed from data can legitimately turn out unusable, and the caller
+    /// decides what to do about it.
+    fn aligned_bayer_roi(&self, rect: Rectangle) -> Option<Self::Sub<'_>>;
+}
+
+/// Mutable phase-preserving region access for images of Bayer CFA samples.
+///
+/// The mutable half of [`BayerSubView`], and the Bayer replacement for
+/// [`SubViewMut`]. Useful for in-place work confined to a region — defect
+/// pixel correction over a known sensor area, for instance.
+///
+/// # Examples
+///
+/// ```
+/// use fovea::image::{BayerSubViewMut, Image, ImageView, ImageViewMut};
+/// use fovea::pixel::bayer::BayerBggr8;
+/// use fovea::Rectangle;
+///
+/// let mut img = Image::fill(8, 8, BayerBggr8::new(10));
+/// let mut roi = img.aligned_bayer_roi_mut(Rectangle::new((2, 2), (2, 2))).unwrap();
+/// *roi.pixel_at_mut(0, 0) = BayerBggr8::new(99);
+///
+/// assert_eq!(img.pixel_at(2, 2), BayerBggr8::new(99));
+/// assert_eq!(img.pixel_at(1, 2), BayerBggr8::new(10));
+/// assert!(img.aligned_bayer_roi_mut(Rectangle::new((3, 2), (2, 2))).is_none());
+/// ```
+pub trait BayerSubViewMut: BayerSubView + ImageViewMut
+where
+    Self::Pixel: crate::pixel::bayer::BayerPixel,
+{
+    /// The mutable sub-view type returned by
+    /// [`aligned_bayer_roi_mut`](BayerSubViewMut::aligned_bayer_roi_mut).
+    type SubMut<'a>: ImageViewMut<Pixel = Self::Pixel>
+    where
+        Self: 'a;
+
+    /// Returns a mutable region of interest that preserves the 2×2 CFA
+    /// phase, or `None` if the origin is odd or `rect` exceeds the bounds.
+    fn aligned_bayer_roi_mut(&mut self, rect: Rectangle) -> Option<Self::SubMut<'_>>;
+}
+
 /// An iterator that yields non-overlapping sub-views (tiles) of a fixed size.
 ///
 /// Produced by [`SubView::tiles`]. Partial tiles appear at the right and bottom
@@ -1808,5 +1933,262 @@ mod tests {
     fn tile_iter_mut_rejects_zero_tile_size() {
         let mut img = Image::<u8>::zero(4, 4);
         let _ = (&mut img).into_tiles_mut(Size::new(0, 2)).count();
+    }
+}
+
+#[cfg(test)]
+mod bayer_roi_tests {
+    use super::*;
+    use crate::image::sequential::{Image, ImageArray, ImageRef, ImageRefMut};
+    use crate::image::{ImageView, ImageViewMut};
+    use crate::pixel::bayer::{BayerPattern, BayerPixel, BayerRggb8, BayerRggb12, CfaColor};
+
+    /// An 8×8 RGGB frame whose sample value encodes its own coordinate, so a
+    /// crop's contents identify exactly where it came from.
+    fn frame() -> Image<BayerRggb12> {
+        Image::generate(8, 8, |x, y| BayerRggb12::new((x + y * 8) as u16))
+    }
+
+    #[test]
+    fn even_origin_crops_keep_the_source_pattern_and_the_right_samples() {
+        let img = frame();
+        for (left, top) in [(0usize, 0usize), (2, 0), (0, 4), (6, 6), (4, 2)] {
+            let roi = img
+                .aligned_bayer_roi(Rectangle::new((left, top), (2, 2)))
+                .unwrap_or_else(|| panic!("({left}, {top}) is even and in bounds"));
+            assert_eq!(roi.size(), Size::new(2, 2));
+            for dy in 0..2 {
+                for dx in 0..2 {
+                    assert_eq!(
+                        roi.pixel_at(dx, dy),
+                        img.pixel_at(left + dx, top + dy),
+                        "({left}+{dx}, {top}+{dy})"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn every_sample_in_an_aligned_crop_keeps_its_cfa_colour() {
+        // The property `aligned_bayer_roi` exists to preserve, stated
+        // directly rather than through the parity rule that implies it.
+        let img = frame();
+        let (left, top) = (2usize, 4usize);
+        let roi = img
+            .aligned_bayer_roi(Rectangle::new((left, top), (4, 4)))
+            .unwrap();
+        let pattern = <BayerRggb12 as BayerPixel>::PATTERN;
+        for y in 0..roi.height() {
+            for x in 0..roi.width() {
+                assert_eq!(
+                    pattern.color_at(x, y),
+                    pattern.color_at(left + x, top + y),
+                    "local ({x}, {y}) must mean what global ({}, {}) means",
+                    left + x,
+                    top + y
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn an_odd_origin_would_shift_the_phase_and_is_refused() {
+        let img = frame();
+        for (left, top) in [(1usize, 0usize), (0, 1), (1, 1), (3, 2), (2, 5)] {
+            assert!(
+                img.aligned_bayer_roi(Rectangle::new((left, top), (2, 2)))
+                    .is_none(),
+                "({left}, {top}) has an odd component and must be refused"
+            );
+        }
+        // …and the refusal is not superstition: one column over, red becomes
+        // green.
+        let p = BayerPattern::Rggb;
+        assert_eq!(p.color_at(0, 0), CfaColor::Red);
+        assert_eq!(p.color_at(1, 0), CfaColor::Green);
+    }
+
+    #[test]
+    fn odd_extents_are_allowed_because_they_do_not_move_anything() {
+        let img = frame();
+        let roi = img
+            .aligned_bayer_roi(Rectangle::new((2, 2), (3, 5)))
+            .expect("odd width and height are fine; only the origin matters");
+        assert_eq!(roi.size(), Size::new(3, 5));
+        assert_eq!(roi.pixel_at(0, 0), img.pixel_at(2, 2));
+    }
+
+    #[test]
+    fn out_of_bounds_is_none_even_when_aligned() {
+        let img = frame();
+        assert!(
+            img.aligned_bayer_roi(Rectangle::new((6, 6), (4, 4)))
+                .is_none()
+        );
+        assert!(
+            img.aligned_bayer_roi(Rectangle::new((0, 0), (9, 2)))
+                .is_none()
+        );
+        assert!(
+            img.aligned_bayer_roi(Rectangle::new((usize::MAX - 1, 0), (2, 2)))
+                .is_none(),
+            "the origin is even, so only the overflow check can reject this"
+        );
+    }
+
+    #[test]
+    fn a_zero_sized_aligned_crop_is_empty_not_an_error() {
+        let img = frame();
+        let roi = img
+            .aligned_bayer_roi(Rectangle::new((2, 2), (0, 0)))
+            .unwrap();
+        assert_eq!(roi.size(), Size::new(0, 0));
+    }
+
+    #[test]
+    fn nested_crops_compose_and_stay_aligned() {
+        // A view's own ROI is taken relative to the view, so the parity rule
+        // has to hold at each level — which it does, because an even offset
+        // from an even offset is even.
+        let img = frame();
+        let outer = img
+            .aligned_bayer_roi(Rectangle::new((2, 2), (6, 6)))
+            .unwrap();
+        let inner = outer
+            .aligned_bayer_roi(Rectangle::new((2, 2), (2, 2)))
+            .unwrap();
+        assert_eq!(inner.pixel_at(0, 0), img.pixel_at(4, 4));
+        assert!(
+            outer
+                .aligned_bayer_roi(Rectangle::new((1, 0), (2, 2)))
+                .is_none(),
+            "an odd step from an aligned view still shifts the phase"
+        );
+    }
+
+    #[test]
+    fn mutable_crops_write_through_and_respect_the_same_rule() {
+        let mut img = Image::fill(8, 8, BayerRggb8::new(10));
+        {
+            let mut roi = img
+                .aligned_bayer_roi_mut(Rectangle::new((4, 2), (2, 2)))
+                .unwrap();
+            *roi.pixel_at_mut(1, 1) = BayerRggb8::new(99);
+        }
+        assert_eq!(img.pixel_at(5, 3), BayerRggb8::new(99));
+        assert_eq!(img.pixel_at(4, 2), BayerRggb8::new(10));
+        assert!(
+            img.aligned_bayer_roi_mut(Rectangle::new((5, 2), (2, 2)))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn borrowed_views_offer_the_same_api_as_owned_images() {
+        let mut data = vec![BayerRggb8::new(0); 64];
+        for (i, p) in data.iter_mut().enumerate() {
+            *p = BayerRggb8::new(i as u8);
+        }
+
+        let view = ImageRef::new(8, 8, &data).unwrap();
+        let roi = view
+            .aligned_bayer_roi(Rectangle::new((2, 2), (2, 2)))
+            .unwrap();
+        assert_eq!(roi.pixel_at(0, 0), BayerRggb8::new(18));
+        assert!(
+            view.aligned_bayer_roi(Rectangle::new((1, 2), (2, 2)))
+                .is_none()
+        );
+
+        let mut view_mut = ImageRefMut::new(8, 8, &mut data).unwrap();
+        // The read-only path on a mutable view.
+        let roi = view_mut
+            .aligned_bayer_roi(Rectangle::new((2, 2), (2, 2)))
+            .unwrap();
+        assert_eq!(roi.pixel_at(0, 0), BayerRggb8::new(18));
+        // …and the mutable one.
+        let mut roi = view_mut
+            .aligned_bayer_roi_mut(Rectangle::new((2, 2), (2, 2)))
+            .unwrap();
+        *roi.pixel_at_mut(0, 0) = BayerRggb8::new(200);
+        assert_eq!(view_mut.pixel_at(2, 2), BayerRggb8::new(200));
+    }
+
+    #[test]
+    fn compile_time_sized_arrays_offer_the_same_api() {
+        let mut arr: ImageArray<BayerRggb8, 8, 8> =
+            ImageArray::generate(|x, y| BayerRggb8::new((x + y * 8) as u8));
+
+        {
+            let roi = arr
+                .aligned_bayer_roi(Rectangle::new((2, 4), (4, 2)))
+                .unwrap();
+            assert_eq!(roi.size(), Size::new(4, 2));
+            assert_eq!(roi.pixel_at(0, 0), BayerRggb8::new(34));
+        }
+        assert!(
+            arr.aligned_bayer_roi(Rectangle::new((1, 4), (4, 2)))
+                .is_none(),
+            "an odd origin shifts the phase here exactly as it does for `Image`"
+        );
+        assert!(
+            arr.aligned_bayer_roi(Rectangle::new((6, 6), (4, 4)))
+                .is_none(),
+            "the const W/H are the bounds, checked by the same helper"
+        );
+
+        {
+            let mut roi = arr
+                .aligned_bayer_roi_mut(Rectangle::new((0, 0), (2, 2)))
+                .unwrap();
+            *roi.pixel_at_mut(1, 0) = BayerRggb8::new(200);
+        }
+        assert_eq!(arr.pixel_at(1, 0), BayerRggb8::new(200));
+        assert!(
+            arr.aligned_bayer_roi_mut(Rectangle::new((0, 1), (2, 2)))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn the_alignment_predicate_is_exactly_even_origin() {
+        for top in 0..4usize {
+            for left in 0..4usize {
+                assert_eq!(
+                    cfa_phase_preserved(Rectangle::new((left, top), (1, 1))),
+                    left % 2 == 0 && top % 2 == 0,
+                    "({left}, {top})"
+                );
+            }
+        }
+        // Extents are not part of the rule.
+        assert!(cfa_phase_preserved(Rectangle::new((0, 0), (3, 7))));
+    }
+
+    #[test]
+    fn a_tiles_shared_roi_survives_a_write_through_a_sibling_tile() {
+        // The v0.4.0 review's D11 scenario: two live sibling tiles, a
+        // shared roi taken from one, a write through the other, then a
+        // read through the still-held roi. The accessed elements are
+        // disjoint; what this pins (under `cargo +nightly miri test`) is
+        // that the shared-roi construction does not assert a borrow over
+        // the sibling's territory.
+        use crate::image::RasterImageMut;
+        use crate::pixel::Mono8;
+
+        let mut image: Image<Mono8> = Image::zero(8, 4);
+        let mut tiles: Vec<ImageRefMut<'_, Mono8>> =
+            (&mut image).into_tiles_mut(Size::new(4, 4)).collect();
+        assert_eq!(tiles.len(), 2);
+        let (left, right) = tiles.split_at_mut(1);
+
+        let roi = left[0]
+            .roi(Rectangle::new(Coordinate::new(0, 0), Size::new(2, 2)))
+            .unwrap();
+        right[0].row_mut(0)[0] = Mono8::new(7);
+        assert_eq!(roi.pixel_at(0, 0), Mono8::new(0));
+        assert_eq!(roi.pixel_at(1, 1), Mono8::new(0));
+        assert_eq!(right[0].pixel_at(0, 0), Mono8::new(7));
     }
 }

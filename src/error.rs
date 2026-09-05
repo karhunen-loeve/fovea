@@ -68,6 +68,81 @@ pub enum Error {
         actual: usize,
     },
 
+    /// The requested `pyr_up` target is not a size whose `pyr_down`
+    /// result is the source image's size.
+    ///
+    /// Returned by [`pyr_up`](crate::transform::pyr_up) when
+    /// `target.width ∉ {2·w − 1, 2·w}` or
+    /// `target.height ∉ {2·h − 1, 2·h}` for a `w`×`h` source image.
+    /// Because `pyr_down` uses ceiling division, both the odd and the
+    /// even parent dimension are valid targets — anything else cannot
+    /// be the parent of this image.
+    InvalidPyrUpTarget {
+        /// The dimensions of the source image being upsampled.
+        source: Size,
+        /// The rejected target dimensions.
+        target: Size,
+    },
+
+    /// A pyramid was constructed from an empty level list.
+    ///
+    /// Returned by
+    /// [`Pyramid::try_from_levels`](crate::image::Pyramid::try_from_levels) —
+    /// a pyramid always contains at least one level.
+    EmptyPyramid,
+
+    /// Pyramid levels are not ordered finest to coarsest.
+    ///
+    /// Returned by
+    /// [`Pyramid::try_from_levels`](crate::image::Pyramid::try_from_levels)
+    /// when a level is larger than its predecessor along either axis.
+    /// Levels must be non-increasing in both width and height (equal sizes
+    /// are allowed — same-size levels occur in scale stacks and sub-band
+    /// decompositions). Levels are never reordered automatically: a wrong
+    /// order is reported, not silently normalized.
+    PyramidLevelOrder {
+        /// Index of the first level that violates the ordering.
+        index: usize,
+        /// The dimensions of the preceding level.
+        previous: Size,
+        /// The dimensions of the offending level.
+        current: Size,
+    },
+
+    /// A computed value violates a parameter type's invariant.
+    ///
+    /// Returned by the `try_new` constructors of the invariant-carrying
+    /// parameter types — [`Sigma`](crate::Sigma),
+    /// [`PixelDistance`](crate::PixelDistance),
+    /// [`Tolerance`](crate::Tolerance),
+    /// [`OddWindowSide`](crate::OddWindowSide),
+    /// [`HysteresisThresholds`](crate::analyze::threshold::HysteresisThresholds),
+    /// [`Clamp`](crate::transform::Clamp),
+    /// [`Harris`](crate::features::detect::Harris),
+    /// [`SegmentTest`](crate::features::detect::SegmentTest),
+    /// [`NmsRadius`](crate::features::detect::NmsRadius),
+    /// [`PeakValue`](crate::analyze::quality::PeakValue),
+    /// [`BayerGains`](crate::transform::BayerGains) and their kin — and by
+    /// validating functions whose parameter is a plain value. What
+    /// "invalid" means is the type's own invariant: a sign or finiteness
+    /// condition for the float parameters, a parity or at-least-one
+    /// condition for the integer ones, an ordering relation between two
+    /// values for the pairs. The constructor's documentation states it.
+    ///
+    /// This is the *computed-value* path, for parameters derived from data
+    /// at run time. A literal parameter does not need it: the types carry
+    /// `const fn new -> Option` constructors, and where a literal is the
+    /// normal input, a matching literal macro ([`sigma!`](crate::sigma),
+    /// [`pixel_distance!`](crate::pixel_distance),
+    /// [`tolerance!`](crate::tolerance), [`window!`](crate::window),
+    /// [`harris!`](crate::harris), [`peak!`](crate::peak)) that rejects a
+    /// bad literal at compile time.
+    ///
+    /// The contained string describes the specific reason. Treat it as
+    /// human-readable diagnostic text, not as a stable machine-readable
+    /// tag.
+    InvalidParameter(String),
+
     /// The template is larger than the image in one or both dimensions.
     ///
     /// Returned by [`match_template`](crate::transform::match_template) when
@@ -76,6 +151,17 @@ pub enum Error {
         /// The dimensions of the source image.
         image_size: Size,
         /// The dimensions of the template that does not fit.
+        template_size: Size,
+    },
+
+    /// The template has zero width or height.
+    ///
+    /// Returned by [`match_template`](crate::transform::match_template) and
+    /// [`match_template_into`](crate::transform::match_template_into) —
+    /// an empty template (for example a degenerate user crop) has no
+    /// defined score.
+    EmptyTemplate {
+        /// The dimensions of the degenerate template.
         template_size: Size,
     },
 
@@ -137,7 +223,7 @@ pub enum Error {
     LabelOverflow {
         /// `MAX_LABEL` of the chosen label pixel type — the maximum
         /// foreground label the type can represent.
-        label_capacity: u64,
+        label_capacity: u32,
     },
 }
 
@@ -170,6 +256,41 @@ impl fmt::Display for Error {
                     f,
                     "channel count mismatch: expected {} channels, got {}",
                     expected, actual
+                )
+            }
+            Error::InvalidPyrUpTarget { source, target } => {
+                write!(
+                    f,
+                    "invalid pyr_up target: {}x{} is not a size whose pyr_down is {}x{}",
+                    target.width, target.height, source.width, source.height
+                )
+            }
+            Error::EmptyPyramid => {
+                write!(
+                    f,
+                    "empty pyramid: a pyramid must contain at least one level"
+                )
+            }
+            Error::PyramidLevelOrder {
+                index,
+                previous,
+                current,
+            } => {
+                write!(
+                    f,
+                    "pyramid level order: level {} is {}x{}, larger than its \
+                     predecessor {}x{} (levels must be finest to coarsest)",
+                    index, current.width, current.height, previous.width, previous.height
+                )
+            }
+            Error::InvalidParameter(reason) => {
+                write!(f, "invalid parameter: {}", reason)
+            }
+            Error::EmptyTemplate { template_size } => {
+                write!(
+                    f,
+                    "empty template: {}x{} has zero width or height",
+                    template_size.width, template_size.height
                 )
             }
             Error::TemplateTooLarge {
@@ -287,6 +408,75 @@ mod tests {
     }
 
     #[test]
+    fn display_invalid_pyr_up_target() {
+        let err = Error::InvalidPyrUpTarget {
+            source: Size::new(4, 4),
+            target: Size::new(9, 8),
+        };
+        assert_eq!(
+            err.to_string(),
+            "invalid pyr_up target: 9x8 is not a size whose pyr_down is 4x4"
+        );
+    }
+
+    #[test]
+    fn invalid_pyr_up_target_equality_and_clone() {
+        let a = Error::InvalidPyrUpTarget {
+            source: Size::new(4, 4),
+            target: Size::new(9, 8),
+        };
+        let b = a.clone();
+        let c = Error::InvalidPyrUpTarget {
+            source: Size::new(4, 4),
+            target: Size::new(6, 8),
+        };
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+    }
+
+    #[test]
+    fn display_empty_pyramid() {
+        assert_eq!(
+            Error::EmptyPyramid.to_string(),
+            "empty pyramid: a pyramid must contain at least one level"
+        );
+    }
+
+    #[test]
+    fn display_pyramid_level_order() {
+        let err = Error::PyramidLevelOrder {
+            index: 2,
+            previous: Size::new(4, 3),
+            current: Size::new(8, 6),
+        };
+        assert_eq!(
+            err.to_string(),
+            "pyramid level order: level 2 is 8x6, larger than its \
+             predecessor 4x3 (levels must be finest to coarsest)"
+        );
+    }
+
+    #[test]
+    fn display_invalid_parameter() {
+        let err = Error::InvalidParameter("sigma must be positive, got -1".to_string());
+        assert_eq!(
+            err.to_string(),
+            "invalid parameter: sigma must be positive, got -1"
+        );
+    }
+
+    #[test]
+    fn display_empty_template() {
+        let err = Error::EmptyTemplate {
+            template_size: Size::new(0, 5),
+        };
+        assert_eq!(
+            err.to_string(),
+            "empty template: 0x5 has zero width or height"
+        );
+    }
+
+    #[test]
     fn display_template_too_large() {
         let err = Error::TemplateTooLarge {
             image_size: Size::new(10, 10),
@@ -345,7 +535,7 @@ mod tests {
     #[test]
     fn display_label_overflow() {
         let err = Error::LabelOverflow {
-            label_capacity: u32::MAX as u64,
+            label_capacity: u32::MAX,
         };
         assert_eq!(
             err.to_string(),

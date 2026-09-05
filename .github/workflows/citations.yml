@@ -1,0 +1,28 @@
+name: Citations
+
+# Guards the boundary between the private workspace and the published
+# crate: rustdoc, benches and examples ship (docs.rs serves the rustdoc,
+# and the package's `include` list carries the benches), while
+# PHILOSOPHY.md, the ADRs and the Roadmap do not, so a citation of those
+# documents dangles for every reader outside the workspace. The rule was
+# announced in the 0.3.0 changelog and had regressed twice by the end of
+# the 0.4.0 cycle; this gate closes the class.
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+jobs:
+  no-internal-citations:
+    name: No internal-document citations in published sources
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check published sources cite no internal documents
+        run: sh .github/scripts/check-no-internal-citations.sh

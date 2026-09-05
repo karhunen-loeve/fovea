@@ -26,8 +26,9 @@ use crate::transform::combine::{
 };
 use crate::transform::convolve::convolve;
 use crate::transform::convolve_separable::{
-    convolve_separable, correlate_separable_raw, correlate_separable_raw_into,
+    SeparableScratch, convolve_separable, convolve_separable_into,
 };
+use crate::{Offset, Sigma};
 
 // ─── Box blur ────────────────────────────────────────────────────────────────
 
@@ -35,6 +36,10 @@ use crate::transform::convolve_separable::{
 ///
 /// Each weight is `1/3`, applied horizontally then vertically, giving an
 /// effective `1/9` per pixel — identical to [`Neighborhood::box_blur_3x3`].
+///
+/// Sugar for `convolve_separable(image, &SeparableKernel::box_blur_3(), border)` —
+/// the kernel is the variant, and this spelling is the common case.
+/// Equivalence pinned by `fixed_size_blurs_equal_their_kernel_form`.
 ///
 /// # Example
 ///
@@ -73,6 +78,10 @@ where
 ///
 /// Each weight is `1/5`, applied horizontally then vertically, giving an
 /// effective `1/25` per pixel — identical to [`Neighborhood::box_blur_5x5`].
+///
+/// Sugar for `convolve_separable(image, &SeparableKernel::box_blur_5(), border)` —
+/// the kernel is the variant, and this spelling is the common case.
+/// Equivalence pinned by `fixed_size_blurs_equal_their_kernel_form`.
 ///
 /// # Example
 ///
@@ -119,6 +128,10 @@ where
 /// If you instead need the raw integer `[1, 2, 1]` kernel (sum 16) — for
 /// example to reproduce a legacy ×16-scaled result — convolve directly
 /// with [`Neighborhood::gaussian_3x3`], where the caller owns the scale.
+///
+/// Sugar for `convolve_separable(image, &SeparableKernel::gaussian_3(), border)` —
+/// the kernel is the variant, and this spelling is the common case.
+/// Equivalence pinned by `fixed_size_blurs_equal_their_kernel_form`.
 ///
 /// # Example
 ///
@@ -168,6 +181,10 @@ where
 /// convolve directly with [`Neighborhood::gaussian_5x5`], where the caller
 /// owns the scale.
 ///
+/// Sugar for `convolve_separable(image, &SeparableKernel::gaussian_5(), border)` —
+/// the kernel is the variant, and this spelling is the common case.
+/// Equivalence pinned by `fixed_size_blurs_equal_their_kernel_form`.
+///
 /// # Example
 ///
 /// ```
@@ -209,9 +226,11 @@ where
 ///
 /// The kernel radius is `round(truncate * sigma)`. The value `4.0` matches
 /// SciPy (`scipy.ndimage.gaussian_filter`) and scikit-image
-/// (`filters.gaussian`), capturing the Gaussian out to 4σ. Use
-/// [`gaussian_blur_with`] to pick a smaller `truncate` (e.g. `3.0`) for
-/// faster, slightly tighter kernels.
+/// (`filters.gaussian`), capturing the Gaussian out to 4σ. To pick a smaller
+/// `truncate` (e.g. `3.0`) for a faster, slightly tighter kernel, build the
+/// kernel with
+/// [`gaussian_kernel_1d`](crate::image::gaussian_kernel_1d) and pass it to
+/// [`convolve_separable`].
 pub const DEFAULT_TRUNCATE: f32 = 4.0;
 
 /// Gaussian blur with a separable kernel derived from `sigma`.
@@ -223,25 +242,35 @@ pub const DEFAULT_TRUNCATE: f32 = 4.0;
 /// the derived odd kernel size is reported by
 /// [`gaussian_kernel_size`](crate::image::gaussian_kernel_size).
 ///
-/// Use [`gaussian_blur_with`] to override `truncate`.
+/// To choose `truncate` yourself, build the kernel and convolve with it —
+/// `convolve_separable(image, &gaussian_kernel_1d(sigma, 3.0), border)`. The
+/// kernel is the variant, so there is no second blur function for it.
+///
+/// σ is the invariant-carrying [`Sigma`] type: literals use
+/// [`sigma!`](crate::sigma), which checks them at compile time, computed
+/// values use [`Sigma::try_new`] and handle the error where the value was
+/// produced. This function itself cannot see an invalid σ.
 ///
 /// # Panics
 ///
-/// Panics (Tier 3 precondition) if `sigma <= 0.0`, or if the derived radius
-/// exceeds [`MAX_RADIUS`](crate::image::MAX_RADIUS) (i.e. `sigma` is larger
-/// than `MAX_RADIUS / truncate`).
+/// Panics if the derived radius exceeds
+/// [`MAX_RADIUS`](crate::image::MAX_RADIUS) (i.e. `sigma` is larger than
+/// `MAX_RADIUS / truncate`) — a capacity bound of the stack-allocated
+/// kernel, testable up front with
+/// [`gaussian_kernel_size`](crate::image::gaussian_kernel_size).
 ///
 /// # Example
 ///
 /// ```
-/// use fovea::image::{Image, ImageView};
 /// use fovea::border::Clamp;
+/// use fovea::image::{Image, ImageView};
 /// use fovea::pixel::MonoF32;
+/// use fovea::sigma;
 /// use fovea::transform::gaussian_blur;
 ///
 /// // A flat image is returned unchanged (brightness preserved).
 /// let src = Image::fill(16, 16, MonoF32::new(0.7));
-/// let result: Image<MonoF32> = gaussian_blur(&src, 2.0, &Clamp);
+/// let result: Image<MonoF32> = gaussian_blur(&src, sigma!(2.0), &Clamp);
 /// for y in 0..result.height() {
 ///     for x in 0..result.width() {
 ///         assert!((result.pixel_at(x, y).0 - 0.7).abs() < 1e-4);
@@ -249,7 +278,7 @@ pub const DEFAULT_TRUNCATE: f32 = 4.0;
 /// }
 /// ```
 #[must_use]
-pub fn gaussian_blur<I, B, P, Acc, Out>(image: &I, sigma: f32, border: &B) -> Image<Out>
+pub fn gaussian_blur<I, B, P, Acc, Out>(image: &I, sigma: Sigma, border: &B) -> Image<Out>
 where
     I: RasterImage<Pixel = P>,
     P: Copy + LinearPixel<f32, Accumulator = Acc>,
@@ -261,63 +290,7 @@ where
     B: BorderPolicy<I> + BorderPolicy<Image<Acc>>,
     Out: ZeroablePixel + FromLinear<Acc>,
 {
-    gaussian_blur_with(image, sigma, DEFAULT_TRUNCATE, border)
-}
-
-/// Gaussian blur derived from `sigma` with an explicit `truncate`.
-///
-/// As [`gaussian_blur`], but the kernel radius is `round(truncate * sigma)`.
-/// A smaller `truncate` (e.g. `3.0`) yields a smaller, faster kernel
-/// capturing slightly less of the Gaussian tail; the default of `4.0`
-/// matches SciPy / scikit-image.
-///
-/// # Panics
-///
-/// Panics if `sigma <= 0.0` or `truncate <= 0.0`, or if the derived radius
-/// exceeds [`MAX_RADIUS`](crate::image::MAX_RADIUS).
-///
-/// # Example
-///
-/// ```
-/// use fovea::image::{Image, ImageView};
-/// use fovea::border::Clamp;
-/// use fovea::pixel::MonoF32;
-/// use fovea::transform::gaussian_blur_with;
-///
-/// let src = Image::fill(16, 16, MonoF32::new(0.5));
-/// let result: Image<MonoF32> = gaussian_blur_with(&src, 1.5, 3.0, &Clamp);
-/// assert_eq!(result.size(), src.size());
-/// ```
-#[must_use]
-pub fn gaussian_blur_with<I, B, P, Acc, Out>(
-    image: &I,
-    sigma: f32,
-    truncate: f32,
-    border: &B,
-) -> Image<Out>
-where
-    I: RasterImage<Pixel = P>,
-    P: Copy + LinearPixel<f32, Accumulator = Acc>,
-    Acc: Copy
-        + Default
-        + ZeroablePixel
-        + LinearPixel<f32, Accumulator = Acc>
-        + std::ops::Add<Output = Acc>,
-    B: BorderPolicy<I> + BorderPolicy<Image<Acc>>,
-    Out: ZeroablePixel + FromLinear<Acc>,
-{
-    let kernel = gaussian_kernel_1d(sigma, truncate);
-    let weights = kernel.weights();
-    let n = kernel.len();
-    let anchor = kernel.anchor();
-
-    // The kernel is symmetric ⇒ correlation == convolution (no flip needed),
-    // and identical horizontal/vertical weights. Borrow the stack-resident
-    // weights as `ImageRef` views: the kernel never touches the heap.
-    let h = ImageRef::new(n, 1, weights).expect("h kernel view: len == n");
-    let v = ImageRef::new(1, n, weights).expect("v kernel view: len == n");
-
-    correlate_separable_raw(image, &h, anchor, &v, anchor, border)
+    convolve_separable(image, &gaussian_kernel_1d(sigma, DEFAULT_TRUNCATE), border)
 }
 
 /// Gaussian blur derived from `sigma`, writing into a caller-owned output.
@@ -326,10 +299,10 @@ where
 ///
 /// # Panics
 ///
-/// Panics if `sigma <= 0.0`, if the derived radius exceeds
+/// Panics if the derived radius exceeds
 /// [`MAX_RADIUS`](crate::image::MAX_RADIUS), or if `output` is too small for
 /// the region produced by the border policy.
-pub fn gaussian_blur_into<I, B, O, P, Acc, Out>(image: &I, sigma: f32, border: &B, output: &mut O)
+pub fn gaussian_blur_into<I, B, O, P, Acc, Out>(image: &I, sigma: Sigma, border: &B, output: &mut O)
 where
     I: RasterImage<Pixel = P>,
     P: Copy + LinearPixel<f32, Accumulator = Acc>,
@@ -342,49 +315,84 @@ where
     O: RasterImageMut<Pixel = Out>,
     Out: FromLinear<Acc>,
 {
-    gaussian_blur_with_into(image, sigma, DEFAULT_TRUNCATE, border, output);
+    convolve_separable_into(
+        image,
+        &gaussian_kernel_1d(sigma, DEFAULT_TRUNCATE),
+        border,
+        output,
+    );
 }
 
-/// Gaussian blur derived from `sigma` and an explicit `truncate`, writing
-/// into a caller-owned output.
-///
-/// As [`gaussian_blur_with`], but writes into `output` instead of
-/// allocating.
-///
-/// # Panics
-///
-/// Panics if `sigma <= 0.0` or `truncate <= 0.0`, if the derived radius
-/// exceeds [`MAX_RADIUS`](crate::image::MAX_RADIUS), or if `output` is too
-/// small for the region produced by the border policy.
-pub fn gaussian_blur_with_into<I, B, O, P, Acc, Out>(
-    image: &I,
-    sigma: f32,
-    truncate: f32,
-    border: &B,
-    output: &mut O,
-) where
-    I: RasterImage<Pixel = P>,
-    P: Copy + LinearPixel<f32, Accumulator = Acc>,
+impl<Acc> SeparableScratch<Acc>
+where
     Acc: Copy
         + Default
         + ZeroablePixel
         + LinearPixel<f32, Accumulator = Acc>
         + std::ops::Add<Output = Acc>,
-    B: BorderPolicy<I> + BorderPolicy<Image<Acc>>,
-    O: RasterImageMut<Pixel = Out>,
-    Out: FromLinear<Acc>,
 {
-    let kernel = gaussian_kernel_1d(sigma, truncate);
-    let weights = kernel.weights();
-    let n = kernel.len();
-    let anchor = kernel.anchor();
-
-    // Symmetric kernel ⇒ correlate directly; borrow the stack weights as
-    // `ImageRef` views with no heap kernel copy.
-    let h = ImageRef::new(n, 1, weights).expect("h kernel view: len == n");
-    let v = ImageRef::new(1, n, weights).expect("v kernel view: len == n");
-
-    correlate_separable_raw_into(image, &h, anchor, &v, anchor, border, output);
+    /// Gaussian blur derived from `sigma`, writing into a caller-owned
+    /// output and reusing this scratch.
+    ///
+    /// As the free [`gaussian_blur_into`], but the inter-pass intermediate
+    /// and the engine's working buffers come from `self`. With a
+    /// caller-owned `output` as well, a blur in a hot loop performs **no
+    /// heap allocation after the first call** — the case pyramid and
+    /// scale-space construction hit `log₂(N)` and `octaves × (S + 3)` times
+    /// per image.
+    ///
+    /// To choose `truncate` yourself, build the kernel and use
+    /// [`convolve_separable_into`](Self::convolve_separable_into) —
+    /// `scratch.convolve_separable_into(&src, &gaussian_kernel_1d(sigma, 3.0),
+    /// &border, &mut out)`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the derived radius exceeds
+    /// [`MAX_RADIUS`](crate::image::MAX_RADIUS), or if `output` is too small
+    /// for the region produced by the border policy.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use fovea::border::Clamp;
+    /// use fovea::image::{Image, ImageView};
+    /// use fovea::pixel::MonoF32;
+    /// use fovea::sigma;
+    /// use fovea::transform::SeparableScratch;
+    ///
+    /// let mut scratch = SeparableScratch::new();
+    /// let mut out = Image::<MonoF32>::zero(32, 32);
+    ///
+    /// for frame in 0..3 {
+    ///     let src = Image::fill(32, 32, MonoF32::new(0.25 * frame as f32));
+    ///     scratch.gaussian_blur_into(&src, sigma!(1.5), &Clamp, &mut out);
+    ///     assert!((out.pixel_at(16, 16).0 - 0.25 * frame as f32).abs() < 1e-4);
+    /// }
+    /// ```
+    pub fn gaussian_blur_into<I, B, O, P, Out>(
+        &mut self,
+        image: &I,
+        sigma: Sigma,
+        border: &B,
+        output: &mut O,
+    ) where
+        I: RasterImage<Pixel = P>,
+        P: Copy + LinearPixel<f32, Accumulator = Acc>,
+        B: BorderPolicy<I> + for<'r> BorderPolicy<ImageRef<'r, Acc>>,
+        O: RasterImageMut<Pixel = Out>,
+        Out: FromLinear<Acc>,
+    {
+        // A σ blur is a separable convolution with the σ-derived kernel —
+        // the same path an explicit `truncate` takes, and the same path the
+        // free `gaussian_blur_into` takes without a scratch.
+        self.convolve_separable_into(
+            image,
+            &gaussian_kernel_1d(sigma, DEFAULT_TRUNCATE),
+            border,
+            output,
+        );
+    }
 }
 
 // ─── Sobel ───────────────────────────────────────────────────────────────────
@@ -870,7 +878,7 @@ where
 /// `(-1, 1)` anti-diagonal. Every step has `dy >= 0`, which
 /// [`nms_survives`] relies on when picking the two neighbour rows.
 #[inline]
-fn nms_sector(theta: f64) -> (isize, isize) {
+pub(crate) fn nms_sector(theta: f64) -> Offset {
     use core::f64::consts::PI;
     // Fold (-π, π] onto [0, π): opposite gradients share an edge orientation.
     let mut a = theta;
@@ -879,15 +887,15 @@ fn nms_sector(theta: f64) -> (isize, isize) {
     }
     const SEG: f64 = PI / 8.0; // 22.5°
     if a < SEG {
-        (1, 0) // gradient ≈ horizontal → compare left / right
+        Offset::new(1, 0) // gradient ≈ horizontal → compare left / right
     } else if a < 3.0 * SEG {
-        (1, 1) // gradient ≈ +45° → compare the main diagonal
+        Offset::new(1, 1) // gradient ≈ +45° → compare the main diagonal
     } else if a < 5.0 * SEG {
-        (0, 1) // gradient ≈ vertical → compare up / down
+        Offset::new(0, 1) // gradient ≈ vertical → compare up / down
     } else if a < 7.0 * SEG {
-        (-1, 1) // gradient ≈ −45° → compare the anti-diagonal
+        Offset::new(-1, 1) // gradient ≈ −45° → compare the anti-diagonal
     } else {
-        (1, 0) // [157.5°, 180°] wraps back to horizontal
+        Offset::new(1, 0) // [157.5°, 180°] wraps back to horizontal
     }
 }
 
@@ -905,7 +913,7 @@ fn nms_sector(theta: f64) -> (isize, isize) {
 /// vertical and by the angle path as horizontal. Its magnitude is `0`, so
 /// the suppressed output is `0` under either sector.
 #[inline]
-fn nms_sector_from_gradient(gx: f64, gy: f64) -> (isize, isize) {
+pub(crate) fn nms_sector_from_gradient(gx: f64, gy: f64) -> Offset {
     /// `tan(22.5°)`
     const T22: f64 = 0.414_213_562_373_095_05;
     /// `tan(67.5°)`
@@ -916,21 +924,21 @@ fn nms_sector_from_gradient(gx: f64, gy: f64) -> (isize, isize) {
     if gx * gy >= 0.0 {
         // Folded angle in [0, π/2]: rising diagonal.
         if ay < ax * T22 {
-            (1, 0)
+            Offset::new(1, 0)
         } else if ay < ax * T67 {
-            (1, 1)
+            Offset::new(1, 1)
         } else {
-            (0, 1)
+            Offset::new(0, 1)
         }
     } else {
         // Folded angle in (π/2, π): falling diagonal. The comparisons
         // mirror the branch above, hence the flipped order and strictness.
         if ay > ax * T67 {
-            (0, 1)
+            Offset::new(0, 1)
         } else if ay > ax * T22 {
-            (-1, 1)
+            Offset::new(-1, 1)
         } else {
-            (1, 0)
+            Offset::new(1, 0)
         }
     }
 }
@@ -950,7 +958,7 @@ where
     Some(row[nx].channel(0))
 }
 
-/// Whether `cur[x]` is a local maximum along `(dx, dy)`.
+/// Whether `cur[x]` is a local maximum along `step`.
 ///
 /// `prev` / `next` are the rows above and below `cur`, or `None` at the
 /// image border. Because every [`nms_sector`] step has `dy >= 0`, the two
@@ -964,14 +972,14 @@ fn nms_survives<P>(
     next: Option<&[P]>,
     x: usize,
     w: usize,
-    dx: isize,
-    dy: isize,
+    step: Offset,
 ) -> bool
 where
     P: HomogeneousPixel,
     P::Channel: PartialOrd,
 {
-    let (forward, backward) = if dy == 0 {
+    let dx = step.dx as isize;
+    let (forward, backward) = if step.dy == 0 {
         (Some(cur), Some(cur))
     } else {
         (next, prev)
@@ -1003,9 +1011,11 @@ where
 /// `MonoF64`); the result is a raw float container suitable as input to a
 /// hysteresis threshold.
 ///
-/// # Panics
+/// # Errors
 ///
-/// Panics if `magnitude` and `direction` differ in dimensions.
+/// Returns [`Error::SizeMismatch`] if `magnitude` and `direction` differ
+/// in dimensions — two separately produced input images, the same
+/// input-vs-input relation as [`combine_images`](crate::transform::combine_images).
 ///
 /// # Example
 ///
@@ -1022,13 +1032,13 @@ where
 /// )
 /// .unwrap();
 /// let dir = Image::fill(3, 1, MonoF32::new(0.0));
-/// let thin = non_maximum_suppression(&mag, &dir);
+/// let thin = non_maximum_suppression(&mag, &dir)?;
 /// assert_eq!(thin.pixel_at(0, 0).value(), 0.0); // left border → suppressed
 /// assert_eq!(thin.pixel_at(1, 0).value(), 2.0); // local maximum kept
 /// assert_eq!(thin.pixel_at(2, 0).value(), 0.0); // right border → suppressed
+/// # Ok::<(), fovea::Error>(())
 /// ```
-#[must_use]
-pub fn non_maximum_suppression<IM, IA, P>(magnitude: &IM, direction: &IA) -> Image<P>
+pub fn non_maximum_suppression<IM, IA, P>(magnitude: &IM, direction: &IA) -> Result<Image<P>, Error>
 where
     IM: RasterImage<Pixel = P>,
     IA: RasterImage<Pixel = P>,
@@ -1036,11 +1046,12 @@ where
     P::Channel: PartialOrd,
     f64: From<P::Channel>,
 {
-    assert_eq!(
-        magnitude.size(),
-        direction.size(),
-        "non_maximum_suppression: magnitude and direction must have the same size",
-    );
+    if magnitude.size() != direction.size() {
+        return Err(Error::SizeMismatch {
+            expected: magnitude.size(),
+            actual: direction.size(),
+        });
+    }
 
     let (w, h) = (magnitude.width(), magnitude.height());
     let mut out = Image::fill(w, h, P::zero());
@@ -1051,13 +1062,13 @@ where
         let dir = direction.row(y);
         let dst = out.row_mut(y);
         for x in 0..w {
-            let (dx, dy) = nms_sector(f64::from(dir[x].channel(0)));
-            if nms_survives(cur, prev, next, x, w, dx, dy) {
+            let step = nms_sector(f64::from(dir[x].channel(0)));
+            if nms_survives(cur, prev, next, x, w, step) {
                 dst[x] = cur[x];
             }
         }
     }
-    out
+    Ok(out)
 }
 
 /// [`non_maximum_suppression`] driven by the raw gradient pair instead of a
@@ -1102,11 +1113,11 @@ where
         let gy_row = gy.row(y);
         let dst = out.row_mut(y);
         for x in 0..w {
-            let (dx, dy) = nms_sector_from_gradient(
+            let step = nms_sector_from_gradient(
                 f64::from(gx_row[x].channel(0)),
                 f64::from(gy_row[x].channel(0)),
             );
-            if nms_survives(cur, prev, next, x, w, dx, dy) {
+            if nms_survives(cur, prev, next, x, w, step) {
                 dst[x] = cur[x];
             }
         }
@@ -1121,9 +1132,11 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Size;
     use crate::border::{Clamp, Constant, Skip};
     use crate::image::{ImageView, ImageViewMut, gaussian_kernel_1d};
     use crate::pixel::{Mono8, MonoF32};
+    use crate::sigma;
     use crate::transform::convolve;
 
     // ── helpers ──────────────────────────────────────────────────────────
@@ -1289,7 +1302,7 @@ mod tests {
     #[test]
     fn gaussian_blur_uniform_image_preserved_f32() {
         let src = Image::fill(16, 16, MonoF32::new(0.7));
-        let result: Image<MonoF32> = gaussian_blur(&src, 2.0, &Clamp);
+        let result: Image<MonoF32> = gaussian_blur(&src, sigma!(2.0), &Clamp);
         assert_eq!(result.size(), src.size());
         for y in 0..result.height() {
             for x in 0..result.width() {
@@ -1305,7 +1318,7 @@ mod tests {
     #[test]
     fn gaussian_blur_uniform_image_preserved_u8() {
         let src = Image::fill(16, 16, Mono8::new(120));
-        let result: Image<Mono8> = gaussian_blur(&src, 1.5, &Clamp);
+        let result: Image<Mono8> = gaussian_blur(&src, sigma!(1.5), &Clamp);
         for y in 0..result.height() {
             for x in 0..result.width() {
                 assert_eq!(result.pixel_at(x, y), Mono8::new(120));
@@ -1318,7 +1331,7 @@ mod tests {
         // A single bright pixel on a black field, blurred, should reproduce
         // the 2-D Gaussian (outer product of the 1-D kernel) — interior
         // only, with a zero border so nothing bleeds in.
-        let sigma = 1.0;
+        let sigma = sigma!(1.0);
         let truncate = 2.0; // radius 2, 5 taps
         let kernel = gaussian_kernel_1d(sigma, truncate);
         let w = kernel.weights();
@@ -1328,8 +1341,7 @@ mod tests {
         let mut src = Image::fill(11, 11, MonoF32::new(0.0));
         *src.pixel_at_mut(c, c) = MonoF32::new(1.0);
 
-        let out: Image<MonoF32> =
-            gaussian_blur_with(&src, sigma, truncate, &Constant(MonoF32(0.0)));
+        let out: Image<MonoF32> = convolve_separable(&src, &kernel, &Constant(MonoF32(0.0)));
 
         for dy in -(r as isize)..=(r as isize) {
             for dx in -(r as isize)..=(r as isize) {
@@ -1350,14 +1362,14 @@ mod tests {
         // Separability: the two-pass blur must equal a non-separable 2-D
         // convolution with the outer-product kernel. Checked on interior
         // pixels (where the border policy has no effect).
-        let sigma = 1.0;
+        let sigma = sigma!(1.0);
         let truncate = 2.0; // radius 2
         let kernel = gaussian_kernel_1d(sigma, truncate);
         let w = kernel.weights();
         let r = kernel.radius();
 
         let src = Image::generate(9, 9, |x, y| MonoF32::new((x * 3 + y * 5) as f32));
-        let out: Image<MonoF32> = gaussian_blur_with(&src, sigma, truncate, &Clamp);
+        let out: Image<MonoF32> = convolve_separable(&src, &kernel, &Clamp);
 
         for y in r..(9 - r) {
             for x in r..(9 - r) {
@@ -1388,7 +1400,7 @@ mod tests {
         });
 
         let max_slope = |sigma: f32| -> f32 {
-            let blurred: Image<MonoF32> = gaussian_blur(&src, sigma, &Clamp);
+            let blurred: Image<MonoF32> = gaussian_blur(&src, Sigma::new(sigma).unwrap(), &Clamp);
             let mut m = 0.0f32;
             for y in 0..blurred.height() {
                 for x in 1..blurred.width() {
@@ -1413,10 +1425,10 @@ mod tests {
     fn gaussian_blur_into_matches_owned() {
         let src = Image::generate(12, 12, |x, y| MonoF32::new((x + y) as f32));
 
-        let owned: Image<MonoF32> = gaussian_blur(&src, 1.5, &Clamp);
+        let owned: Image<MonoF32> = gaussian_blur(&src, sigma!(1.5), &Clamp);
 
         let mut into = Image::<MonoF32>::zero(owned.width(), owned.height());
-        gaussian_blur_into(&src, 1.5, &Clamp, &mut into);
+        gaussian_blur_into(&src, sigma!(1.5), &Clamp, &mut into);
 
         for y in 0..owned.height() {
             for x in 0..owned.width() {
@@ -1429,25 +1441,177 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "sigma must be > 0.0")]
-    fn gaussian_blur_zero_sigma_panics() {
-        let src = Image::fill(8, 8, MonoF32::new(1.0));
-        let _: Image<MonoF32> = gaussian_blur(&src, 0.0, &Clamp);
+    fn scratch_gaussian_blur_into_matches_owned_across_frames() {
+        // The scratch form must equal the allocating form on every call —
+        // the first (which sizes the buffers) and every later one (which
+        // reuses them).
+        let sigma = sigma!(1.5);
+        let mut scratch = SeparableScratch::new();
+        let mut reused = Image::<MonoF32>::zero(12, 12);
+
+        for frame in 0..3 {
+            let src = Image::generate(12, 12, |x, y| MonoF32::new((x + y + frame) as f32));
+            let owned: Image<MonoF32> = gaussian_blur(&src, sigma, &Clamp);
+
+            scratch.gaussian_blur_into(&src, sigma, &Clamp, &mut reused);
+
+            for y in 0..owned.height() {
+                for x in 0..owned.width() {
+                    assert!(
+                        (owned.pixel_at(x, y).0 - reused.pixel_at(x, y).0).abs() < 1e-6,
+                        "frame {frame}: mismatch at ({x}, {y}): owned={}, scratch={}",
+                        owned.pixel_at(x, y).0,
+                        reused.pixel_at(x, y).0,
+                    );
+                }
+            }
+        }
     }
+
+    #[test]
+    fn gaussian_blur_equals_convolve_with_its_own_kernel() {
+        // The claim that retired `gaussian_blur_with`: a σ blur *is* a
+        // separable convolution with the σ-derived kernel. If this ever
+        // drifts, the migration documented in the changelog is wrong.
+        let src = Image::generate(17, 13, |x, y| MonoF32::new((x * 5 + y * 3) as f32));
+
+        for sigma in [sigma!(0.05), sigma!(0.8), sigma!(1.5), sigma!(3.0)] {
+            let via_blur: Image<MonoF32> = gaussian_blur(&src, sigma, &Clamp);
+            let via_kernel: Image<MonoF32> =
+                convolve_separable(&src, &gaussian_kernel_1d(sigma, DEFAULT_TRUNCATE), &Clamp);
+
+            assert_eq!(via_blur.size(), via_kernel.size());
+            for y in 0..via_blur.height() {
+                for x in 0..via_blur.width() {
+                    assert_eq!(
+                        via_blur.pixel_at(x, y).0,
+                        via_kernel.pixel_at(x, y).0,
+                        "σ={}: mismatch at ({x}, {y})",
+                        sigma.get(),
+                    );
+                }
+            }
+        }
+
+        // Same for the `_into` pair, and for a border policy that shrinks.
+        let sigma = sigma!(1.2);
+        let kernel = gaussian_kernel_1d(sigma, DEFAULT_TRUNCATE);
+        let expected: Image<MonoF32> = convolve_separable(&src, &kernel, &Skip);
+        let mut actual = Image::<MonoF32>::zero(expected.width(), expected.height());
+        gaussian_blur_into(&src, sigma, &Skip, &mut actual);
+        for y in 0..expected.height() {
+            for x in 0..expected.width() {
+                assert_eq!(expected.pixel_at(x, y).0, actual.pixel_at(x, y).0);
+            }
+        }
+    }
+
+    #[test]
+    fn fixed_size_blurs_equal_their_kernel_form() {
+        // The four name-encoded sugar functions are documented as equivalent
+        // to naming the kernel; that equivalence is pinned here rather than
+        // asserted in prose.
+        let src = Image::generate(11, 9, |x, y| MonoF32::new((x * 7 + y) as f32));
+
+        let cases: [(Image<MonoF32>, Image<MonoF32>, &str); 4] = [
+            (
+                gaussian_blur_3x3(&src, &Clamp),
+                convolve_separable(&src, &SeparableKernel::gaussian_3(), &Clamp),
+                "gaussian_blur_3x3",
+            ),
+            (
+                gaussian_blur_5x5(&src, &Clamp),
+                convolve_separable(&src, &SeparableKernel::gaussian_5(), &Clamp),
+                "gaussian_blur_5x5",
+            ),
+            (
+                box_blur_3x3(&src, &Clamp),
+                convolve_separable(&src, &SeparableKernel::box_blur_3(), &Clamp),
+                "box_blur_3x3",
+            ),
+            (
+                box_blur_5x5(&src, &Clamp),
+                convolve_separable(&src, &SeparableKernel::box_blur_5(), &Clamp),
+                "box_blur_5x5",
+            ),
+        ];
+
+        for (sugar, kernel_form, name) in cases {
+            assert_eq!(sugar.size(), kernel_form.size(), "{name}: size");
+            for y in 0..sugar.height() {
+                for x in 0..sugar.width() {
+                    assert_eq!(
+                        sugar.pixel_at(x, y).0,
+                        kernel_form.pixel_at(x, y).0,
+                        "{name}: mismatch at ({x}, {y})",
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn scratch_convolve_separable_into_matches_owned_for_sigma_kernels() {
+        // Explicit truncate, a shrinking border policy, and a σ change on
+        // the same scratch: the kernel-position buffer is refilled per call,
+        // so a different tap count must not carry over.
+        let src = Image::generate(16, 11, |x, y| MonoF32::new((x * 2 + y) as f32));
+        let mut scratch = SeparableScratch::new();
+
+        for sigma in [sigma!(2.0), sigma!(0.8), sigma!(2.0)] {
+            let kernel = gaussian_kernel_1d(sigma, 3.0);
+            let owned: Image<MonoF32> = convolve_separable(&src, &kernel, &Skip);
+
+            let mut actual = Image::<MonoF32>::zero(owned.width(), owned.height());
+            scratch.convolve_separable_into(&src, &kernel, &Skip, &mut actual);
+
+            for y in 0..owned.height() {
+                for x in 0..owned.width() {
+                    assert!(
+                        (owned.pixel_at(x, y).0 - actual.pixel_at(x, y).0).abs() < 1e-4,
+                        "sigma {}: mismatch at ({x}, {y}): owned={}, scratch={}",
+                        sigma.get(),
+                        owned.pixel_at(x, y).0,
+                        actual.pixel_at(x, y).0,
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn scratch_gaussian_blur_into_u8_round_trip() {
+        // Input and output pixel types differ from the accumulator type the
+        // scratch is parameterized on.
+        let src = Image::fill(10, 10, Mono8::new(200));
+        let mut scratch = SeparableScratch::<MonoF32>::new();
+        let mut out = Image::<Mono8>::zero(10, 10);
+
+        scratch.gaussian_blur_into(&src, sigma!(1.2), &Clamp, &mut out);
+
+        for y in 0..out.height() {
+            for x in 0..out.width() {
+                assert_eq!(out.pixel_at(x, y), Mono8::new(200), "at ({x}, {y})");
+            }
+        }
+    }
+
+    // An invalid sigma is unrepresentable in the `Sigma` parameter type;
+    // its rejection is tested at the type's constructors in `common.rs`.
 
     #[test]
     #[should_panic(expected = "exceeds MAX_RADIUS")]
     fn gaussian_blur_over_radius_sigma_panics() {
         let src = Image::fill(8, 8, MonoF32::new(1.0));
         // radius = round(4.0 * 20.0) = 80 > MAX_RADIUS (64).
-        let _: Image<MonoF32> = gaussian_blur(&src, 20.0, &Clamp);
+        let _: Image<MonoF32> = gaussian_blur(&src, sigma!(20.0), &Clamp);
     }
 
     #[test]
     fn gaussian_blur_tiny_sigma_is_near_identity() {
         // round(4 * 0.05) = 0 ⇒ 1-tap identity kernel ⇒ input unchanged.
         let src = Image::generate(8, 8, |x, y| MonoF32::new((x * 2 + y) as f32));
-        let result: Image<MonoF32> = gaussian_blur(&src, 0.05, &Clamp);
+        let result: Image<MonoF32> = gaussian_blur(&src, sigma!(0.05), &Clamp);
         for y in 0..result.height() {
             for x in 0..result.width() {
                 assert!((result.pixel_at(x, y).0 - src.pixel_at(x, y).0).abs() < 1e-6);
@@ -1456,12 +1620,14 @@ mod tests {
     }
 
     #[test]
-    fn gaussian_blur_with_smaller_truncate_is_smaller_kernel() {
+    fn smaller_truncate_is_a_smaller_kernel() {
         // Qualitative: a flat image is preserved regardless of truncate, and
         // both truncate values run without panicking on the same input.
         let src = Image::fill(20, 20, MonoF32::new(0.5));
-        let r4: Image<MonoF32> = gaussian_blur_with(&src, 2.0, 4.0, &Clamp);
-        let r3: Image<MonoF32> = gaussian_blur_with(&src, 2.0, 3.0, &Clamp);
+        let r4: Image<MonoF32> =
+            convolve_separable(&src, &gaussian_kernel_1d(sigma!(2.0), 4.0), &Clamp);
+        let r3: Image<MonoF32> =
+            convolve_separable(&src, &gaussian_kernel_1d(sigma!(2.0), 3.0), &Clamp);
         for y in 0..src.height() {
             for x in 0..src.width() {
                 assert!((r4.pixel_at(x, y).0 - 0.5).abs() < 1e-4);
@@ -1847,7 +2013,7 @@ mod tests {
         // Horizontal gradient (θ = 0): a [1,2,3,2,1] ridge keeps only the peak.
         let mag = mag_grid(5, 1, &[1.0, 2.0, 3.0, 2.0, 1.0]);
         let dir = Image::fill(5, 1, MonoF32::new(0.0));
-        let thin = non_maximum_suppression(&mag, &dir);
+        let thin = non_maximum_suppression(&mag, &dir).unwrap();
         let row: Vec<f32> = (0..5).map(|x| thin.pixel_at(x, 0).0).collect();
         assert_eq!(row, vec![0.0, 0.0, 3.0, 0.0, 0.0]);
     }
@@ -1858,7 +2024,7 @@ mod tests {
         // (a strict `>` would erase this flat ridge).
         let mag = mag_grid(3, 1, &[2.0, 2.0, 2.0]);
         let dir = Image::fill(3, 1, MonoF32::new(0.0));
-        let thin = non_maximum_suppression(&mag, &dir);
+        let thin = non_maximum_suppression(&mag, &dir).unwrap();
         assert_eq!(thin.pixel_at(1, 0).0, 2.0);
     }
 
@@ -1868,7 +2034,7 @@ mod tests {
         // out-of-bounds neighbour and are suppressed; the centre survives.
         let mag = Image::fill(3, 3, MonoF32::new(5.0));
         let dir = Image::fill(3, 3, MonoF32::new(0.0));
-        let thin = non_maximum_suppression(&mag, &dir);
+        let thin = non_maximum_suppression(&mag, &dir).unwrap();
         for y in 0..3 {
             assert_eq!(thin.pixel_at(0, y).0, 0.0, "left border at y={y}");
             assert_eq!(thin.pixel_at(2, y).0, 0.0, "right border at y={y}");
@@ -1921,7 +2087,7 @@ mod tests {
             let mut mag = Image::fill(3, 3, MonoF32::new(0.0));
             *mag.pixel_at_mut(1, 1) = MonoF32::new(5.0);
             *mag.pixel_at_mut(case.along[0].0, case.along[0].1) = MonoF32::new(9.0);
-            let thin = non_maximum_suppression(&mag, &dir);
+            let thin = non_maximum_suppression(&mag, &dir).unwrap();
             assert_eq!(thin.pixel_at(1, 1).0, 0.0, "case {i}: should suppress");
 
             // Higher neighbours only OFF the gradient ⇒ centre kept.
@@ -1930,7 +2096,7 @@ mod tests {
             for &(x, y) in &case.off {
                 *mag.pixel_at_mut(x, y) = MonoF32::new(9.0);
             }
-            let thin = non_maximum_suppression(&mag, &dir);
+            let thin = non_maximum_suppression(&mag, &dir).unwrap();
             assert_eq!(thin.pixel_at(1, 1).0, 5.0, "case {i}: should keep");
         }
     }
@@ -1951,15 +2117,29 @@ mod tests {
         )
         .unwrap();
         let dir = Image::fill(5, 1, MonoF64::new(0.0));
-        let thin = non_maximum_suppression(&mag, &dir);
+        let thin = non_maximum_suppression(&mag, &dir).unwrap();
         let row: Vec<f64> = (0..5).map(|x| thin.pixel_at(x, 0).0).collect();
         assert_eq!(row, vec![0.0, 0.0, 3.0, 0.0, 0.0]);
 
         // A vertical gradient on the same accumulator: θ = π/2 compares
         // up/down, so a single-row image suppresses everything.
         let dir = Image::fill(5, 1, MonoF64::new(std::f64::consts::FRAC_PI_2));
-        let thin = non_maximum_suppression(&mag, &dir);
+        let thin = non_maximum_suppression(&mag, &dir).unwrap();
         assert!((0..5).all(|x| thin.pixel_at(x, 0).0 == 0.0));
+    }
+
+    #[test]
+    fn nms_size_mismatch_is_error() {
+        let mag = Image::fill(4, 4, MonoF32::new(1.0));
+        let dir = Image::fill(3, 4, MonoF32::new(0.0));
+        let result: Result<Image<MonoF32>, Error> = non_maximum_suppression(&mag, &dir);
+        assert_eq!(
+            result.unwrap_err(),
+            Error::SizeMismatch {
+                expected: Size::new(4, 4),
+                actual: Size::new(3, 4),
+            }
+        );
     }
 
     // ── fused (gradient-driven) suppression ─────────────────────────────
@@ -2015,15 +2195,11 @@ mod tests {
         let mag = gradient_magnitude(&gx, &gy).unwrap();
         let dir = gradient_direction(&gx, &gy).unwrap();
 
-        let staged = non_maximum_suppression(&mag, &dir);
+        let staged = non_maximum_suppression(&mag, &dir).unwrap();
         let fused = non_maximum_suppression_from_gradients(&mag, &gx, &gy);
         for y in 0..9 {
             for x in 0..11 {
-                assert_eq!(
-                    staged.pixel_at(x, y).0,
-                    fused.pixel_at(x, y).0,
-                    "({x},{y})"
-                );
+                assert_eq!(staged.pixel_at(x, y).0, fused.pixel_at(x, y).0, "({x},{y})");
             }
         }
     }

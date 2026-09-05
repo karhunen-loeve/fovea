@@ -15,7 +15,7 @@ use crate::Error;
 use crate::analyze::integral::{IntegralImage, integral_image};
 use crate::image::{BinaryImage, ImageView, RasterImage, RasterImageMut};
 use crate::pixel::{IntegralPixel, Mono32, Mono64, MonoF64};
-use crate::{Coordinate, Rectangle, Size};
+use crate::{Coordinate, OddWindowSide, Rectangle, Size};
 
 mod sealed {
     /// Seals [`AdaptiveAccumulator`](super::AdaptiveAccumulator): the set
@@ -39,14 +39,14 @@ mod sealed {
 /// system rather than a runtime assert (contrast
 /// [`hysteresis_threshold`](super::hysteresis_threshold)).
 ///
-/// The associated [`Offset`](Self::Offset) is the signed bias domain:
+/// The associated [`BiasValue`](Self::BiasValue) is the signed bias domain:
 /// `i64` for the integer accumulators (`Mono32`, `Mono64`) and `f64` for
 /// `MonoF64`. The offset is keyed on the accumulator rather than on its
 /// (unsigned) channel type, which could not represent a negative bias.
 pub trait AdaptiveAccumulator: sealed::Sealed + Copy + Sub<Output = Self> {
     /// Signed offset domain for [`Bias<Self>`](Bias): `i64` for integer
     /// accumulators, `f64` for `MonoF64`.
-    type Offset: Copy + core::fmt::Debug + PartialEq;
+    type BiasValue: Copy + core::fmt::Debug + PartialEq;
 
     /// Build the summed-area table of `image` with `Self` as the
     /// accumulator. Delegates to
@@ -70,11 +70,11 @@ pub trait AdaptiveAccumulator: sealed::Sealed + Copy + Sub<Output = Self> {
     /// `region_sum`; `area` is the clipped pixel count. Equality is
     /// **background** (strict `>`).
     #[doc(hidden)]
-    fn exceeds_local_mean(pixel: Self, sum: Self, area: u64, offset: Self::Offset) -> bool;
+    fn exceeds_local_mean(pixel: Self, sum: Self, area: u64, offset: Self::BiasValue) -> bool;
 }
 
 impl AdaptiveAccumulator for Mono32 {
-    type Offset = i64;
+    type BiasValue = i64;
 
     #[inline]
     fn integral_of<I>(image: &I) -> Result<IntegralImage<Self>, Error>
@@ -96,7 +96,7 @@ impl AdaptiveAccumulator for Mono32 {
 }
 
 impl AdaptiveAccumulator for Mono64 {
-    type Offset = i64;
+    type BiasValue = i64;
 
     #[inline]
     fn integral_of<I>(image: &I) -> Result<IntegralImage<Self>, Error>
@@ -118,7 +118,7 @@ impl AdaptiveAccumulator for Mono64 {
 }
 
 impl AdaptiveAccumulator for MonoF64 {
-    type Offset = f64;
+    type BiasValue = f64;
 
     #[inline]
     fn integral_of<I>(image: &I) -> Result<IntegralImage<Self>, Error>
@@ -146,10 +146,11 @@ impl AdaptiveAccumulator for MonoF64 {
 /// **background**. A `Bias::new(0)` makes the decision a strict
 /// `pixel > local_mean`.
 ///
-/// The wrapped value is `A::Offset` — `i64` for the integer accumulators
+/// The wrapped value is `A::BiasValue` — `i64` for the integer accumulators
 /// (`Mono32`, `Mono64`) and `f64` for `MonoF64`. The newtype exists to
 /// keep the sign explicit and to stop the offset being accidentally
-/// transposed with `adaptive_threshold`'s `window: usize` argument.
+/// transposed with `adaptive_threshold`'s window argument, which carries
+/// its own type ([`OddWindowSide`]) for the same reason.
 ///
 /// # Examples
 ///
@@ -157,32 +158,34 @@ impl AdaptiveAccumulator for MonoF64 {
 /// use fovea::analyze::threshold::{adaptive_threshold, Bias};
 /// use fovea::image::{Image, ImageView};
 /// use fovea::pixel::{Mono8, Mono32};
+/// use fovea::window;
 ///
 /// let img = Image::fill(5, 5, Mono8::new(100));
+/// let window = window!(3);
 /// // Zero bias: a pixel equal to its local mean is background (strict `>`).
-/// let mask = adaptive_threshold::<_, Mono32>(&img, 3, Bias::new(0)).unwrap();
+/// let mask = adaptive_threshold::<_, Mono32>(&img, window, Bias::new(0)).unwrap();
 /// assert!(!mask.pixel_at(2, 2));
 /// // Positive bias lowers the threshold → foreground.
-/// let mask = adaptive_threshold::<_, Mono32>(&img, 3, Bias::new(1)).unwrap();
+/// let mask = adaptive_threshold::<_, Mono32>(&img, window, Bias::new(1)).unwrap();
 /// assert!(mask.pixel_at(2, 2));
 /// ```
-pub struct Bias<A: AdaptiveAccumulator>(A::Offset);
+pub struct Bias<A: AdaptiveAccumulator>(A::BiasValue);
 
 impl<A: AdaptiveAccumulator> Bias<A> {
     /// Wrap a signed offset value in the accumulator's bias domain.
     #[inline]
-    pub fn new(offset: A::Offset) -> Self {
+    pub fn new(offset: A::BiasValue) -> Self {
         Bias(offset)
     }
 
     /// The wrapped offset value.
     #[inline]
-    pub fn get(self) -> A::Offset {
+    pub fn get(self) -> A::BiasValue {
         self.0
     }
 }
 
-// Hand-written (not derived) so the bounds land on `A::Offset` — which is
+// Hand-written (not derived) so the bounds land on `A::BiasValue` — which is
 // always `Copy + Debug + PartialEq` per the trait — rather than on `A`.
 impl<A: AdaptiveAccumulator> Clone for Bias<A> {
     fn clone(&self) -> Self {
@@ -218,6 +221,11 @@ impl<A: AdaptiveAccumulator> PartialEq for Bias<A> {
 /// images, `MonoF64` for float input. `A` also fixes the
 /// [`Bias`] domain (`i64` for integer accumulators, `f64` for `MonoF64`).
 ///
+/// `window` is the side of the square neighbourhood, carried by
+/// [`OddWindowSide`] so that the "odd and non-zero" requirement (an even
+/// window has no centre pixel to threshold) is settled where the value is
+/// written rather than on entry here.
+///
 /// # Algorithm
 ///
 /// Builds one summed-area table ([`integral_image`](crate::analyze::integral::integral_image)),
@@ -252,10 +260,11 @@ impl<A: AdaptiveAccumulator> PartialEq for Bias<A> {
 /// image of these dimensions — the same data-dependent failure surfaced by
 /// the integral pre-flight. Choose a wider accumulator.
 ///
-/// # Panics — Tier 3
+/// # Panics
 ///
-/// Panics if `window` is even or zero (the window must have a well-defined
-/// centre pixel).
+/// Never, on the parameters: the window's invariant lives in [`OddWindowSide`]
+/// and the bias domain in [`Bias`], so this function has no parameter
+/// precondition left to violate.
 ///
 /// # Examples
 ///
@@ -263,18 +272,19 @@ impl<A: AdaptiveAccumulator> PartialEq for Bias<A> {
 /// use fovea::analyze::threshold::{adaptive_threshold, Bias};
 /// use fovea::image::{Image, ImageView, ImageViewMut};
 /// use fovea::pixel::{Mono8, Mono32};
+/// use fovea::window;
 ///
 /// // A flat field (value 50) with one locally bright spot (90).
 /// let mut img = Image::fill(7, 3, Mono8::new(50));
 /// *img.pixel_at_mut(3, 1) = Mono8::new(90);
 ///
-/// let mask = adaptive_threshold::<_, Mono32>(&img, 3, Bias::new(0)).unwrap();
+/// let mask = adaptive_threshold::<_, Mono32>(&img, window!(3), Bias::new(0)).unwrap();
 /// assert!(mask.pixel_at(3, 1));   // brighter than its local mean
 /// assert!(!mask.pixel_at(0, 0));  // flat field → equals local mean
 /// ```
 pub fn adaptive_threshold<I, A>(
     image: &I,
-    window: usize,
+    window: OddWindowSide,
     offset: Bias<A>,
 ) -> Result<BinaryImage, Error>
 where
@@ -302,11 +312,11 @@ where
 ///
 /// # Panics — Tier 3
 ///
-/// In addition to the panics documented on [`adaptive_threshold`]: panics
-/// if `out.size() != image.size()`.
+/// Panics if `out.size() != image.size()` (the caller allocated the mask
+/// from sizes in hand).
 pub fn adaptive_threshold_into<I, A>(
     image: &I,
-    window: usize,
+    window: OddWindowSide,
     offset: Bias<A>,
     out: &mut BinaryImage,
 ) -> Result<(), Error>
@@ -315,10 +325,6 @@ where
     I::Pixel: IntegralPixel<A>,
     A: AdaptiveAccumulator,
 {
-    assert!(
-        window != 0 && window % 2 == 1,
-        "adaptive_threshold: window must be odd and non-zero, got {window}"
-    );
     assert_eq!(
         out.size(),
         image.size(),
@@ -332,7 +338,8 @@ where
 
     // One summed-area table; this is where the Tier 2 pre-flight runs.
     let sat = A::integral_of(image)?;
-    let half = window / 2;
+    // Exact for an odd side, which is the invariant `OddWindowSide` carries.
+    let half = window.radius();
     let off = offset.0;
 
     for y in 0..h {
@@ -362,6 +369,11 @@ mod tests {
     use super::*;
     use crate::image::{Image, ImageView, ImageViewMut};
     use crate::pixel::{Mono8, MonoF32};
+
+    /// Shorthand for the window literal each behaviour test pins.
+    fn win(side: usize) -> OddWindowSide {
+        OddWindowSide::new(side).unwrap()
+    }
 
     /// Collect the `true` pixel coordinates of a mask into a sorted set.
     fn set_true(m: &BinaryImage) -> std::collections::BTreeSet<(usize, usize)> {
@@ -407,7 +419,7 @@ mod tests {
         // Flat image: every pixel equals its local mean, so the strict `>`
         // is false everywhere — pins the no-rounding property too.
         let img = Image::fill(5, 5, Mono8::new(100));
-        let out = adaptive_threshold::<_, Mono32>(&img, 3, Bias::new(0)).unwrap();
+        let out = adaptive_threshold::<_, Mono32>(&img, win(3), Bias::new(0)).unwrap();
         assert!(set_true(&out).is_empty());
     }
 
@@ -419,7 +431,7 @@ mod tests {
         // `(pixel + offset) * area > sum` and prose "positive offset biases
         // toward foreground". This implementation follows the formula.)
         let img = Image::fill(5, 5, Mono8::new(100));
-        let out = adaptive_threshold::<_, Mono32>(&img, 3, Bias::new(1)).unwrap();
+        let out = adaptive_threshold::<_, Mono32>(&img, win(3), Bias::new(1)).unwrap();
         for y in 0..out.height() {
             for x in 0..out.width() {
                 assert!(out.pixel_at(x, y), "({x},{y}) should be foreground");
@@ -437,7 +449,7 @@ mod tests {
         let mut img = Image::generate(8, 3, |x, _| Mono8::new(if x < 4 { 50 } else { 150 }));
         *img.pixel_at_mut(1, 1) = Mono8::new(90);
 
-        let out = adaptive_threshold::<_, Mono32>(&img, 3, Bias::new(0)).unwrap();
+        let out = adaptive_threshold::<_, Mono32>(&img, win(3), Bias::new(0)).unwrap();
         assert!(out.pixel_at(1, 1), "local spot must be foreground");
         // Bright flat interior: pixel equals its local mean → background,
         // even though it is the brightest region in the image.
@@ -453,9 +465,9 @@ mod tests {
         // Degenerate but well-defined: zero bias is background everywhere,
         // a positive bias is foreground everywhere, regardless of content.
         let img = Image::generate(4, 4, |x, y| Mono8::new((x * 16 + y * 4) as u8));
-        let bg = adaptive_threshold::<_, Mono32>(&img, 1, Bias::new(0)).unwrap();
+        let bg = adaptive_threshold::<_, Mono32>(&img, win(1), Bias::new(0)).unwrap();
         assert!(set_true(&bg).is_empty());
-        let fg = adaptive_threshold::<_, Mono32>(&img, 1, Bias::new(1)).unwrap();
+        let fg = adaptive_threshold::<_, Mono32>(&img, win(1), Bias::new(1)).unwrap();
         assert_eq!(set_true(&fg).len(), 16);
     }
 
@@ -465,7 +477,7 @@ mod tests {
         // full image, so the threshold is the global mean. Values 1..=9 have
         // global mean 5 (sum 45 / area 9); foreground iff pixel > 5.
         let img = Image::generate(3, 3, |x, y| Mono8::new((y * 3 + x + 1) as u8));
-        let out = adaptive_threshold::<_, Mono32>(&img, 9, Bias::new(0)).unwrap();
+        let out = adaptive_threshold::<_, Mono32>(&img, win(9), Bias::new(0)).unwrap();
         let expected: std::collections::BTreeSet<_> = (0..3)
             .flat_map(|y| (0..3).map(move |x| (x, y)))
             .filter(|&(x, y)| (y * 3 + x + 1) > 5)
@@ -485,33 +497,26 @@ mod tests {
         *img.pixel_at_mut(1, 0) = Mono8::new(20);
         *img.pixel_at_mut(0, 1) = Mono8::new(20);
         *img.pixel_at_mut(1, 1) = Mono8::new(10);
-        let out = adaptive_threshold::<_, Mono32>(&img, 3, Bias::new(0)).unwrap();
+        let out = adaptive_threshold::<_, Mono32>(&img, win(3), Bias::new(0)).unwrap();
         assert!(
             !out.pixel_at(0, 0),
             "corner must divide by the clipped area (4), not the full 9"
         );
     }
 
-    #[test]
-    #[should_panic(expected = "window must be odd")]
-    fn even_window_panics() {
-        let img = Image::fill(4, 4, Mono8::new(0));
-        let _ = adaptive_threshold::<_, Mono32>(&img, 2, Bias::new(0));
-    }
-
-    #[test]
-    #[should_panic(expected = "window must be odd")]
-    fn zero_window_panics() {
-        let img = Image::fill(4, 4, Mono8::new(0));
-        let _ = adaptive_threshold::<_, Mono32>(&img, 0, Bias::new(0));
-    }
+    // The even / zero window cases are no longer reachable through
+    // `adaptive_threshold`: the parity invariant moved into `OddWindowSide`, so
+    // this function has no window precondition left to violate and the
+    // rejection is tested at the constructor instead (see the `odd_window_side_*`
+    // tests in `common`). `window!(2)` does not compile at all, wherever it is
+    // written, which is the point of the move.
 
     #[test]
     fn accumulator_overflow_is_err() {
         // 255 × 5000 × 5000 > u32::MAX, so the Mono32 accumulator fails the
         // integral pre-flight regardless of pixel data (worst-case bound).
         let img = Image::<Mono8>::zero(5000, 5000);
-        let err = adaptive_threshold::<_, Mono32>(&img, 3, Bias::new(0)).unwrap_err();
+        let err = adaptive_threshold::<_, Mono32>(&img, win(3), Bias::new(0)).unwrap_err();
         assert!(
             matches!(err, Error::AccumulatorOverflow { .. }),
             "expected AccumulatorOverflow, got {err:?}"
@@ -523,11 +528,11 @@ mod tests {
         let img = Image::generate(6, 5, |x, y| {
             Mono8::new(((x.wrapping_mul(53).wrapping_add(y.wrapping_mul(97))) & 0xFF) as u8)
         });
-        let owned = adaptive_threshold::<_, Mono32>(&img, 3, Bias::new(-3)).unwrap();
+        let owned = adaptive_threshold::<_, Mono32>(&img, win(3), Bias::new(-3)).unwrap();
 
         // Pre-fill with the opposite pattern to prove every pixel is written.
         let mut into = BinaryImage::fill(img.width(), img.height(), true);
-        adaptive_threshold_into::<_, Mono32>(&img, 3, Bias::new(-3), &mut into).unwrap();
+        adaptive_threshold_into::<_, Mono32>(&img, win(3), Bias::new(-3), &mut into).unwrap();
 
         assert_eq!(set_true(&owned), set_true(&into));
     }
@@ -537,7 +542,7 @@ mod tests {
     fn into_wrong_size_panics() {
         let img = Image::fill(4, 4, Mono8::new(1));
         let mut out = BinaryImage::fill(5, 5, false);
-        let _ = adaptive_threshold_into::<_, Mono32>(&img, 3, Bias::new(0), &mut out);
+        let _ = adaptive_threshold_into::<_, Mono32>(&img, win(3), Bias::new(0), &mut out);
     }
 
     #[test]
@@ -548,7 +553,8 @@ mod tests {
         });
         for &window in &[1usize, 3, 5] {
             for &offset in &[0i64, 5, -7] {
-                let got = adaptive_threshold::<_, Mono32>(&img, window, Bias::new(offset)).unwrap();
+                let got =
+                    adaptive_threshold::<_, Mono32>(&img, win(window), Bias::new(offset)).unwrap();
                 let want = naive(&img, window, offset);
                 assert_eq!(
                     set_true(&got),
@@ -586,7 +592,7 @@ mod tests {
             (p + 0.0) * area > sum
         });
 
-        let got = adaptive_threshold::<_, MonoF64>(&img, 3, Bias::new(0.0)).unwrap();
+        let got = adaptive_threshold::<_, MonoF64>(&img, win(3), Bias::new(0.0)).unwrap();
         assert_eq!(set_true(&got), set_true(&want));
     }
 
