@@ -19,7 +19,10 @@
 use crate::Size;
 use crate::border::Mirror;
 use crate::error::Error;
-use crate::image::{Image, ImageView, ImageViewMut, Pyramid, RasterImage, SeparableKernel};
+use crate::image::{
+    Dyadic, Image, ImageView, ImageViewMut, LevelChain, Pyramid, PyramidLevel, RasterImage,
+    SeparableKernel,
+};
 use crate::pixel::{FromLinear, LinearPixel, LinearSpace, ZeroablePixel};
 use crate::transform::convolve_separable::convolve_separable;
 
@@ -190,6 +193,65 @@ where
     Ok(convolve_separable(&upsampled, &kernel, &Mirror))
 }
 
+// ─── expand ─────────────────────────────────────────────────────────────────
+
+impl<C: Pyramid> Dyadic<C> {
+    /// Lifts the level at `child` back to the size of its parent.
+    ///
+    /// This is [`pyr_up`] with the target taken from the neighbouring
+    /// level instead of from the caller. The free function keeps existing
+    /// and stays the right call for an image of unknown provenance: a
+    /// 51-wide image could be the reduction of 101 or of 102, so its
+    /// parent size is genuinely input. Inside a [`Dyadic`] pyramid it is
+    /// not input, it is already stored, and the ambiguity `pyr_up`'s
+    /// `target` argument exists to resolve cannot arise.
+    ///
+    /// The result is a plain [`Image<P>`], not a level: a raised child is
+    /// an approximation of its parent, not the parent, and giving it the
+    /// parent's geometry would be a claim nothing backs.
+    ///
+    /// Returns `None` exactly when there is no parent to lift to — for
+    /// `child == 0`, which is the finest level, and for any `child` at or
+    /// past [`depth`](Pyramid::depth). That is the same question
+    /// [`get`](Pyramid::get) answers, and it is the only one left: the
+    /// halving guarantee makes every index that does have a parent
+    /// succeed.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use fovea::image::{Image, ImageView, Pyramid};
+    /// use fovea::pixel::MonoF32;
+    /// use fovea::transform::{Gaussian, PyramidMethod};
+    ///
+    /// let img = Image::fill(20, 12, MonoF32::new(0.5));
+    /// let pyramid = Gaussian.build(&img, 3);
+    ///
+    /// let raised: Image<MonoF32> = pyramid.expand(2).expect("level 2 has a parent");
+    /// assert_eq!(raised.size(), pyramid.level(1).size());
+    ///
+    /// assert!(pyramid.expand(0).is_none()); // the finest level has no parent
+    /// assert!(pyramid.expand(3).is_none()); // no such level
+    /// ```
+    pub fn expand<P, Acc>(&self, child: usize) -> Option<Image<P>>
+    where
+        C::Level: PyramidLevel<Pixel = P>,
+        P: LinearPixel<f32, Accumulator = Acc> + LinearSpace + ZeroablePixel + FromLinear<Acc>,
+        Acc: Copy
+            + Default
+            + ZeroablePixel
+            + LinearPixel<f32, Accumulator = Acc>
+            + std::ops::Add<Output = Acc>,
+    {
+        let source = self.get(child)?;
+        let parent = self.get(child.checked_sub(1)?)?;
+        Some(
+            pyr_up(source.as_image(), parent.as_image().size())
+                .expect("Dyadic guarantees the parent is a valid pyr_up target"),
+        )
+    }
+}
+
 // ─── PyramidMethod strategy ─────────────────────────────────────────────────
 
 /// Strategy trait for pyramid construction.
@@ -199,12 +261,18 @@ where
 /// [`ResizeMethod`](crate::transform::ResizeMethod) and
 /// [`ConvertPixel`](crate::transform::ConvertPixel). Implement this trait
 /// for custom decomposition schemes; assemble the result with
-/// [`Pyramid::try_from_levels`](crate::image::Pyramid::try_from_levels).
+/// [`LevelChain::try_from_levels`](crate::image::LevelChain::try_from_levels).
+///
+/// The container is named by [`Output`](Self::Output) rather than fixed, so
+/// a method that halves can return a [`Dyadic`](crate::image::Dyadic) one
+/// and hand its callers [`expand`](crate::image::Dyadic::expand), while a
+/// method that does not returns the plain chain. The level type is reached
+/// through it as `<Self::Output as Pyramid>::Level`.
 ///
 /// # Example
 ///
 /// ```
-/// use fovea::image::{Image, ImageView};
+/// use fovea::image::{Image, ImageView, Pyramid};
 /// use fovea::pixel::MonoF32;
 /// use fovea::transform::{Gaussian, PyramidMethod};
 ///
@@ -215,8 +283,8 @@ where
 /// assert_eq!(pyramid.coarsest().size().width, 4);
 /// ```
 pub trait PyramidMethod<P: Copy> {
-    /// The level type of the pyramid this method produces.
-    type Level: crate::image::PyramidLevel;
+    /// The pyramid this method produces, container and level type at once.
+    type Output: Pyramid;
 
     /// Builds a pyramid from the given image.
     ///
@@ -231,7 +299,7 @@ pub trait PyramidMethod<P: Copy> {
     /// and never mutates the caller's parameters. The resolved depth is
     /// whatever [`Pyramid::depth`] reports afterwards. The result always
     /// contains at least one level.
-    fn build<I>(&self, image: &I, max_depth: usize) -> Pyramid<Self::Level>
+    fn build<I>(&self, image: &I, max_depth: usize) -> Self::Output
     where
         I: RasterImage<Pixel = P>;
 }
@@ -243,6 +311,12 @@ pub trait PyramidMethod<P: Copy> {
 /// division) with the pinned binomial smoothing. The levels are plain
 /// [`Image<P>`] values — no wrapper, no stored strategy.
 ///
+/// Because every step halves, the result is a
+/// [`Dyadic`](crate::image::Dyadic) pyramid and therefore carries
+/// [`expand`](crate::image::Dyadic::expand): the way back up needs no
+/// target size. The halving is established by construction here, so nothing
+/// re-checks it.
+///
 /// The build stops early once a level cannot shrink further (1×1), so the
 /// resolved depth may be smaller than requested; a `max_depth` of 0 is
 /// treated as 1, because a pyramid always contains at least its base level.
@@ -251,7 +325,7 @@ pub trait PyramidMethod<P: Copy> {
 ///
 /// ```
 /// use fovea::Size;
-/// use fovea::image::{GaussianPyramid, Image, ImageView};
+/// use fovea::image::{GaussianPyramid, Image, ImageView, Pyramid};
 /// use fovea::pixel::MonoF32;
 /// use fovea::transform::{Gaussian, PyramidMethod};
 ///
@@ -273,9 +347,9 @@ where
         + LinearPixel<f32, Accumulator = Acc>
         + std::ops::Add<Output = Acc>,
 {
-    type Level = Image<P>;
+    type Output = Dyadic<LevelChain<Image<P>>>;
 
-    fn build<I>(&self, image: &I, max_depth: usize) -> Pyramid<Image<P>>
+    fn build<I>(&self, image: &I, max_depth: usize) -> Self::Output
     where
         I: RasterImage<Pixel = P>,
     {
@@ -301,8 +375,11 @@ where
             let next = pyr_down(prev);
             levels.push(next);
         }
-        Pyramid::try_from_levels(levels)
-            .expect("Gaussian::build produces non-empty, strictly shrinking levels")
+        let chain = LevelChain::try_from_levels(levels)
+            .expect("Gaussian::build produces non-empty, strictly shrinking levels");
+        // Every level is the `pyr_down` of its predecessor, so the halving
+        // relation holds by construction: PHILOSOPHY §12's licensed case.
+        Dyadic::new_unchecked(chain)
     }
 }
 
@@ -614,6 +691,63 @@ mod tests {
         assert_eq!(pyramid.depth(), 3);
         assert_eq!(pyramid.coarsest().size(), Size::new(4, 3));
         assert_eq!(pyramid.coarsest().pixel_at(0, 0), Mono8::new(200));
+    }
+
+    // ── expand ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn expand_recovers_every_parent_size() {
+        // Odd on both axes, so the doubling `pyr_up` cannot guess is
+        // exercised at every step rather than only at the last.
+        let src = Image::fill(21, 13, MonoF32::new(0.5));
+        let pyramid = Gaussian.build(&src, 4);
+        for child in 1..pyramid.depth() {
+            let raised: Image<MonoF32> = pyramid.expand(child).expect("child has a parent");
+            assert_eq!(raised.size(), pyramid.level(child - 1).size());
+        }
+    }
+
+    #[test]
+    fn expand_matches_pyr_up_with_the_parent_size() {
+        let src = Image::fill(20, 12, MonoF32::new(0.25));
+        let pyramid = Gaussian.build(&src, 3);
+        let by_hand: Image<MonoF32> =
+            pyr_up(pyramid.level(2), pyramid.level(1).size()).expect("valid target");
+        let raised: Image<MonoF32> = pyramid.expand(2).expect("level 2 has a parent");
+        assert_eq!(raised.size(), by_hand.size());
+        for y in 0..raised.height() {
+            for x in 0..raised.width() {
+                assert_eq!(raised.pixel_at(x, y), by_hand.pixel_at(x, y));
+            }
+        }
+    }
+
+    #[test]
+    fn expand_has_no_parent_for_the_finest_level() {
+        let src = Image::fill(16, 16, MonoF32::new(0.5));
+        let pyramid = Gaussian.build(&src, 3);
+        assert!(pyramid.expand::<MonoF32, _>(0).is_none());
+    }
+
+    #[test]
+    fn expand_has_no_level_past_the_depth() {
+        let src = Image::fill(16, 16, MonoF32::new(0.5));
+        let pyramid = Gaussian.build(&src, 3);
+        assert!(pyramid.expand::<MonoF32, _>(3).is_none());
+        assert!(pyramid.expand::<MonoF32, _>(99).is_none());
+    }
+
+    #[test]
+    fn expand_works_on_an_imported_chain() {
+        // Not builder-made: the validating constructor is what unlocks it.
+        let chain = LevelChain::try_from_levels(vec![
+            Image::fill(9, 7, MonoF32::new(0.5)),
+            Image::fill(5, 4, MonoF32::new(0.5)),
+        ])
+        .unwrap();
+        let pyramid = Dyadic::try_new(chain).unwrap();
+        let raised: Image<MonoF32> = pyramid.expand(1).expect("level 1 has a parent");
+        assert_eq!(raised.size(), Size::new(9, 7));
     }
 
     // ── Level→base coordinate lift property ─────────────────────────────

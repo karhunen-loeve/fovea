@@ -874,7 +874,7 @@ mod tests {
     use crate::Coordinate;
     use crate::border::{Clamp, Constant, Mirror, Skip};
     use crate::features::{HasPosition, HasResponse, retain_top_n};
-    use crate::image::{OriginOffset, Pyramid, ScaledImage};
+    use crate::image::{LevelChain, OriginOffset, Pyramid, ScaledImage};
     use crate::pixel::{Mono8, Mono16, MonoF64};
     use crate::transform::{pyr_down, rotate_90};
     use crate::{pixel_distance, sigma};
@@ -1936,7 +1936,7 @@ mod tests {
                 sigma!(1.0),
             ),
         ];
-        let pyramid = Pyramid::try_from_levels(levels).unwrap();
+        let pyramid = LevelChain::try_from_levels(levels).unwrap();
         let params = FastParams::new(
             SegmentTest::new(0.1, 9).unwrap(),
             NmsRadius::new(2).unwrap(),

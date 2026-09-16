@@ -32,7 +32,7 @@ mod internal;
 /// - [`SubView`](image::SubView), [`SubViewMut`](image::SubViewMut) — region-of-interest access
 /// - [`Neighborhood`](image::Neighborhood), [`Kernel`](image::Kernel) — kernel/mask types
 /// - [`ImagePlanes`](image::ImagePlanes) — planar image representation
-/// - [`Pyramid`](image::Pyramid), [`PyramidLevel`](image::PyramidLevel) — multi-resolution pyramids and their level traits
+/// - [`Pyramid`](image::Pyramid), [`LevelChain`](image::LevelChain), [`Dyadic`](image::Dyadic), [`PyramidLevel`](image::PyramidLevel) — multi-resolution pyramids, their containers and their level traits
 /// - [`zip_pixels`](image::zip_pixels) — pixel-pair iteration
 pub mod image;
 

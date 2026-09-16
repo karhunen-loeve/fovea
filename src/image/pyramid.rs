@@ -1,7 +1,8 @@
 //! Multi-resolution image pyramids.
 //!
-//! A [`Pyramid<L>`] is a chain of levels at decreasing resolution, generic
-//! over the level type `L` rather than over the construction method: the
+//! [`Pyramid`] is the trait a chain of levels at decreasing resolution
+//! implements, and [`LevelChain<L>`] is its ordinary container: generic over
+//! the level type `L` rather than over the construction method, so the
 //! structural truth ("what does a level contain?") lives in the type, while
 //! the construction strategy
 //! ([`PyramidMethod`](crate::transform::PyramidMethod)) is consumed at build
@@ -9,9 +10,14 @@
 //! [`ResizeMethod`](crate::transform::ResizeMethod) and
 //! [`ConvertPixel`](crate::transform::ConvertPixel).
 //!
+//! [`Dyadic<C>`] wraps any container whose neighbouring levels halve and is
+//! what turns the lift back up into
+//! [`expand`](crate::image::Dyadic::expand), which needs no target size
+//! because the container already holds one.
+//!
 //! [`Image<P>`] implements [`PyramidLevel`] directly, so a Gaussian pyramid
-//! is simply `Pyramid<Image<P>>` (aliased as [`GaussianPyramid<P>`]) with no
-//! wrapper cost. Levels that carry scale metadata opt in via the
+//! is simply a chain of `Image<P>` (aliased as [`GaussianPyramid<P>`]) with
+//! no wrapper cost. Levels that carry scale metadata opt in via the
 //! [`Decimated`] / [`ScaleLevel`] capability traits, implemented by the thin
 //! [`ScaledImage<P>`] wrapper.
 
@@ -70,17 +76,44 @@ impl<P: Copy> PyramidLevel for Image<P> {
 // ─── Pyramid ────────────────────────────────────────────────────────────────
 
 /// A multi-resolution image pyramid: a chain of levels from finest to
-/// coarsest.
+/// coarsest, where **index 0 is the finest (largest) level**.
 ///
-/// `Pyramid<L>` is a thin container over `Vec<L>` where **index 0 is the
-/// finest (largest) level**. It is generic over the level type, not the
-/// construction method — a Gaussian-built pyramid and a custom-built pyramid
-/// with the same level type are interchangeable downstream.
+/// `Pyramid` is a trait, not a container: [`LevelChain<L>`] is the ordinary
+/// `Vec`-backed implementation, [`Dyadic<C>`] wraps any implementor and adds
+/// the halving guarantee, and a backend that pages levels in from disk or
+/// decides lazily which levels exist implements the same two methods without
+/// inheriting either representation. It is the same split as [`ImageView`]
+/// and [`Image<P>`] one level down.
 ///
-/// A `Pyramid` is **never empty**: every constructor guarantees at least one
-/// level, so [`finest`](Self::finest) and [`coarsest`](Self::coarsest)
-/// cannot fail in correct code — their documented panics are the backstop
+/// Implementors owe [`depth`](Self::depth) and [`get`](Self::get); the four
+/// accessors below are provided in terms of them and may be overridden where
+/// a container has a faster path.
+///
+/// # Contract
+///
+/// Implementors must uphold all of the following. These are logical
+/// requirements, not memory-safety ones: breaking them makes the provided
+/// methods panic or return misleading values, and the panic messages name
+/// the clause that was broken.
+///
+/// 1. **Non-empty.** `depth() >= 1`. A pyramid always has at least its base
+///    level, which is what makes [`finest`](Self::finest) and
+///    [`coarsest`](Self::coarsest) total.
+/// 2. **Agreement.** `get(index).is_some()` if and only if `index < depth()`.
+/// 3. **Order.** Index `0` is the finest level, and neither dimension grows
+///    as the index increases. Equal sizes are legal and deliberate: scale
+///    stacks and sub-band decompositions need them.
+/// 4. **Stability.** Repeated `get` calls with the same index observe the
+///    same level. A container that computes levels on demand must cache
+///    them; the signature already forces this, since a reference cannot
+///    outlive a temporary.
+///
+/// The constructors this crate provides ([`LevelChain::try_from_levels`],
+/// [`Dyadic::try_new`]) uphold every clause, so the panics are the backstop
 /// for a violated invariant, not an expected path.
+///
+/// Note that `iter` returns `impl Iterator`, so `Pyramid` is deliberately
+/// **not** object-safe: there is no `dyn Pyramid`.
 ///
 /// # Example
 ///
@@ -97,13 +130,99 @@ impl<P: Copy> PyramidLevel for Image<P> {
 /// assert_eq!(pyramid.finest().size(), Size::new(16, 16));
 /// assert_eq!(pyramid.coarsest().size(), Size::new(4, 4));
 /// ```
+pub trait Pyramid {
+    /// The level type this pyramid hands out.
+    type Level: PyramidLevel;
+
+    /// Returns the number of levels in the pyramid.
+    ///
+    /// At least 1, per contract clause 1.
+    fn depth(&self) -> usize;
+
+    /// Returns a reference to the level at the given index, or `None` if
+    /// the index is out of bounds.
+    ///
+    /// `Some` exactly for `index < depth()`, per contract clause 2.
+    fn get(&self, index: usize) -> Option<&Self::Level>;
+
+    /// Returns a reference to the level at the given index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index >= self.depth()` (programmer bug). Use
+    /// [`get`](Self::get) for a non-panicking lookup. A panic for an index
+    /// below `depth` means the implementor broke contract clause 2.
+    fn level(&self, index: usize) -> &Self::Level {
+        let depth = self.depth();
+        self.get(index).unwrap_or_else(|| {
+            panic!("no pyramid level {index} at depth {depth} (contract clause 2: agreement)")
+        })
+    }
+
+    /// Returns a reference to the finest (largest) level.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the pyramid is empty, which contract clause 1 forbids.
+    fn finest(&self) -> &Self::Level {
+        self.get(0)
+            .expect("pyramid is empty (contract clause 1: non-empty)")
+    }
+
+    /// Returns a reference to the coarsest (smallest) level.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the pyramid is empty, which contract clause 1 forbids.
+    fn coarsest(&self) -> &Self::Level {
+        let last = self
+            .depth()
+            .checked_sub(1)
+            .expect("pyramid is empty (contract clause 1: non-empty)");
+        self.get(last)
+            .expect("coarsest index is below depth (contract clause 2: agreement)")
+    }
+
+    /// Returns an iterator over levels from finest to coarsest.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use fovea::image::{Image, ImageView, Pyramid};
+    /// use fovea::pixel::MonoF32;
+    /// use fovea::transform::{Gaussian, PyramidMethod};
+    ///
+    /// let img = Image::fill(8, 8, MonoF32::new(1.0));
+    /// let pyramid = Gaussian.build(&img, 3);
+    ///
+    /// let widths: Vec<usize> = pyramid.iter().map(|l| l.size().width).collect();
+    /// assert_eq!(widths, [8, 4, 2]);
+    /// ```
+    fn iter(&self) -> impl Iterator<Item = &Self::Level> {
+        (0..self.depth()).map(move |index| self.level(index))
+    }
+}
+
+// ─── LevelChain ─────────────────────────────────────────────────────────────
+
+/// The ordinary pyramid container: a `Vec` of levels, finest first.
+///
+/// `LevelChain<L>` is generic over the level type, not the construction
+/// method — a Gaussian-built chain and a custom-built chain with the same
+/// level type are interchangeable downstream. It is the [`Pyramid`]
+/// implementation that owns its levels contiguously; the accessors come from
+/// that trait, so callers import it.
+///
+/// A `LevelChain` is **never empty** and never grows from one level to the
+/// next: its only constructor validates both, which is what makes contract
+/// clauses 1 and 3 hold for it by construction.
 #[derive(Clone, Debug)]
-pub struct Pyramid<L: PyramidLevel> {
+pub struct LevelChain<L: PyramidLevel> {
     levels: Vec<L>,
 }
 
-impl<L: PyramidLevel> Pyramid<L> {
-    /// Creates a pyramid from pre-built levels, finest (index 0) to
+impl<L: PyramidLevel> LevelChain<L> {
+    /// Creates a level chain from pre-built levels, finest (index 0) to
     /// coarsest.
     ///
     /// This is the constructor custom
@@ -118,6 +237,9 @@ impl<L: PyramidLevel> Pyramid<L> {
     /// as an error instead. What the ordering *means* (which decomposition
     /// produced the levels) remains the builder's responsibility.
     ///
+    /// The chain is deliberately **not** checked for halving: that is a
+    /// stricter relation, and the type that carries it is [`Dyadic`].
+    ///
     /// # Errors
     ///
     /// - [`Error::EmptyPyramid`] if `levels` is empty — a pyramid always
@@ -129,11 +251,11 @@ impl<L: PyramidLevel> Pyramid<L> {
     /// # Example
     ///
     /// ```
-    /// use fovea::image::{Image, Pyramid};
+    /// use fovea::image::{Image, LevelChain, Pyramid};
     /// use fovea::pixel::Mono8;
     ///
     /// let levels = vec![Image::<Mono8>::zero(8, 8), Image::<Mono8>::zero(4, 4)];
-    /// let pyramid = Pyramid::try_from_levels(levels)?;
+    /// let pyramid = LevelChain::try_from_levels(levels)?;
     /// assert_eq!(pyramid.depth(), 2);
     /// # Ok::<(), fovea::Error>(())
     /// ```
@@ -154,74 +276,156 @@ impl<L: PyramidLevel> Pyramid<L> {
         }
         Ok(Self { levels })
     }
+}
 
-    /// Returns the number of levels in the pyramid.
-    pub fn depth(&self) -> usize {
+impl<L: PyramidLevel> Pyramid for LevelChain<L> {
+    type Level = L;
+
+    fn depth(&self) -> usize {
         self.levels.len()
     }
 
-    /// Returns a reference to the level at the given index.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `index >= self.depth()` (programmer bug). Use
-    /// [`get`](Self::get) for a non-panicking lookup.
-    pub fn level(&self, index: usize) -> &L {
-        &self.levels[index]
-    }
-
-    /// Returns a reference to the level at the given index, or `None` if
-    /// the index is out of bounds.
-    pub fn get(&self, index: usize) -> Option<&L> {
+    fn get(&self, index: usize) -> Option<&L> {
         self.levels.get(index)
     }
 
-    /// Returns a reference to the finest (largest) level.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the pyramid is empty — impossible for pyramids built by
-    /// the provided constructors, which guarantee at least one level.
-    pub fn finest(&self) -> &L {
-        &self.levels[0]
+    // Overridden: the levels are contiguous, so the slice iterator beats
+    // indexing through `get` once per level.
+    fn iter(&self) -> impl Iterator<Item = &L> {
+        self.levels.iter()
     }
+}
 
-    /// Returns a reference to the coarsest (smallest) level.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the pyramid is empty — impossible for pyramids built by
-    /// the provided constructors, which guarantee at least one level.
-    pub fn coarsest(&self) -> &L {
-        self.levels.last().expect("pyramid is empty")
-    }
+// ─── Dyadic ─────────────────────────────────────────────────────────────────
 
-    /// Returns an iterator over levels from finest to coarsest.
+/// A pyramid whose neighbouring levels halve: every level's size is its
+/// predecessor's ceiling-halved size, the relation
+/// [`pyr_down`](crate::transform::pyr_down) produces.
+///
+/// `Dyadic<C>` is an adapter over any [`Pyramid`], not a container of its
+/// own, so a memory-mapped or lazily paged container gains the guarantee by
+/// being wrapped rather than by being reimplemented. It is itself a
+/// [`Pyramid`] — one with an extra guarantee — so it passes everywhere a
+/// `C: Pyramid` bound does.
+///
+/// That guarantee is what makes [`expand`](Self::expand) total: the parent's
+/// size is already in the container, so the lift back up cannot be handed a
+/// size this level is not the reduction of. There is no way to hold a `Dyadic`
+/// without the relation having been established, because
+/// [`try_new`](Self::try_new) is the only public constructor and it checks.
+///
+/// "Dyadic" is the standard term for the factor of two (dyadic pyramid,
+/// dyadic wavelet transform); it names the relation between levels rather
+/// than an operation performed on them, which is why an upsampled level
+/// chain can still be dyadic.
+///
+/// # Example
+///
+/// ```
+/// use fovea::image::{Dyadic, Image, ImageView, LevelChain, Pyramid};
+/// use fovea::pixel::MonoF32;
+///
+/// let levels = vec![
+///     Image::fill(9, 7, MonoF32::new(0.25)),
+///     Image::fill(5, 4, MonoF32::new(0.25)),
+/// ];
+/// let pyramid = Dyadic::try_new(LevelChain::try_from_levels(levels)?)?;
+///
+/// // The odd parent size is recovered without the caller naming it.
+/// let raised: Image<MonoF32> = pyramid.expand(1).expect("level 1 has a parent");
+/// assert_eq!(raised.size(), pyramid.level(0).size());
+/// # Ok::<(), fovea::Error>(())
+/// ```
+#[derive(Clone, Debug)]
+pub struct Dyadic<C: Pyramid>(C);
+
+impl<C: Pyramid> Dyadic<C> {
+    /// Wraps a pyramid of unknown provenance, checking the halving relation.
+    ///
+    /// Every neighbouring pair must satisfy `child = ceil(parent / 2)` along
+    /// both axes — the relation `pyr_down` produces, under which an odd and
+    /// an even parent dimension map onto the same child. A single-level
+    /// pyramid has no pair to violate and is always dyadic.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NotDyadic`] if two neighbours do not halve; the error names
+    /// the first offending index and both sizes.
     ///
     /// # Example
     ///
     /// ```
-    /// use fovea::image::{Image, ImageView, Pyramid};
-    /// use fovea::pixel::MonoF32;
-    /// use fovea::transform::{Gaussian, PyramidMethod};
+    /// use fovea::image::{Dyadic, Image, LevelChain};
+    /// use fovea::pixel::Mono8;
     ///
-    /// let img = Image::fill(8, 8, MonoF32::new(1.0));
-    /// let pyramid = Gaussian.build(&img, 3);
-    ///
-    /// let widths: Vec<usize> = pyramid.iter().map(|l| l.size().width).collect();
-    /// assert_eq!(widths, [8, 4, 2]);
+    /// // Non-growing, so the chain is legal — but 30 is not half of 100.
+    /// let levels = vec![Image::<Mono8>::zero(100, 68), Image::<Mono8>::zero(30, 34)];
+    /// let chain = LevelChain::try_from_levels(levels)?;
+    /// assert!(Dyadic::try_new(chain).is_err());
+    /// # Ok::<(), fovea::Error>(())
     /// ```
-    pub fn iter(&self) -> impl Iterator<Item = &L> {
-        self.levels.iter()
+    pub fn try_new(inner: C) -> Result<Self, Error> {
+        for index in 1..inner.depth() {
+            let parent = inner.level(index - 1).as_image().size();
+            let child = inner.level(index).as_image().size();
+            if child.width != halved(parent.width) || child.height != halved(parent.height) {
+                return Err(Error::NotDyadic {
+                    index,
+                    parent,
+                    child,
+                });
+            }
+        }
+        Ok(Self(inner))
     }
+
+    /// Wraps a pyramid whose halving the caller has already established.
+    ///
+    /// Crate-internal, per PHILOSOPHY §12: the builders that compose
+    /// `pyr_down` produce the relation by construction, so re-deriving it
+    /// from the sizes afterwards would check the arithmetic of the very
+    /// function that produced them.
+    pub(crate) fn new_unchecked(inner: C) -> Self {
+        Self(inner)
+    }
+
+    /// Returns the wrapped pyramid, dropping the halving guarantee.
+    pub fn into_inner(self) -> C {
+        self.0
+    }
+}
+
+impl<C: Pyramid> Pyramid for Dyadic<C> {
+    type Level = C::Level;
+
+    fn depth(&self) -> usize {
+        self.0.depth()
+    }
+
+    fn get(&self, index: usize) -> Option<&C::Level> {
+        self.0.get(index)
+    }
+
+    fn iter(&self) -> impl Iterator<Item = &C::Level> {
+        self.0.iter()
+    }
+}
+
+/// The dyadic relation between neighbouring level sizes.
+///
+/// `pyr_down` maps a dimension onto `ceil(dim / 2)`, so an odd and an even
+/// parent dimension land on the same child — which is why the way back up
+/// needs a target, and why a container that already holds one does not.
+fn halved(dim: usize) -> usize {
+    dim / 2 + dim % 2
 }
 
 /// A Gaussian pyramid: plain images as levels, no wrapper type.
 ///
 /// This alias exists for discoverability — the underlying type is an
-/// ordinary [`Pyramid`] whose levels are [`Image<P>`], produced by the
-/// [`Gaussian`](crate::transform::Gaussian) construction strategy.
-pub type GaussianPyramid<P> = Pyramid<Image<P>>;
+/// ordinary [`LevelChain`] of [`Image<P>`] levels, wrapped in [`Dyadic`]
+/// because [`Gaussian`](crate::transform::Gaussian) halves at every step.
+pub type GaussianPyramid<P> = Dyadic<LevelChain<Image<P>>>;
 
 // ─── Scale capability traits ────────────────────────────────────────────────
 
@@ -564,8 +768,8 @@ mod tests {
     use crate::pixel::{Mono8, MonoF32};
     use crate::{pixel_distance, sigma};
 
-    fn two_level_pyramid() -> Pyramid<Image<Mono8>> {
-        Pyramid::try_from_levels(vec![
+    fn two_level_pyramid() -> LevelChain<Image<Mono8>> {
+        LevelChain::try_from_levels(vec![
             Image::fill(8, 6, Mono8::new(10)),
             Image::fill(4, 3, Mono8::new(20)),
         ])
@@ -592,14 +796,14 @@ mod tests {
 
     #[test]
     fn try_from_levels_empty_is_error() {
-        let result = Pyramid::<Image<Mono8>>::try_from_levels(vec![]);
+        let result = LevelChain::<Image<Mono8>>::try_from_levels(vec![]);
         assert_eq!(result.err().unwrap(), Error::EmptyPyramid);
     }
 
     #[test]
     fn try_from_levels_rejects_growing_levels() {
         // Coarsest-first is the realistic builder bug: reported, not sorted.
-        let result = Pyramid::try_from_levels(vec![
+        let result = LevelChain::try_from_levels(vec![
             Image::fill(4, 3, Mono8::new(0)),
             Image::fill(8, 6, Mono8::new(0)),
         ]);
@@ -616,7 +820,7 @@ mod tests {
     #[test]
     fn try_from_levels_rejects_single_growing_axis() {
         // Width shrinks but height grows — still not a coarser level.
-        let result = Pyramid::try_from_levels(vec![
+        let result = LevelChain::try_from_levels(vec![
             Image::fill(8, 6, Mono8::new(0)),
             Image::fill(4, 7, Mono8::new(0)),
         ]);
@@ -633,7 +837,7 @@ mod tests {
     #[test]
     fn try_from_levels_allows_equal_sizes() {
         // Same-size levels are legitimate (scale stacks, sub-bands).
-        let p = Pyramid::try_from_levels(vec![
+        let p = LevelChain::try_from_levels(vec![
             Image::fill(8, 8, Mono8::new(1)),
             Image::fill(8, 8, Mono8::new(2)),
             Image::fill(4, 4, Mono8::new(3)),
@@ -650,10 +854,70 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
+    #[should_panic(expected = "no pyramid level 2 at depth 2")]
     fn level_out_of_bounds_panics() {
         let p = two_level_pyramid();
         let _ = p.level(2);
+    }
+
+    /// A deliberately contract-breaking implementor: it claims no levels at
+    /// all, which clause 1 forbids. The provided accessors are supposed to
+    /// panic, and to say which clause was broken while they do it.
+    struct NoLevels;
+
+    impl Pyramid for NoLevels {
+        type Level = Image<Mono8>;
+
+        fn depth(&self) -> usize {
+            0
+        }
+
+        fn get(&self, _index: usize) -> Option<&Image<Mono8>> {
+            None
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "contract clause 1")]
+    fn finest_names_the_clause_an_empty_implementor_broke() {
+        let _ = NoLevels.finest();
+    }
+
+    #[test]
+    #[should_panic(expected = "contract clause 1")]
+    fn coarsest_names_the_clause_an_empty_implementor_broke() {
+        let _ = NoLevels.coarsest();
+    }
+
+    /// The smallest legal implementor: `depth` and `get` only, so the four
+    /// provided accessors are the ones under test — including `iter`, whose
+    /// `impl Iterator` return borrows `&self` and is the one shape D2e
+    /// wanted compiled rather than assumed.
+    struct MinimalPyramid(Vec<Image<Mono8>>);
+
+    impl Pyramid for MinimalPyramid {
+        type Level = Image<Mono8>;
+
+        fn depth(&self) -> usize {
+            self.0.len()
+        }
+
+        fn get(&self, index: usize) -> Option<&Image<Mono8>> {
+            self.0.get(index)
+        }
+    }
+
+    #[test]
+    fn the_provided_accessors_derive_from_depth_and_get() {
+        let p = MinimalPyramid(vec![
+            Image::fill(8, 6, Mono8::new(10)),
+            Image::fill(4, 3, Mono8::new(20)),
+        ]);
+        assert_eq!(p.level(1).size(), Size::new(4, 3));
+        assert_eq!(p.finest().size(), Size::new(8, 6));
+        assert_eq!(p.coarsest().size(), Size::new(4, 3));
+        let widths: Vec<usize> = p.iter().map(|l| l.size().width).collect();
+        assert_eq!(widths, [8, 4]);
     }
 
     #[test]
@@ -673,7 +937,7 @@ mod tests {
 
     #[test]
     fn finest_equals_coarsest_for_single_level() {
-        let p = Pyramid::try_from_levels(vec![Image::fill(3, 3, Mono8::new(1))]).unwrap();
+        let p = LevelChain::try_from_levels(vec![Image::fill(3, 3, Mono8::new(1))]).unwrap();
         assert_eq!(p.finest().size(), p.coarsest().size());
         assert_eq!(p.depth(), 1);
     }
@@ -694,11 +958,100 @@ mod tests {
     }
 
     #[test]
-    fn gaussian_pyramid_alias_is_plain_pyramid() {
-        let p: GaussianPyramid<Mono8> = two_level_pyramid();
+    fn gaussian_pyramid_alias_is_a_dyadic_chain() {
+        let p: GaussianPyramid<Mono8> = Dyadic::try_new(two_level_pyramid()).unwrap();
         assert_eq!(p.depth(), 2);
     }
 
+    // ── Dyadic ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn try_new_accepts_a_halving_chain() {
+        let pyramid = Dyadic::try_new(two_level_pyramid()).unwrap();
+        assert_eq!(pyramid.depth(), 2);
+        assert_eq!(pyramid.level(1).size(), Size::new(4, 3));
+    }
+
+    #[test]
+    fn try_new_accepts_an_odd_parent() {
+        // 9 and 10 both reduce to 5: ceiling halving, not exact division.
+        let chain = LevelChain::try_from_levels(vec![
+            Image::fill(9, 7, Mono8::new(1)),
+            Image::fill(5, 4, Mono8::new(1)),
+            Image::fill(3, 2, Mono8::new(1)),
+        ])
+        .unwrap();
+        assert!(Dyadic::try_new(chain).is_ok());
+    }
+
+    #[test]
+    fn try_new_accepts_a_single_level() {
+        let chain = LevelChain::try_from_levels(vec![Image::fill(7, 5, Mono8::new(1))]).unwrap();
+        assert!(Dyadic::try_new(chain).is_ok());
+    }
+
+    #[test]
+    fn try_new_rejects_equal_size_neighbours() {
+        // A legal chain — `try_from_levels` admits equal sizes on purpose —
+        // that is nevertheless not dyadic.
+        let chain = LevelChain::try_from_levels(vec![
+            Image::fill(8, 6, Mono8::new(1)),
+            Image::fill(8, 6, Mono8::new(1)),
+        ])
+        .unwrap();
+        assert_eq!(
+            Dyadic::try_new(chain).err().unwrap(),
+            Error::NotDyadic {
+                index: 1,
+                parent: Size::new(8, 6),
+                child: Size::new(8, 6),
+            }
+        );
+    }
+
+    #[test]
+    fn try_new_rejects_a_chain_that_shrinks_without_halving() {
+        let chain = LevelChain::try_from_levels(vec![
+            Image::fill(100, 68, Mono8::new(1)),
+            Image::fill(30, 34, Mono8::new(1)),
+        ])
+        .unwrap();
+        assert!(matches!(
+            Dyadic::try_new(chain),
+            Err(Error::NotDyadic { index: 1, .. })
+        ));
+    }
+
+    #[test]
+    fn try_new_names_the_first_offending_index() {
+        let chain = LevelChain::try_from_levels(vec![
+            Image::fill(16, 16, Mono8::new(1)),
+            Image::fill(8, 8, Mono8::new(1)),
+            Image::fill(3, 4, Mono8::new(1)),
+        ])
+        .unwrap();
+        assert!(matches!(
+            Dyadic::try_new(chain),
+            Err(Error::NotDyadic { index: 2, .. })
+        ));
+    }
+
+    #[test]
+    fn dyadic_forwards_the_pyramid_accessors() {
+        let pyramid = Dyadic::try_new(two_level_pyramid()).unwrap();
+        assert_eq!(pyramid.finest().size(), Size::new(8, 6));
+        assert_eq!(pyramid.coarsest().size(), Size::new(4, 3));
+        assert!(pyramid.get(2).is_none());
+        let widths: Vec<usize> = pyramid.iter().map(|l| l.size().width).collect();
+        assert_eq!(widths, [8, 4]);
+    }
+
+    #[test]
+    fn into_inner_returns_the_wrapped_container() {
+        let pyramid = Dyadic::try_new(two_level_pyramid()).unwrap();
+        let chain: LevelChain<Image<Mono8>> = pyramid.into_inner();
+        assert_eq!(chain.depth(), 2);
+    }
     // ── ScaledImage / capability traits ─────────────────────────────────
 
     #[test]
@@ -841,7 +1194,7 @@ mod tests {
                 sigma!(1.0),
             ),
         ];
-        let p = Pyramid::try_from_levels(levels).unwrap();
+        let p = LevelChain::try_from_levels(levels).unwrap();
         assert_eq!(p.depth(), 2);
         assert_eq!(p.level(1).pixel_distance(), pixel_distance!(2.0));
         assert_eq!(p.level(1).sigma(), sigma!(1.0));

@@ -61,7 +61,8 @@ pub use neighborhood::{
 };
 pub use planar::ImagePlanes;
 pub use pyramid::{
-    Decimated, GaussianPyramid, OriginOffset, Pyramid, PyramidLevel, ScaleLevel, ScaledImage,
+    Decimated, Dyadic, GaussianPyramid, LevelChain, OriginOffset, Pyramid, PyramidLevel,
+    ScaleLevel, ScaledImage,
 };
 pub use separable::{
     GaussianKernel1D, MAX_RADIUS, SeparableKernel, SeparableWeights, gaussian_kernel_1d,

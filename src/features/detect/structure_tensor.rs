@@ -801,7 +801,7 @@ where
 /// use fovea::CoordinateF64;
 /// use fovea::features::detect::{detect_corners_in_level, CornerParams, NmsRadius, ShiTomasi};
 /// use fovea::features::sort_by_response;
-/// use fovea::image::{Image, OriginOffset, Pyramid, ScaledImage};
+/// use fovea::image::{Image, LevelChain, OriginOffset, Pyramid, ScaledImage};
 /// use fovea::pixel::MonoF32;
 /// use fovea::{pixel_distance, sigma};
 /// use fovea::transform::pyr_down;
@@ -825,7 +825,7 @@ where
 ///         sigma!(1.0),
 ///     ),
 /// ];
-/// let pyramid = Pyramid::try_from_levels(levels)?;
+/// let pyramid = LevelChain::try_from_levels(levels)?;
 ///
 /// let params = CornerParams::try_new(sigma!(1.0), 0.02, NmsRadius::new(2).unwrap())?;
 /// let mut corners: Vec<_> = pyramid
@@ -878,7 +878,7 @@ where
 mod tests {
     use super::*;
     use crate::features::HasPosition;
-    use crate::image::{ImageView, OriginOffset, Pyramid, PyramidLevel, ScaledImage};
+    use crate::image::{ImageView, LevelChain, OriginOffset, Pyramid, PyramidLevel, ScaledImage};
     use crate::pixel::{Mono8, Mono16, MonoF32, MonoF64};
     use crate::transform::{pyr_down, rotate_90};
     use crate::{pixel_distance, sigma};
@@ -1472,7 +1472,7 @@ mod tests {
                 sigma!(1.0),
             ),
         ];
-        let pyramid = Pyramid::try_from_levels(levels).unwrap();
+        let pyramid = LevelChain::try_from_levels(levels).unwrap();
         let params = CornerParams::new(sigma!(1.0), 0.5, NmsRadius::new(2).unwrap()).unwrap();
 
         let corners: Vec<Corner> = pyramid
