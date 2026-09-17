@@ -472,17 +472,17 @@ pub type ScaledPyramid<P> = Dyadic<LevelChain<ScaledImage<P>>>;
 ///
 /// ```
 /// use fovea::CoordinateF64;
-/// use fovea::image::{Decimated, Image, OriginOffset, ScaledImage};
+/// use fovea::image::{Decimated, Image, OriginOffset, PlacedImage};
 /// use fovea::pixel::MonoF32;
-/// use fovea::{pixel_distance, sigma};
+/// use fovea::pixel_distance;
 ///
 /// // Level 1 of a 2× pyramid built by even-sample decimation:
 /// // adjacent samples are 2 base pixels apart, grid origin unshifted.
-/// let level = ScaledImage::new(
+/// // `PlacedImage` is the level that carries exactly this and no σ.
+/// let level = PlacedImage::new(
 ///     Image::<MonoF32>::zero(4, 4),
 ///     pixel_distance!(2.0),
 ///     OriginOffset::ZERO,
-///     sigma!(1.0),
 /// );
 ///
 /// let base = level.to_base(CoordinateF64::new(1.5, 3.0));
@@ -531,15 +531,15 @@ pub trait Decimated: PyramidLevel {
     ///
     /// ```
     /// use fovea::CoordinateF64;
-    /// use fovea::image::{Decimated, Image, OriginOffset, ScaledImage};
+    /// use fovea::image::{Decimated, Image, OriginOffset, PlacedImage};
     /// use fovea::pixel::MonoF32;
-    /// use fovea::{pixel_distance, sigma};
+    /// use fovea::pixel_distance;
     ///
-    /// let level = ScaledImage::new(
+    /// // A deliberately shifted origin: the round trip has to survive one.
+    /// let level = PlacedImage::new(
     ///     Image::<MonoF32>::zero(4, 4),
     ///     pixel_distance!(2.0),
     ///     OriginOffset::new(0.5, 0.5).unwrap(),
-    ///     sigma!(1.0),
     /// );
     ///
     /// let local = CoordinateF64::new(1.5, 3.0);
@@ -619,7 +619,12 @@ pub trait ScaleLevel: PyramidLevel {
 /// let base = Image::fill(16, 16, MonoF32::new(1.0));
 /// let coarse: Image<MonoF32> = pyr_down(&base);
 ///
-/// // pyr_down keeps even samples: distance 2, origin unshifted, σ = 1.
+/// // This constructor is the path for a level that arrived from elsewhere,
+/// // where all four values genuinely are input: the grid follows from
+/// // `pyr_down`, and the σ is the caller's to state, because only the caller
+/// // knows how sharp the base image was. A pyramid built by
+/// // [`Gaussian`](crate::transform::Gaussian) answers for its own geometry
+/// // and needs none of this.
 /// let level = ScaledImage::new(
 ///     coarse,
 ///     pixel_distance!(2.0),
@@ -646,7 +651,8 @@ pub struct ScaledImage<P: Copy> {
 /// A level's pixel-(0,0) center in base-image coordinates: **finite** along
 /// both axes.
 ///
-/// The invariant carrier for [`ScaledImage`]'s origin, in the same family
+/// The invariant carrier for a level's origin, [`PlacedImage`]'s and
+/// [`ScaledImage`]'s alike, in the same family
 /// as [`PixelDistance`] and [`Sigma`](crate::Sigma): a NaN or infinite
 /// origin would poison every [`Decimated::to_base`] lift while the
 /// constructor's totality claim promised nothing can fail, so the claim is

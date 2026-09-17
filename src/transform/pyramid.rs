@@ -563,7 +563,7 @@ where
 mod tests {
     use super::*;
     use crate::CoordinateF64;
-    use crate::image::{Decimated, OriginOffset, PyramidLevel, ScaleLevel, ScaledImage};
+    use crate::image::{Decimated, PyramidLevel, ScaleLevel};
     use crate::pixel::{Mono8, MonoF32};
     use crate::{pixel_distance, sigma};
 
@@ -938,19 +938,13 @@ mod tests {
             MonoF32::new((-(dx * dx + dy * dy) / 18.0).exp())
         });
 
-        let mut level: Image<MonoF32> = pyr_down(&src);
-        level = pyr_down(&level);
-        // Cumulative smoothing in base-frame units: the first binomial
-        // blur is σ = 1 at distance 1, the second σ = 1 at distance 2,
-        // composing to √(1² + 2²) ≈ 2.24. (The lift under test reads only
-        // the geometry fields, but a fixture should not model a wrong
-        // value.)
-        let scaled = ScaledImage::new(
-            level,
-            pixel_distance!(4.0),
-            OriginOffset::ZERO,
-            sigma!(2.236),
-        );
+        // Two pyr_down steps, from the builder rather than by hand, so the
+        // sampling distance under test is the one the build derived and not
+        // a number this fixture restated. The lift reads geometry only, and
+        // a `PlacedImage` level has nothing else to offer it.
+        let pyramid: PlacedPyramid<MonoF32> = Gaussian.build(&src, 3);
+        let scaled = pyramid.level(2);
+        assert_eq!(scaled.pixel_distance(), pixel_distance!(4.0));
 
         // Find the argmax on the coarse level.
         let img = scaled.as_image();

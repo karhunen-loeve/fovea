@@ -801,31 +801,17 @@ where
 /// use fovea::CoordinateF64;
 /// use fovea::features::detect::{detect_corners_in_level, CornerParams, NmsRadius, ShiTomasi};
 /// use fovea::features::sort_by_response;
-/// use fovea::image::{Image, LevelChain, OriginOffset, Pyramid, ScaledImage};
+/// use fovea::image::{Image, PlacedPyramid, Pyramid};
 /// use fovea::pixel::MonoF32;
-/// use fovea::{pixel_distance, sigma};
-/// use fovea::transform::pyr_down;
+/// use fovea::sigma;
+/// use fovea::transform::{Gaussian, PyramidMethod};
 ///
 /// let base: Image<MonoF32> = Image::generate(32, 32, |x, y| {
 ///     MonoF32::new(if (8..24).contains(&x) && (8..24).contains(&y) { 1.0 } else { 0.0 })
 /// });
 ///
-/// // Two levels, each carrying the sampling geometry `pyr_down` produced.
-/// let levels = vec![
-///     ScaledImage::new(
-///         base.clone(),
-///         pixel_distance!(1.0),
-///         OriginOffset::ZERO,
-///         sigma!(0.5),
-///     ),
-///     ScaledImage::new(
-///         pyr_down(&base),
-///         pixel_distance!(2.0),
-///         OriginOffset::ZERO,
-///         sigma!(1.0),
-///     ),
-/// ];
-/// let pyramid = LevelChain::try_from_levels(levels)?;
+/// // Two levels, each carrying the sampling geometry the build computed.
+/// let pyramid: PlacedPyramid<MonoF32> = Gaussian.build(&base, 2);
 ///
 /// let params = CornerParams::try_new(sigma!(1.0), 0.02, NmsRadius::new(2).unwrap())?;
 /// let mut corners: Vec<_> = pyramid
@@ -878,9 +864,11 @@ where
 mod tests {
     use super::*;
     use crate::features::HasPosition;
-    use crate::image::{ImageView, LevelChain, OriginOffset, Pyramid, PyramidLevel, ScaledImage};
+    use crate::image::{
+        ImageView, OriginOffset, PlacedImage, PlacedPyramid, Pyramid, PyramidLevel,
+    };
     use crate::pixel::{Mono8, Mono16, MonoF32, MonoF64};
-    use crate::transform::{pyr_down, rotate_90};
+    use crate::transform::{Gaussian, PyramidMethod, pyr_down, rotate_90};
     use crate::{pixel_distance, sigma};
 
     // ── Fixtures ────────────────────────────────────────────────────────
@@ -1407,16 +1395,11 @@ mod tests {
     #[test]
     fn detection_on_the_base_level_is_the_identity_lift() {
         let image = square(24, 8, 16);
-        let level = ScaledImage::new(
-            image.clone(),
-            pixel_distance!(1.0),
-            OriginOffset::ZERO,
-            sigma!(0.5),
-        );
+        let pyramid: PlacedPyramid<MonoF32> = Gaussian.build(&image, 1);
         let params = CornerParams::new(sigma!(1.2), 1.0, NmsRadius::new(3).unwrap()).unwrap();
 
         assert_eq!(
-            detect_corners_in_level(&level, ShiTomasi, params),
+            detect_corners_in_level(pyramid.finest(), ShiTomasi, params),
             detect_corners(&image, ShiTomasi, params)
         );
     }
@@ -1424,12 +1407,8 @@ mod tests {
     #[test]
     fn detection_on_a_coarse_level_reports_base_coordinates() {
         let base = square(48, 16, 32);
-        let level = ScaledImage::new(
-            pyr_down(&base),
-            pixel_distance!(2.0),
-            OriginOffset::ZERO,
-            sigma!(1.0),
-        );
+        let pyramid: PlacedPyramid<MonoF32> = Gaussian.build(&base, 2);
+        let level = pyramid.level(1);
         let map: Image<MonoF32> = corner_response_map(level.as_image(), ShiTomasi, sigma!(1.0));
         let params = CornerParams::try_new(
             sigma!(1.0),
@@ -1438,7 +1417,7 @@ mod tests {
         )
         .unwrap();
 
-        let corners = detect_corners_in_level(&level, ShiTomasi, params);
+        let corners = detect_corners_in_level(level, ShiTomasi, params);
         assert_eq!(corners.len(), 4, "{corners:?}");
 
         let truth = square_corners(16, 32);
@@ -1458,21 +1437,7 @@ mod tests {
     #[test]
     fn a_pyramid_can_be_swept_level_by_level() {
         let base = square(32, 8, 24);
-        let levels = vec![
-            ScaledImage::new(
-                base.clone(),
-                pixel_distance!(1.0),
-                OriginOffset::ZERO,
-                sigma!(0.5),
-            ),
-            ScaledImage::new(
-                pyr_down(&base),
-                pixel_distance!(2.0),
-                OriginOffset::ZERO,
-                sigma!(1.0),
-            ),
-        ];
-        let pyramid = LevelChain::try_from_levels(levels).unwrap();
+        let pyramid: PlacedPyramid<MonoF32> = Gaussian.build(&base, 2);
         let params = CornerParams::new(sigma!(1.0), 0.5, NmsRadius::new(2).unwrap()).unwrap();
 
         let corners: Vec<Corner> = pyramid
@@ -1500,17 +1465,14 @@ mod tests {
         let coarse = pyr_down(&base);
         let params = CornerParams::new(sigma!(1.0), 0.5, NmsRadius::new(2).unwrap()).unwrap();
 
-        let unshifted = ScaledImage::new(
-            coarse.clone(),
-            pixel_distance!(2.0),
-            OriginOffset::ZERO,
-            sigma!(1.0),
-        );
-        let shifted = ScaledImage::new(
+        // Hand-assembled on purpose: the shifted origin is the subject of
+        // this test, not a convention a builder could supply. No σ is
+        // invented for it, because none is read.
+        let unshifted = PlacedImage::new(coarse.clone(), pixel_distance!(2.0), OriginOffset::ZERO);
+        let shifted = PlacedImage::new(
             coarse,
             pixel_distance!(2.0),
             OriginOffset::new(0.5, 0.5).unwrap(),
-            sigma!(1.0),
         );
 
         let a = detect_corners_in_level(&unshifted, ShiTomasi, params);
