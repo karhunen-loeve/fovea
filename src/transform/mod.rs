@@ -175,7 +175,7 @@ pub use morphology::{
     black_hat, closing, closing_into, dilate, dilate_into, erode, erode_into, median_filter,
     morphological_gradient, opening, opening_into, top_hat,
 };
-pub use pyramid::{Gaussian, PyramidMethod, pyr_down, pyr_up};
+pub use pyramid::{Gaussian, PyramidMethod, ScaledGaussian, pyr_down, pyr_up};
 pub use resize::{Bilinear, NearestNeighbor, ResizeMethod, resize, resize_into};
 pub use template_match::{
     MatchMethod, NCC, SAD, SSD, ScorePolarity, match_template, match_template_into,

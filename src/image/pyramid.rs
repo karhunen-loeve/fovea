@@ -15,33 +15,41 @@
 //! [`expand`](crate::image::Dyadic::expand), which needs no target size
 //! because the container already holds one.
 //!
-//! [`Image<P>`] implements [`PyramidLevel`] directly, so a Gaussian pyramid
-//! is simply a chain of `Image<P>` (aliased as [`GaussianPyramid<P>`]) with
-//! no wrapper cost. Levels that carry scale metadata opt in via the
-//! [`Decimated`] / [`ScaleLevel`] capability traits, implemented by the thin
-//! [`ScaledImage<P>`] wrapper.
+//! [`Image<P>`] implements [`PyramidLevel`] directly, so a level can be a
+//! plain image with no wrapper cost. Levels that answer for their own
+//! geometry opt in via the [`Decimated`] / [`ScaleLevel`] capability traits:
+//! [`PlacedImage<P>`] knows where its samples sit, [`ScaledImage<P>`] knows
+//! that and its absolute σ. The two aliases [`PlacedPyramid<P>`] and
+//! [`ScaledPyramid<P>`] name the chains the two Gaussian builders return.
 
 use crate::error::Error;
-use crate::image::{Image, ImageView};
+use crate::image::{Image, ImageView, RasterImage};
 use crate::{CoordinateF64, PixelDistance, Sigma, Size};
 
 // ─── PyramidLevel ────────────────────────────────────────────────────────────
 
 /// Base trait for all pyramid level types.
 ///
-/// Every level provides access to itself as an image — the minimum contract
-/// that all pyramid-consuming algorithms can rely on; the level's spatial
-/// size is `as_image().size()`. Capability traits ([`Decimated`],
-/// [`ScaleLevel`]) extend this base with additional per-level guarantees; a
-/// function that needs any pyramid binds on `PyramidLevel`, a function that
-/// needs scale metadata binds on the capability it actually uses.
+/// Every level is a [`RasterImage`] and can additionally hand out the owned
+/// image behind it. That supertrait is the whole reason a pyramid level can
+/// be passed to code that never heard of pyramids: `level.size()`,
+/// `level.pixel_at(x, y)` and `pyr_down(level)` all work directly, because
+/// the level really is an image with extra facts attached.
+///
+/// Capability traits ([`Decimated`], [`ScaleLevel`]) extend this base with
+/// additional per-level guarantees; a function that needs any pyramid binds
+/// on `PyramidLevel`, a function that needs scale metadata binds on the
+/// capability it actually uses.
 ///
 /// [`Image<P>`] implements `PyramidLevel` trivially (`as_image` returns
-/// `&self`), so plain images are levels with no wrapper type. (This is also
-/// why the trait deliberately has no `size` method of its own: `Image`
-/// already has [`ImageView::size`], and a same-named provided method would
-/// make every plain `img.size()` call ambiguous for code that imports both
-/// traits.)
+/// `&self`), so plain images are levels with no wrapper type.
+///
+/// The supertrait **adds no requirement**: `as_image` already forces an
+/// owned, contiguous, host-memory `Image<P>`, so every level that can exist
+/// is a `RasterImage` already. It writes an existing constraint down rather
+/// than imposing a new one, and in exchange there is exactly one `Pixel`
+/// associated type instead of two that generic callers had to prove equal
+/// by hand.
 ///
 /// # Example
 ///
@@ -51,22 +59,20 @@ use crate::{CoordinateF64, PixelDistance, Sigma, Size};
 /// use fovea::pixel::Mono8;
 ///
 /// let img: Image<Mono8> = Image::zero(8, 6);
-/// // An `Image` is its own pyramid level.
+/// // An `Image` is its own pyramid level, and answers as an image.
+/// assert_eq!(img.size(), Size::new(8, 6));
 /// assert_eq!(img.as_image().size(), Size::new(8, 6));
 /// ```
-pub trait PyramidLevel {
-    /// The pixel type of this level's image.
-    type Pixel: Copy;
-
+pub trait PyramidLevel: RasterImage {
     /// Returns this level as an image reference.
     ///
-    /// The level's spatial size is `as_image().size()`.
+    /// Use this where the owned `Image<P>` itself is needed. For the
+    /// level's size and pixels, the [`ImageView`] methods inherited through
+    /// [`RasterImage`] answer directly.
     fn as_image(&self) -> &Image<Self::Pixel>;
 }
 
 impl<P: Copy> PyramidLevel for Image<P> {
-    type Pixel = P;
-
     #[inline]
     fn as_image(&self) -> &Image<P> {
         self
@@ -422,12 +428,23 @@ fn halved(dim: usize) -> usize {
     dim / 2 + dim % 2
 }
 
-/// A Gaussian pyramid: plain images as levels, no wrapper type.
+/// A dyadic pyramid of levels that know their sampling grid.
 ///
-/// This alias exists for discoverability — the underlying type is an
-/// ordinary [`LevelChain`] of [`Image<P>`] levels, wrapped in [`Dyadic`]
-/// because [`Gaussian`](crate::transform::Gaussian) halves at every step.
-pub type GaussianPyramid<P> = Dyadic<LevelChain<Image<P>>>;
+/// What [`Gaussian`](crate::transform::Gaussian) builds. The name states a
+/// capability rather than a construction method, which is why it is also
+/// the right name for an imported GPU mipmap: both know where their samples
+/// sit, and neither claims a blur.
+pub type PlacedPyramid<P> = Dyadic<LevelChain<PlacedImage<P>>>;
+
+/// A dyadic pyramid of levels that know their sampling grid **and** their
+/// absolute σ.
+///
+/// What [`ScaledGaussian`](crate::transform::ScaledGaussian) builds, reached
+/// through
+/// [`Gaussian::assuming_input_sigma`](crate::transform::Gaussian::assuming_input_sigma).
+/// The extra capability is [`ScaleLevel`], so a function that binds it
+/// accepts this and not [`PlacedPyramid`].
+pub type ScaledPyramid<P> = Dyadic<LevelChain<ScaledImage<P>>>;
 
 // ─── Scale capability traits ────────────────────────────────────────────────
 
@@ -717,15 +734,9 @@ impl<P: Copy> ScaledImage<P> {
             sigma,
         }
     }
-
     /// Returns the wrapped image.
     pub fn image(&self) -> &Image<P> {
         &self.image
-    }
-
-    /// Returns the spatial dimensions of this level.
-    pub fn size(&self) -> Size {
-        self.image.size()
     }
 
     /// Unwraps the level, discarding the scale metadata.
@@ -734,9 +745,28 @@ impl<P: Copy> ScaledImage<P> {
     }
 }
 
-impl<P: Copy> PyramidLevel for ScaledImage<P> {
+impl<P: Copy> ImageView for ScaledImage<P> {
     type Pixel = P;
 
+    #[inline]
+    fn size(&self) -> Size {
+        self.image.size()
+    }
+
+    #[inline]
+    fn pixel_at(&self, x: usize, y: usize) -> P {
+        self.image.pixel_at(x, y)
+    }
+}
+
+impl<P: Copy> RasterImage for ScaledImage<P> {
+    #[inline]
+    fn row(&self, y: usize) -> &[P] {
+        self.image.row(y)
+    }
+}
+
+impl<P: Copy> PyramidLevel for ScaledImage<P> {
     #[inline]
     fn as_image(&self) -> &Image<P> {
         &self.image
@@ -759,6 +789,146 @@ impl<P: Copy> ScaleLevel for ScaledImage<P> {
     #[inline]
     fn sigma(&self) -> Sigma {
         self.sigma
+    }
+}
+
+// ─── PlacedImage ────────────────────────────────────────────────────────────
+
+/// An image level that knows **where it sits** but not how blurred it is:
+/// sampling geometry ([`Decimated`]) without an absolute σ.
+///
+/// This is the level for the case the library could not express before: a
+/// grid that is known and a blur that is not. An imported GPU mipmap is
+/// exactly that, and so is the output of [`Gaussian`](crate::transform::Gaussian),
+/// which halves on a known grid but is told nothing about how sharp its
+/// input was. Both used to force an invented `sigma!(1.0)`.
+///
+/// It pairs with [`ScaledImage<P>`] as a strict extension. `PlacedImage`
+/// knows where it sits; `ScaledImage` knows where it sits *and* how blurred
+/// it is, and its constructor is this one plus a σ:
+///
+/// | Caller knows | level type |
+/// |---|---|
+/// | pixels only | [`Image<P>`] |
+/// | pixels + grid | `PlacedImage<P>` |
+/// | pixels + grid + blur | [`ScaledImage<P>`] |
+///
+/// Deliberately **not** [`ScaleLevel`], and deliberately not an
+/// `Option<Sigma>` on one shared type. A function that binds
+/// `L: ScaleLevel` is then *unreachable* from a pyramid nobody named an
+/// assumption for: asking for a σ that was never established is a compile
+/// error rather than a plausible `None` one `unwrap_or` away from the very
+/// failure this distinction exists to remove.
+///
+/// # Example
+///
+/// ```
+/// use fovea::CoordinateF64;
+/// use fovea::image::{Decimated, Image, ImageView, OriginOffset, PlacedImage};
+/// use fovea::pixel::MonoF32;
+/// use fovea::pixel_distance;
+/// use fovea::transform::pyr_down;
+///
+/// let base = Image::fill(16, 16, MonoF32::new(1.0));
+/// let coarse: Image<MonoF32> = pyr_down(&base);
+///
+/// // pyr_down keeps even samples: distance 2, origin unshifted.
+/// let level = PlacedImage::new(coarse, pixel_distance!(2.0), OriginOffset::ZERO);
+///
+/// assert_eq!(level.size().width, 8);
+/// assert_eq!(level.pixel_distance().get(), 2.0);
+/// assert_eq!(
+///     level.to_base(CoordinateF64::new(3.0, 4.0)),
+///     CoordinateF64::new(6.0, 8.0),
+/// );
+/// ```
+#[derive(Clone, Debug)]
+pub struct PlacedImage<P: Copy> {
+    image: Image<P>,
+    pixel_distance: PixelDistance,
+    origin_offset: OriginOffset,
+}
+
+impl<P: Copy> PlacedImage<P> {
+    /// Wraps an image with its sampling geometry.
+    ///
+    /// - `pixel_distance`: distance between adjacent samples of this level,
+    ///   in base-image pixels (see [`Decimated::pixel_distance`]).
+    /// - `origin_offset`: position of this level's pixel-(0,0) center in
+    ///   base-image coordinates (see [`Decimated::origin_offset`]).
+    ///
+    /// This constructor is **total**, for the same reason
+    /// [`ScaledImage::new`] is: every parameter invariant lives in its type
+    /// and was checked when that value was constructed. Nothing can fail
+    /// here.
+    pub fn new(
+        image: Image<P>,
+        pixel_distance: PixelDistance,
+        origin_offset: OriginOffset,
+    ) -> Self {
+        Self {
+            image,
+            pixel_distance,
+            origin_offset,
+        }
+    }
+
+    /// Returns the wrapped image.
+    pub fn image(&self) -> &Image<P> {
+        &self.image
+    }
+
+    /// Unwraps the level, discarding the sampling geometry.
+    pub fn into_image(self) -> Image<P> {
+        self.image
+    }
+
+    /// Adds an absolute σ, turning this level into a [`ScaledImage`].
+    ///
+    /// The geometry carries over unchanged; only the claim about blur is
+    /// new, which is why it has to be supplied here rather than derived.
+    pub fn with_sigma(self, sigma: Sigma) -> ScaledImage<P> {
+        ScaledImage::new(self.image, self.pixel_distance, self.origin_offset, sigma)
+    }
+}
+
+impl<P: Copy> ImageView for PlacedImage<P> {
+    type Pixel = P;
+
+    #[inline]
+    fn size(&self) -> Size {
+        self.image.size()
+    }
+
+    #[inline]
+    fn pixel_at(&self, x: usize, y: usize) -> P {
+        self.image.pixel_at(x, y)
+    }
+}
+
+impl<P: Copy> RasterImage for PlacedImage<P> {
+    #[inline]
+    fn row(&self, y: usize) -> &[P] {
+        self.image.row(y)
+    }
+}
+
+impl<P: Copy> PyramidLevel for PlacedImage<P> {
+    #[inline]
+    fn as_image(&self) -> &Image<P> {
+        &self.image
+    }
+}
+
+impl<P: Copy> Decimated for PlacedImage<P> {
+    #[inline]
+    fn pixel_distance(&self) -> PixelDistance {
+        self.pixel_distance
+    }
+
+    #[inline]
+    fn origin_offset(&self) -> CoordinateF64 {
+        self.origin_offset.get()
     }
 }
 
@@ -958,11 +1128,38 @@ mod tests {
         assert_eq!(q.depth(), p.depth());
         assert_eq!(q.level(1).pixel_at(0, 0), Mono8::new(20));
     }
-
     #[test]
-    fn gaussian_pyramid_alias_is_a_dyadic_chain() {
-        let p: GaussianPyramid<Mono8> = Dyadic::try_new(two_level_pyramid()).unwrap();
-        assert_eq!(p.depth(), 2);
+    fn the_capability_aliases_name_dyadic_chains() {
+        let placed: PlacedPyramid<Mono8> = Dyadic::try_new(
+            LevelChain::try_from_levels(vec![
+                PlacedImage::new(
+                    Image::fill(8, 6, Mono8::new(10)),
+                    pixel_distance!(1.0),
+                    OriginOffset::ZERO,
+                ),
+                PlacedImage::new(
+                    Image::fill(4, 3, Mono8::new(20)),
+                    pixel_distance!(2.0),
+                    OriginOffset::ZERO,
+                ),
+            ])
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(placed.depth(), 2);
+        assert_eq!(placed.level(1).pixel_distance().get(), 2.0);
+
+        let scaled: ScaledPyramid<Mono8> = Dyadic::try_new(
+            LevelChain::try_from_levels(vec![ScaledImage::new(
+                Image::fill(8, 6, Mono8::new(10)),
+                pixel_distance!(1.0),
+                OriginOffset::ZERO,
+                sigma!(0.5),
+            )])
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(scaled.finest().sigma().get(), 0.5);
     }
 
     // ── Dyadic ──────────────────────────────────────────────────────────
@@ -1200,5 +1397,70 @@ mod tests {
         assert_eq!(p.depth(), 2);
         assert_eq!(p.level(1).pixel_distance(), pixel_distance!(2.0));
         assert_eq!(p.level(1).sigma(), sigma!(1.0));
+    }
+
+    // ── PlacedImage ─────────────────────────────────────────────────────
+
+    fn placed_level() -> PlacedImage<MonoF32> {
+        PlacedImage::new(
+            Image::generate(4, 3, |x, y| MonoF32::new((y * 4 + x) as f32)),
+            pixel_distance!(2.0),
+            OriginOffset::ZERO,
+        )
+    }
+
+    #[test]
+    fn placed_image_carries_its_grid_and_no_sigma() {
+        let level = placed_level();
+        assert_eq!(level.pixel_distance(), pixel_distance!(2.0));
+        assert_eq!(level.origin_offset(), CoordinateF64::new(0.0, 0.0));
+        assert_eq!(
+            level.to_base(CoordinateF64::new(3.0, 4.0)),
+            CoordinateF64::new(6.0, 8.0)
+        );
+        assert_eq!(
+            level.to_local(CoordinateF64::new(6.0, 8.0)),
+            CoordinateF64::new(3.0, 4.0)
+        );
+    }
+
+    #[test]
+    fn placed_image_answers_as_an_image() {
+        // The delegation is what keeps the break soft: code that never heard
+        // of pyramids sees an ordinary raster image.
+        let level = placed_level();
+        assert_eq!(level.size(), Size::new(4, 3));
+        assert_eq!(level.width(), 4);
+        assert_eq!(level.pixel_at(2, 1), MonoF32::new(6.0));
+        assert_eq!(level.row(1)[2], MonoF32::new(6.0));
+        assert_eq!(level.as_image().size(), Size::new(4, 3));
+    }
+
+    #[test]
+    fn scaled_image_answers_as_an_image_too() {
+        let level = ScaledImage::new(
+            Image::generate(4, 3, |x, y| MonoF32::new((y * 4 + x) as f32)),
+            pixel_distance!(2.0),
+            OriginOffset::ZERO,
+            sigma!(1.0),
+        );
+        assert_eq!(level.size(), Size::new(4, 3));
+        assert_eq!(level.pixel_at(2, 1), MonoF32::new(6.0));
+        assert_eq!(level.row(1)[2], MonoF32::new(6.0));
+    }
+
+    #[test]
+    fn with_sigma_carries_the_geometry_over() {
+        let scaled = placed_level().with_sigma(sigma!(1.5));
+        assert_eq!(scaled.pixel_distance(), pixel_distance!(2.0));
+        assert_eq!(scaled.origin_offset(), CoordinateF64::new(0.0, 0.0));
+        assert_eq!(scaled.sigma(), sigma!(1.5));
+        assert_eq!(scaled.size(), Size::new(4, 3));
+    }
+
+    #[test]
+    fn into_image_drops_the_geometry() {
+        let image = placed_level().into_image();
+        assert_eq!(image.size(), Size::new(4, 3));
     }
 }

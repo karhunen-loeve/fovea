@@ -16,15 +16,15 @@
 //! [`convolve_separable`](crate::transform::convolve_separable); that path
 //! stays fully available.
 
-use crate::Size;
 use crate::border::Mirror;
 use crate::error::Error;
 use crate::image::{
-    Dyadic, Image, ImageView, ImageViewMut, LevelChain, Pyramid, PyramidLevel, RasterImage,
-    SeparableKernel,
+    Dyadic, Image, ImageView, ImageViewMut, LevelChain, OriginOffset, PlacedImage, PlacedPyramid,
+    Pyramid, PyramidLevel, RasterImage, ScaledImage, ScaledPyramid, SeparableKernel,
 };
 use crate::pixel::{FromLinear, LinearPixel, LinearSpace, ZeroablePixel};
 use crate::transform::convolve_separable::convolve_separable;
+use crate::{PixelDistance, Sigma, Size};
 
 /// The `pyr_up` interpolation kernel: the binomial `[1, 4, 6, 4, 1] / 8`
 /// per axis — the `pyr_down` kernel with weights ×2 per axis (×4 combined),
@@ -308,8 +308,16 @@ pub trait PyramidMethod<P: Copy> {
 ///
 /// Level 0 is a copy of the input image; each further level is the
 /// [`pyr_down`] of the previous one, halving the resolution (ceiling
-/// division) with the pinned binomial smoothing. The levels are plain
-/// [`Image<P>`] values — no wrapper, no stored strategy.
+/// division) with the pinned binomial smoothing.
+///
+/// Builds a [`PlacedPyramid<P>`](crate::image::PlacedPyramid): every level
+/// carries the sampling geometry the builder computed anyway, a
+/// `pixel_distance` of `2^k` and an unshifted origin, so a caller never
+/// hand-writes `x * 2^level` again. It carries **no** σ, and that is the
+/// point: this method is told nothing about how sharp its input was, so any
+/// σ it attached would be a claim it cannot back. Name the assumption with
+/// [`assuming_input_sigma`](Self::assuming_input_sigma) and the levels come
+/// back as [`ScaledImage`](crate::image::ScaledImage) instead.
 ///
 /// Because every step halves, the result is a
 /// [`Dyadic`](crate::image::Dyadic) pyramid and therefore carries
@@ -325,18 +333,63 @@ pub trait PyramidMethod<P: Copy> {
 ///
 /// ```
 /// use fovea::Size;
-/// use fovea::image::{GaussianPyramid, Image, ImageView, Pyramid};
+/// use fovea::image::{Decimated, Image, ImageView, PlacedPyramid, Pyramid};
 /// use fovea::pixel::MonoF32;
 /// use fovea::transform::{Gaussian, PyramidMethod};
 ///
 /// let img = Image::fill(20, 12, MonoF32::new(0.5));
-/// let pyramid: GaussianPyramid<MonoF32> = Gaussian.build(&img, 3);
+/// let pyramid: PlacedPyramid<MonoF32> = Gaussian.build(&img, 3);
 ///
 /// let sizes: Vec<Size> = pyramid.iter().map(|l| l.size()).collect();
 /// assert_eq!(sizes, [Size::new(20, 12), Size::new(10, 6), Size::new(5, 3)]);
+///
+/// // The geometry is answered, not remembered by the caller.
+/// assert_eq!(pyramid.level(2).pixel_distance().get(), 4.0);
 /// ```
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Gaussian;
+
+impl Gaussian {
+    /// Names the σ the input image is assumed to already carry, so the
+    /// levels can state an absolute σ of their own.
+    ///
+    /// A pyramid's σ ladder is only defined relative to the blur its input
+    /// already had. A photograph off a sensor is never perfectly sharp;
+    /// Lowe's SIFT assumes σ = 0.5 for exactly this reason. Since the
+    /// library cannot know that number, it refuses to invent one: without
+    /// this call the levels carry no σ at all.
+    ///
+    /// The ladder is `σ_k² = σ_in² + (4^k − 1)/3`, in base-image pixels.
+    /// With `σ_in = 0.5`, levels 1 to 3 come out at 1.118, 2.291 and 4.610,
+    /// not at 1, 2 and 4: a caller extrapolating from `pixel_distance` is
+    /// 13% wrong by level 3, silently. That gap is the reason this method
+    /// exists.
+    ///
+    /// **The ladder is nominal.** [`pyr_down`]'s pinned binomial 5-tap has
+    /// an effective σ of 1.0 but is not a true Gaussian, so the variances
+    /// add only approximately. The number a level reports is the
+    /// conventional one every comparable library uses, not a measurement.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use fovea::image::{Image, ScaleLevel, ScaledPyramid, Pyramid};
+    /// use fovea::pixel::MonoF32;
+    /// use fovea::sigma;
+    /// use fovea::transform::{Gaussian, PyramidMethod};
+    ///
+    /// let img = Image::fill(32, 32, MonoF32::new(0.5));
+    /// let pyramid: ScaledPyramid<MonoF32> =
+    ///     Gaussian.assuming_input_sigma(sigma!(0.5)).build(&img, 4);
+    ///
+    /// assert_eq!(pyramid.level(0).sigma().get(), 0.5);
+    /// assert!((pyramid.level(1).sigma().get() - 1.118).abs() < 1e-3);
+    /// ```
+    #[must_use]
+    pub fn assuming_input_sigma(self, input_sigma: Sigma) -> ScaledGaussian {
+        ScaledGaussian { input_sigma }
+    }
+}
 
 impl<P, Acc> PyramidMethod<P> for Gaussian
 where
@@ -347,40 +400,162 @@ where
         + LinearPixel<f32, Accumulator = Acc>
         + std::ops::Add<Output = Acc>,
 {
-    type Output = Dyadic<LevelChain<Image<P>>>;
+    type Output = PlacedPyramid<P>;
 
     fn build<I>(&self, image: &I, max_depth: usize) -> Self::Output
     where
         I: RasterImage<Pixel = P>,
     {
-        let resolved = max_depth.max(1);
-        // Level 0 is an owned copy of whatever view came in, row by row.
-        let base = {
-            let mut data = Vec::with_capacity(image.width() * image.height());
-            for y in 0..image.height() {
-                data.extend_from_slice(image.row(y));
-            }
-            Image::from_vec(image.width(), image.height(), data)
-                .expect("rows fill width * height exactly")
-        };
-        let mut levels = vec![base];
-        while levels.len() < resolved {
-            let prev = levels.last().expect("levels start non-empty");
-            let Size { width, height } = prev.size();
-            // Minimum usable level size: a level that cannot shrink
-            // further (or has no pixels at all) ends the chain.
-            if width <= 1 && height <= 1 || width == 0 || height == 0 {
-                break;
-            }
-            let next = pyr_down(prev);
-            levels.push(next);
-        }
-        let chain = LevelChain::try_from_levels(levels)
-            .expect("Gaussian::build produces non-empty, strictly shrinking levels");
-        // Every level is the `pyr_down` of its predecessor, so the halving
-        // relation holds by construction and needs no second check here.
-        Dyadic::new_unchecked(chain)
+        let levels = gaussian_levels(image, max_depth)
+            .into_iter()
+            .enumerate()
+            .map(|(index, image)| {
+                PlacedImage::new(image, level_pixel_distance(index), OriginOffset::ZERO)
+            })
+            .collect();
+        finish(levels)
     }
+}
+
+/// Gaussian pyramid construction with a named input σ: [`Gaussian`] plus the
+/// one fact it cannot derive.
+///
+/// Reached through
+/// [`Gaussian::assuming_input_sigma`](Gaussian::assuming_input_sigma), which
+/// is where the ladder and its caveats are documented. Builds a
+/// [`ScaledPyramid<P>`](crate::image::ScaledPyramid): the same levels as
+/// [`Gaussian`], each additionally carrying its finished absolute σ.
+///
+/// The levels store the **result**, not the schedule. Asked afterwards, a
+/// level says what σ it has, not which assumption produced it; σ_in is
+/// consumed here and retained nowhere. That keeps the level type usable for
+/// a level some other reducer produced, and it is the crate's standing
+/// pattern: results do not remember their strategy.
+///
+/// # Example
+///
+/// ```
+/// use fovea::image::{Decimated, Image, ScaleLevel, Pyramid};
+/// use fovea::pixel::MonoF32;
+/// use fovea::sigma;
+/// use fovea::transform::{Gaussian, PyramidMethod};
+///
+/// let img = Image::fill(16, 16, MonoF32::new(1.0));
+/// let pyramid = Gaussian.assuming_input_sigma(sigma!(0.5)).build(&img, 3);
+///
+/// let level = pyramid.level(1);
+/// assert_eq!(level.pixel_distance().get(), 2.0);
+/// assert!((level.sigma().get() - 1.118).abs() < 1e-3);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ScaledGaussian {
+    input_sigma: Sigma,
+}
+
+impl ScaledGaussian {
+    /// Returns the assumed input σ this method was given.
+    #[must_use]
+    pub fn input_sigma(&self) -> Sigma {
+        self.input_sigma
+    }
+}
+
+impl<P, Acc> PyramidMethod<P> for ScaledGaussian
+where
+    P: LinearPixel<f32, Accumulator = Acc> + LinearSpace + ZeroablePixel + FromLinear<Acc>,
+    Acc: Copy
+        + Default
+        + ZeroablePixel
+        + LinearPixel<f32, Accumulator = Acc>
+        + std::ops::Add<Output = Acc>,
+{
+    type Output = ScaledPyramid<P>;
+
+    fn build<I>(&self, image: &I, max_depth: usize) -> Self::Output
+    where
+        I: RasterImage<Pixel = P>,
+    {
+        let input_variance = f64::from(self.input_sigma.get()).powi(2);
+        // Each `pyr_down` adds the variance of a σ = 1 blur measured in its
+        // *parent's* pixels, which is 4^(k-1) base pixels squared. Summed,
+        // that is the (4^k - 1)/3 of the ladder, accumulated here rather
+        // than re-derived per level so the exponent cannot overflow.
+        let mut variance = input_variance;
+        let mut added = 1.0_f64;
+        let levels = gaussian_levels(image, max_depth)
+            .into_iter()
+            .enumerate()
+            .map(|(index, image)| {
+                if index > 0 {
+                    variance += added;
+                    added *= 4.0;
+                }
+                let sigma = Sigma::try_new(variance.sqrt() as f32)
+                    .expect("a positive input sigma stays positive and finite along the ladder");
+                ScaledImage::new(
+                    image,
+                    level_pixel_distance(index),
+                    OriginOffset::ZERO,
+                    sigma,
+                )
+            })
+            .collect();
+        finish(levels)
+    }
+}
+
+/// The base-pixel spacing of level `index`: `2^index`, since every step
+/// keeps the even samples of the one before it.
+fn level_pixel_distance(index: usize) -> PixelDistance {
+    let spacing = (1_u64 << index.min(63)) as f64;
+    PixelDistance::try_new(spacing).expect("a power of two is finite and strictly positive")
+}
+
+/// Assembles built levels into the dyadic chain both builders return.
+///
+/// Every level is the `pyr_down` of its predecessor, so the halving relation
+/// holds by construction and needs no second check here.
+fn finish<L: PyramidLevel>(levels: Vec<L>) -> Dyadic<LevelChain<L>> {
+    let chain = LevelChain::try_from_levels(levels)
+        .expect("Gaussian construction produces non-empty, non-growing levels");
+    Dyadic::new_unchecked(chain)
+}
+
+/// The shared level cascade: level 0 is an owned copy of the input, each
+/// further level the [`pyr_down`] of the one before it.
+fn gaussian_levels<I, P, Acc>(image: &I, max_depth: usize) -> Vec<Image<P>>
+where
+    I: RasterImage<Pixel = P>,
+    P: LinearPixel<f32, Accumulator = Acc> + LinearSpace + ZeroablePixel + FromLinear<Acc>,
+    Acc: Copy
+        + Default
+        + ZeroablePixel
+        + LinearPixel<f32, Accumulator = Acc>
+        + std::ops::Add<Output = Acc>,
+{
+    let resolved = max_depth.max(1);
+    // Level 0 is an owned copy of whatever view came in, row by row.
+    let base = {
+        let mut data = Vec::with_capacity(image.width() * image.height());
+        for y in 0..image.height() {
+            data.extend_from_slice(image.row(y));
+        }
+        Image::from_vec(image.width(), image.height(), data)
+            .expect("rows fill width * height exactly")
+    };
+    let mut levels = vec![base];
+    while levels.len() < resolved {
+        let prev = levels.last().expect("levels start non-empty");
+        let Size { width, height } = prev.size();
+        // Minimum usable level size: a level that cannot shrink
+        // further (or has no pixels at all) ends the chain.
+        if width <= 1 && height <= 1 || width == 0 || height == 0 {
+            break;
+        }
+        let next = pyr_down(prev);
+        levels.push(next);
+    }
+    levels
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
@@ -389,7 +564,7 @@ where
 mod tests {
     use super::*;
     use crate::CoordinateF64;
-    use crate::image::{Decimated, OriginOffset, PyramidLevel, ScaledImage};
+    use crate::image::{Decimated, OriginOffset, PyramidLevel, ScaleLevel, ScaledImage};
     use crate::pixel::{Mono8, MonoF32};
     use crate::{pixel_distance, sigma};
 
@@ -792,5 +967,117 @@ mod tests {
 
         let lifted = scaled.to_base(CoordinateF64::new(best.0 as f64, best.1 as f64));
         assert_eq!(lifted, CoordinateF64::new(f64::from(cx), f64::from(cy)));
+    }
+
+    // ── Gaussian: the geometry the builder no longer discards ───────────
+
+    #[test]
+    fn gaussian_levels_carry_their_sampling_grid() {
+        let src = Image::fill(32, 20, MonoF32::new(0.5));
+        let pyramid: PlacedPyramid<MonoF32> = Gaussian.build(&src, 4);
+        let distances: Vec<f64> = pyramid.iter().map(|l| l.pixel_distance().get()).collect();
+        assert_eq!(distances, [1.0, 2.0, 4.0, 8.0]);
+        for level in pyramid.iter() {
+            assert_eq!(level.origin_offset(), CoordinateF64::new(0.0, 0.0));
+        }
+    }
+
+    #[test]
+    fn a_coarse_position_lifts_without_the_caller_naming_the_grid() {
+        let src = Image::fill(32, 32, MonoF32::new(0.5));
+        let pyramid: PlacedPyramid<MonoF32> = Gaussian.build(&src, 3);
+        // pyr_down keeps even samples, so level-2 pixel 3 is base pixel 12.
+        assert_eq!(
+            pyramid.level(2).to_base(CoordinateF64::new(3.0, 1.0)),
+            CoordinateF64::new(12.0, 4.0)
+        );
+    }
+
+    // ── ScaledGaussian: the sigma ladder ────────────────────────────────
+
+    #[test]
+    fn the_sigma_ladder_matches_the_published_numbers_for_lowes_assumption() {
+        let src = Image::fill(64, 64, MonoF32::new(0.5));
+        let pyramid: ScaledPyramid<MonoF32> =
+            Gaussian.assuming_input_sigma(sigma!(0.5)).build(&src, 4);
+        let sigmas: Vec<f32> = pyramid.iter().map(|l| l.sigma().get()).collect();
+        for (actual, expected) in sigmas.iter().zip([0.5, 1.118, 2.291, 4.610]) {
+            assert!(
+                (actual - expected).abs() < 1e-3,
+                "sigma ladder: got {sigmas:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_sigma_ladder_matches_the_published_numbers_for_a_sharp_input() {
+        let src = Image::fill(64, 64, MonoF32::new(0.5));
+        // A perfectly sharp input is not expressible: Sigma is strictly
+        // positive, and that is the point. This is as close as it gets.
+        let pyramid: ScaledPyramid<MonoF32> =
+            Gaussian.assuming_input_sigma(sigma!(0.001)).build(&src, 4);
+        let sigmas: Vec<f32> = pyramid.iter().skip(1).map(|l| l.sigma().get()).collect();
+        for (actual, expected) in sigmas.iter().zip([1.000, 2.236, 4.583]) {
+            assert!(
+                (actual - expected).abs() < 1e-3,
+                "sigma ladder: got {sigmas:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_naive_extrapolation_is_the_error_the_ladder_prevents() {
+        // The tempting guess is that sigma scales with the sampling
+        // distance: sigma_in * 2^k, so 0.5, 1, 2, 4. It does not, because
+        // variances add rather than sigmas. By level 3 the guess is 13% short
+        // of the truth, silently. This test pins the gap so it cannot be
+        // closed by accident.
+        let src = Image::fill(64, 64, MonoF32::new(0.5));
+        let pyramid: ScaledPyramid<MonoF32> =
+            Gaussian.assuming_input_sigma(sigma!(0.5)).build(&src, 4);
+        let level = pyramid.level(3);
+        let naive = 0.5 * level.pixel_distance().get() as f32;
+        let truth = level.sigma().get();
+        assert!((naive - 4.0).abs() < 1e-6, "naive guess {naive}");
+        assert!(
+            ((truth - naive) / truth - 0.132).abs() < 5e-3,
+            "truth {truth}, naive {naive}"
+        );
+    }
+
+    #[test]
+    fn scaled_levels_keep_the_same_grid_as_placed_ones() {
+        let src = Image::fill(32, 20, MonoF32::new(0.5));
+        let placed: PlacedPyramid<MonoF32> = Gaussian.build(&src, 4);
+        let scaled: ScaledPyramid<MonoF32> =
+            Gaussian.assuming_input_sigma(sigma!(0.5)).build(&src, 4);
+        assert_eq!(placed.depth(), scaled.depth());
+        for index in 0..placed.depth() {
+            assert_eq!(placed.level(index).size(), scaled.level(index).size());
+            assert_eq!(
+                placed.level(index).pixel_distance(),
+                scaled.level(index).pixel_distance()
+            );
+        }
+    }
+
+    #[test]
+    fn the_input_sigma_is_readable_on_the_method_and_nowhere_else() {
+        // The method keeps it because the caller named it; the levels store
+        // their finished sigma, not the assumption that produced it.
+        let method = Gaussian.assuming_input_sigma(sigma!(0.5));
+        assert_eq!(method.input_sigma(), sigma!(0.5));
+    }
+
+    #[test]
+    fn both_builders_produce_dyadic_pyramids_that_expand() {
+        let src = Image::fill(21, 13, MonoF32::new(0.5));
+        let placed: PlacedPyramid<MonoF32> = Gaussian.build(&src, 3);
+        let scaled: ScaledPyramid<MonoF32> =
+            Gaussian.assuming_input_sigma(sigma!(0.5)).build(&src, 3);
+        let from_placed: Image<MonoF32> = placed.expand(2).expect("level 2 has a parent");
+        let from_scaled: Image<MonoF32> = scaled.expand(2).expect("level 2 has a parent");
+        assert_eq!(from_placed.size(), placed.level(1).size());
+        assert_eq!(from_scaled.size(), scaled.level(1).size());
     }
 }
