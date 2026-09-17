@@ -208,7 +208,7 @@ pub trait Pyramid {
 /// The ordinary pyramid container: a `Vec` of levels, finest first.
 ///
 /// `LevelChain<L>` is generic over the level type, not the construction
-/// method — a Gaussian-built chain and a custom-built chain with the same
+/// method, so a Gaussian-built chain and a custom-built chain with the same
 /// level type are interchangeable downstream. It is the [`Pyramid`]
 /// implementation that owns its levels contiguously; the accessors come from
 /// that trait, so callers import it.
@@ -305,7 +305,7 @@ impl<L: PyramidLevel> Pyramid for LevelChain<L> {
 /// `Dyadic<C>` is an adapter over any [`Pyramid`], not a container of its
 /// own, so a memory-mapped or lazily paged container gains the guarantee by
 /// being wrapped rather than by being reimplemented. It is itself a
-/// [`Pyramid`] — one with an extra guarantee — so it passes everywhere a
+/// [`Pyramid`], one with an extra guarantee, so it passes everywhere a
 /// `C: Pyramid` bound does.
 ///
 /// That guarantee is what makes [`expand`](Self::expand) total: the parent's
@@ -343,9 +343,9 @@ impl<C: Pyramid> Dyadic<C> {
     /// Wraps a pyramid of unknown provenance, checking the halving relation.
     ///
     /// Every neighbouring pair must satisfy `child = ceil(parent / 2)` along
-    /// both axes — the relation `pyr_down` produces, under which an odd and
-    /// an even parent dimension map onto the same child. A single-level
-    /// pyramid has no pair to violate and is always dyadic.
+    /// both axes. That is the relation `pyr_down` produces, under which an
+    /// odd and an even parent dimension map onto the same child. A
+    /// single-level pyramid has no pair to violate and is always dyadic.
     ///
     /// # Errors
     ///
@@ -358,7 +358,7 @@ impl<C: Pyramid> Dyadic<C> {
     /// use fovea::image::{Dyadic, Image, LevelChain};
     /// use fovea::pixel::Mono8;
     ///
-    /// // Non-growing, so the chain is legal — but 30 is not half of 100.
+    /// // Non-growing, so the chain is legal, but 30 is not half of 100.
     /// let levels = vec![Image::<Mono8>::zero(100, 68), Image::<Mono8>::zero(30, 34)];
     /// let chain = LevelChain::try_from_levels(levels)?;
     /// assert!(Dyadic::try_new(chain).is_err());
@@ -381,10 +381,12 @@ impl<C: Pyramid> Dyadic<C> {
 
     /// Wraps a pyramid whose halving the caller has already established.
     ///
-    /// Crate-internal, per PHILOSOPHY §12: the builders that compose
-    /// `pyr_down` produce the relation by construction, so re-deriving it
-    /// from the sizes afterwards would check the arithmetic of the very
-    /// function that produced them.
+    /// Crate-internal on purpose. An unchecked constructor is warranted only
+    /// where the caller has already established the invariant: the builders
+    /// that compose `pyr_down` produce the halving relation by construction,
+    /// so re-deriving it from the sizes afterwards would check the arithmetic
+    /// of the very function that produced them. Callers outside the crate
+    /// have no such proof and go through [`try_new`](Self::try_new).
     pub(crate) fn new_unchecked(inner: C) -> Self {
         Self(inner)
     }
@@ -414,7 +416,7 @@ impl<C: Pyramid> Pyramid for Dyadic<C> {
 /// The dyadic relation between neighbouring level sizes.
 ///
 /// `pyr_down` maps a dimension onto `ceil(dim / 2)`, so an odd and an even
-/// parent dimension land on the same child — which is why the way back up
+/// parent dimension land on the same child. That is why the way back up
 /// needs a target, and why a container that already holds one does not.
 fn halved(dim: usize) -> usize {
     dim / 2 + dim % 2
@@ -890,7 +892,7 @@ mod tests {
     }
 
     /// The smallest legal implementor: `depth` and `get` only, so the four
-    /// provided accessors are the ones under test — including `iter`, whose
+    /// provided accessors are the ones under test, including `iter`, whose
     /// `impl Iterator` return borrows `&self` and is the one shape D2e
     /// wanted compiled rather than assumed.
     struct MinimalPyramid(Vec<Image<Mono8>>);
@@ -992,8 +994,8 @@ mod tests {
 
     #[test]
     fn try_new_rejects_equal_size_neighbours() {
-        // A legal chain — `try_from_levels` admits equal sizes on purpose —
-        // that is nevertheless not dyadic.
+        // A legal chain that is nevertheless not dyadic: `try_from_levels`
+        // admits equal sizes on purpose.
         let chain = LevelChain::try_from_levels(vec![
             Image::fill(8, 6, Mono8::new(1)),
             Image::fill(8, 6, Mono8::new(1)),

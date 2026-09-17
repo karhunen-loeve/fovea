@@ -210,7 +210,7 @@ impl<C: Pyramid> Dyadic<C> {
     /// an approximation of its parent, not the parent, and giving it the
     /// parent's geometry would be a claim nothing backs.
     ///
-    /// Returns `None` exactly when there is no parent to lift to — for
+    /// Returns `None` exactly when there is no parent to lift to: for
     /// `child == 0`, which is the finest level, and for any `child` at or
     /// past [`depth`](Pyramid::depth). That is the same question
     /// [`get`](Pyramid::get) answers, and it is the only one left: the
@@ -378,7 +378,7 @@ where
         let chain = LevelChain::try_from_levels(levels)
             .expect("Gaussian::build produces non-empty, strictly shrinking levels");
         // Every level is the `pyr_down` of its predecessor, so the halving
-        // relation holds by construction: PHILOSOPHY §12's licensed case.
+        // relation holds by construction and needs no second check here.
         Dyadic::new_unchecked(chain)
     }
 }

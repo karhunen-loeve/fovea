@@ -113,7 +113,7 @@ pub enum Error {
     ///
     /// Returned by [`Dyadic::try_new`](crate::image::Dyadic::try_new) when a
     /// level's size is not its predecessor's ceiling-halved size along both
-    /// axes — the relation [`pyr_down`](crate::transform::pyr_down)
+    /// axes, which is the relation [`pyr_down`](crate::transform::pyr_down)
     /// produces. A chain may be perfectly well ordered and still not be
     /// dyadic: equal-size neighbours and a chain that shrinks by some other
     /// factor both pass
