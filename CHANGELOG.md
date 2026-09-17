@@ -102,10 +102,15 @@ This moves descriptor scales and matching results, and it has **no compile
 error attached**, because the migrating caller stops writing the number at
 all. Check any threshold or kernel size derived from a level's σ.
 
-The ladder is **nominal**. `pyr_down`'s pinned binomial 5-tap has an
-effective σ of 1.0 but is not a true Gaussian, so the variances add only
-approximately. The number a level reports is the conventional one every
-comparable library uses, not a measurement.
+The ladder is **nominal**, and it is worth being precise about which part.
+The arithmetic is exact: `pyr_down`'s pinned binomial 5-tap has a kernel
+variance of exactly 1, convolution adds variances exactly, and the composite
+kernel from the base image to level `k` therefore has variance
+`(4^k − 1)/3` away from the borders. What is not exact is calling the result
+a Gaussian: the 5-tap is not one, and repeated convolution converges to one
+without ever being one. A level reports a nominal effective scale under
+Gaussian composition, the conventional number every comparable library uses,
+not a measurement.
 
 ## [0.4.0] — 2026-09-05
 
