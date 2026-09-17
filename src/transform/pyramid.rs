@@ -475,12 +475,11 @@ where
     where
         I: RasterImage<Pixel = P>,
     {
-        let input_variance = f64::from(self.input_sigma.get()).powi(2);
         // Each `pyr_down` adds the variance of a σ = 1 blur measured in its
         // *parent's* pixels, which is 4^(k-1) base pixels squared. Summed,
         // that is the (4^k - 1)/3 of the ladder, accumulated here rather
         // than re-derived per level so the exponent cannot overflow.
-        let mut variance = input_variance;
+        let mut variance = f64::from(self.input_sigma.get()).powi(2);
         let mut added = 1.0_f64;
         let levels = gaussian_levels(image, max_depth)
             .into_iter()
