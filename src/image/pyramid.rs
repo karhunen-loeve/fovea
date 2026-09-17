@@ -461,10 +461,12 @@ pub type ScaledPyramid<P> = Dyadic<LevelChain<ScaledImage<P>>>;
 /// All coordinates use the **pixel-center convention**: coordinate
 /// `(0.0, 0.0)` is the *center* of pixel `(0, 0)`.
 ///
-/// A plain `Pyramid<Image<P>>` used only for multi-resolution work
-/// implements neither this trait nor [`ScaleLevel`] — it carries no scale
-/// metadata and pays nothing for it. Level types that guarantee the
-/// metadata (such as [`ScaledImage`]) opt in.
+/// A chain of plain [`Image<P>`] levels implements neither this trait nor
+/// [`ScaleLevel`]. That is a statement about what is **known**, not about
+/// what is cheap: nobody told such a level where its samples sit, so it
+/// must not answer as though they had. Level types that were told opt in,
+/// [`PlacedImage`] for the sampling grid and [`ScaledImage`] for the grid
+/// and the absolute σ.
 ///
 /// # Example
 ///
@@ -591,8 +593,15 @@ pub trait ScaleLevel: PyramidLevel {
 ///
 /// This is the thin wrapper for callers who need scale-aware pyramid
 /// levels — for example to lift feature positions detected on a coarse
-/// level back into base-image coordinates. A plain `Pyramid<Image<P>>`
-/// carries none of this metadata and pays nothing for it.
+/// level back into base-image coordinates. The rung below it is
+/// [`PlacedImage`], which knows its grid and claims no σ; below that a
+/// plain [`Image<P>`], which claims neither.
+///
+/// What separates the three is what has been **established** about the
+/// level, not what it costs to carry. A few scalars against a level holding
+/// megabytes of pixels is not a trade-off worth making, and a stored σ is
+/// cheaper to read than a guessed one is to derive. The reason a level
+/// without a σ exists is that it must not claim one it does not have.
 ///
 /// The metadata is supplied explicitly at construction: whoever builds the
 /// level states its sampling convention instead of leaving it implicit in
