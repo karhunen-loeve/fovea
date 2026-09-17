@@ -282,6 +282,48 @@ impl<L: PyramidLevel> LevelChain<L> {
         }
         Ok(Self { levels })
     }
+
+    /// Hands out the levels and consumes the chain.
+    ///
+    /// O(1): the `Vec` moves out, no pixels are copied. This is the named
+    /// exit for taking a level out and keeping it, in the register of
+    /// [`ScaledImage::into_image`]. Its concrete use is moving levels into
+    /// another structure without a `clone` of every pixel; the accessors on
+    /// [`Pyramid`] all yield references, which is right for reading and
+    /// wrong for taking.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use fovea::image::{Image, LevelChain};
+    /// use fovea::pixel::Mono8;
+    ///
+    /// let chain = LevelChain::try_from_levels(vec![
+    ///     Image::<Mono8>::zero(8, 8),
+    ///     Image::<Mono8>::zero(4, 4),
+    /// ])?;
+    ///
+    /// let levels: Vec<Image<Mono8>> = chain.into_levels();
+    /// assert_eq!(levels.len(), 2);
+    /// # Ok::<(), fovea::Error>(())
+    /// ```
+    pub fn into_levels(self) -> Vec<L> {
+        self.levels
+    }
+}
+
+impl<L: PyramidLevel> IntoIterator for LevelChain<L> {
+    type Item = L;
+    type IntoIter = std::vec::IntoIter<L>;
+
+    /// Consumes the chain, yielding owned levels from finest to coarsest.
+    ///
+    /// The `for level in chain` a Rust reader reaches for.
+    /// [`Pyramid::iter`] is the borrowing counterpart and stays the right
+    /// call for reading.
+    fn into_iter(self) -> Self::IntoIter {
+        self.levels.into_iter()
+    }
 }
 
 impl<L: PyramidLevel> Pyramid for LevelChain<L> {
@@ -416,6 +458,24 @@ impl<C: Pyramid> Pyramid for Dyadic<C> {
 
     fn iter(&self) -> impl Iterator<Item = &C::Level> {
         self.0.iter()
+    }
+}
+
+impl<C: Pyramid + IntoIterator> IntoIterator for Dyadic<C> {
+    type Item = C::Item;
+    type IntoIter = C::IntoIter;
+
+    /// Consumes the adapter and the container inside it, yielding whatever
+    /// the container yields.
+    ///
+    /// Conditional on the wrapped container having an `IntoIterator`, which
+    /// is why it is not on the [`Pyramid`] trait: a memory-mapped or paging
+    /// container would have to materialise a `Vec` for a consumer that may
+    /// never ask. Without this impl `for level in chain` would compile and
+    /// `for level in pyramid` would not, while a `Dyadic` passes as a
+    /// pyramid everywhere else.
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
     }
 }
 
@@ -1175,6 +1235,47 @@ mod tests {
         )
         .unwrap();
         assert_eq!(scaled.finest().sigma().get(), 0.5);
+    }
+
+    // ── Ownership ───────────────────────────────────────────────────────
+
+    #[test]
+    fn into_levels_hands_out_the_levels() {
+        let levels = two_level_pyramid().into_levels();
+        assert_eq!(levels.len(), 2);
+        assert_eq!(levels[0].size(), Size::new(8, 6));
+        assert_eq!(levels[1].pixel_at(0, 0), Mono8::new(20));
+    }
+
+    #[test]
+    fn a_chain_can_be_consumed_by_a_for_loop() {
+        let mut widths = Vec::new();
+        for level in two_level_pyramid() {
+            widths.push(level.size().width);
+        }
+        assert_eq!(widths, [8, 4]);
+    }
+
+    #[test]
+    fn a_dyadic_pyramid_can_be_consumed_by_a_for_loop() {
+        // The conditional forward: without it this loop would not compile
+        // while the one above does, for a type that is a pyramid everywhere
+        // else.
+        let pyramid = Dyadic::try_new(two_level_pyramid()).unwrap();
+        let widths: Vec<usize> = pyramid.into_iter().map(|l| l.size().width).collect();
+        assert_eq!(widths, [8, 4]);
+    }
+
+    #[test]
+    fn a_level_survives_the_chain_it_came_from() {
+        // The point of the exit: take one level out and keep it, without
+        // cloning its pixels.
+        let base = two_level_pyramid()
+            .into_levels()
+            .into_iter()
+            .next()
+            .expect("a chain is never empty");
+        assert_eq!(base.size(), Size::new(8, 6));
     }
 
     // ── Dyadic ──────────────────────────────────────────────────────────
