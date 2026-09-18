@@ -176,6 +176,28 @@ More answers are in [`fovea::guide::faq`](https://docs.rs/fovea/latest/fovea/gui
 | `fovea-derive` | crates.io + docs.rs | Derive macros re-exported by `fovea`. |
 | `fovea-examples` | repo only | End-to-end programs that combine the crates. |
 
+## Further reading
+
+**Type-Safe Computer Vision** is a series by fovea's author about computer
+vision bugs that are really type bugs. Each post takes a mistake that ships in
+production everywhere, measures it on a real image, and then shows the same
+operation written so that a compiler refuses the wrong version.
+
+- [The Blue Face Bug](https://karhunen-loeve.github.io/01-rgb-bgr-the-blue-face-bug.html):
+  three bytes in memory do not say which channel comes first. Read as RGB they
+  are a warm skin tone, read as BGR they are ice blue, and no type in sight
+  disagrees.
+- [128 Is Not the Middle](https://karhunen-loeve.github.io/02-gamma-blind-interpolation.html):
+  the average of a black and a white pixel is not 128, it is 188. Stored bytes
+  are a compressed code for light, which breaks every naive resize, blur and
+  blend, and has been re-discovered in Pillow, imgproxy, darktable and libvips
+  for two decades.
+
+[FAST corners](https://karhunen-loeve.github.io/tools/fast-corners.html) runs
+this crate in your browser, compiled to WebAssembly, with no upload and no
+network request after load: drop an image, move the threshold and the arc
+length, and read the sixteen ring samples that decided a corner.
+
 ## Design principles
 
 fovea is designed around a small set of explicit principles: types are the spec, concerns are orthogonal, traits layer progressively, conversions are named, and layout is a contract. The short version is this:
