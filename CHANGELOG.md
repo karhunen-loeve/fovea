@@ -7,6 +7,113 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-09-18
+
+### Changed
+
+- **The pyramid says what it knows.** A Gaussian pyramid used to compute
+  each level's sampling geometry and then discard it, leaving the caller to
+  restate it from memory. Its levels now carry it. `Gaussian.build` returns
+  a `PlacedPyramid<P>`, whose levels answer `pixel_distance()` and
+  `origin_offset()`, so lifting a coarse detection into base-image
+  coordinates no longer asks the caller for numbers the builder derived.
+
+- **`Pyramid<L>` is now a trait, and the container is `LevelChain<L>`**
+  (**breaking**). Implementors owe `depth` and `get`; `level`, `finest`,
+  `coarsest` and `iter` are provided in terms of them, and the guarantees
+  the old struct got from having a single constructor are now a documented
+  four-clause contract on the trait. Callers of the accessors must import
+  `Pyramid`. The trait is not object-safe, which is intended: `iter`
+  returns `impl Iterator`.
+
+- **`PyramidLevel` requires `RasterImage` and no longer declares `Pixel`**
+  (**breaking** for foreign level types, which gain a supertrait to
+  satisfy; every level that could already exist satisfies it). In exchange a
+  level answers `size()`, `pixel_at()` and `row()` directly, so
+  `pyr_down(pyr.level(1))` and `pyr.level(1).size()` compile unchanged, and
+  generic code binding both traits no longer has to assert by hand that two
+  `Pixel` types are the same. The inherent `ScaledImage::size` is removed
+  with it (**breaking**); `size()` now arrives once, from `ImageView`.
+
+- **`PyramidMethod::Level` is replaced by `Output: Pyramid`**
+  (**breaking**). `build` names the whole pyramid it returns rather than
+  hard-wiring one container, which is what lets `Gaussian` hand its callers
+  a `Dyadic` pyramid. The level type is reached as
+  `<M::Output as Pyramid>::Level`.
+
+- **`Gaussian::build` returns a different type** (**breaking**):
+  `PlacedPyramid<P>` instead of a pyramid of plain `Image<P>` levels.
+
+- **`Error` gains `NotDyadic`** (**breaking**). `Error` is not
+  `#[non_exhaustive]`, so adding any variant breaks a downstream `match`
+  without a catch-all arm.
+
+- `GaussianPyramid<P>` is **removed** (**breaking**), replaced by
+  `PlacedPyramid<P>` and `ScaledPyramid<P>`. The old alias asserted a
+  construction method, and after `PlacedImage` the same type also arises
+  from an imported mipmap, where that assertion is false. The two new names
+  state a capability instead, which is true for both provenances.
+
+### Added
+
+- `PlacedImage<P>`: a level that knows its sampling grid and claims no σ.
+  It fills the gap between `Image<P>` (pixels alone) and `ScaledImage<P>`
+  (pixels, grid and blur): a level whose grid is known and whose blur is
+  not was previously inexpressible, so an imported GPU mipmap had to invent
+  a `sigma!(1.0)`. Deliberately not an `Option<Sigma>` on one shared type:
+  asking a level for a σ nobody established is a compile error, not a
+  plausible `None`.
+
+- `Dyadic<C>`: an adapter over any `Pyramid` whose neighbouring levels
+  halve. `try_new` validates the relation for containers of unknown
+  provenance; the builders establish it by construction. It is itself a
+  `Pyramid`, so it passes anywhere the weaker form does.
+
+- `Dyadic::expand(child)`: lifts a level to its parent's size and returns
+  `Option<Image<P>>`. This is `pyr_up` with the target taken from the
+  neighbouring level instead of from the caller. The free `pyr_up` stays,
+  and stays the right call for an image of unknown provenance: a 51-wide
+  image could be the reduction of 101 or of 102, so its parent size is
+  genuinely input. Inside a `Dyadic` pyramid it is not, and the ambiguity
+  cannot arise.
+
+- `Gaussian::assuming_input_sigma(σ_in)`, which yields `ScaledGaussian` and
+  builds a `ScaledPyramid<P>` whose levels carry an absolute σ. See the
+  behaviour note below before using it.
+
+- `LevelChain::into_levels` and `IntoIterator` for `LevelChain<L>`, with a
+  conditional forward through `Dyadic<C>`. Taking a level out and keeping
+  it no longer costs a clone of its pixels.
+
+- `PlacedImage::with_sigma`, which adds an absolute σ to a level whose grid
+  is already established.
+
+### Behaviour note: level σ changes, without a compile error
+
+A caller who hand-wrote `sigma!(1.0)` for level 1 of a Gaussian pyramid and
+migrates to `Gaussian::assuming_input_sigma(sigma!(0.5))` will now get
+**1.118**. This is a correction, not a refinement.
+
+The σ ladder is `σ_k² = σ_in² + (4^k − 1)/3`, in base-image pixels, because
+variances add and σ does not. Under Lowe's assumption of σ_in = 0.5 the
+first three levels are 1.118, 2.291 and 4.610, where an extrapolation from
+the sampling distance would give 1, 2 and 4. By level 3 that extrapolation
+is 13% short.
+
+This moves descriptor scales and matching results, and it has **no compile
+error attached**, because the migrating caller stops writing the number at
+all. Check any threshold or kernel size derived from a level's σ.
+
+The ladder is **nominal**, and it is worth being precise about which part.
+The arithmetic is exact: `pyr_down`'s pinned binomial 5-tap has a kernel
+variance of exactly 1, convolution adds variances exactly, and the composite
+kernel from the base image to level `k` therefore has variance
+`(4^k − 1)/3` away from the borders. What is not exact is calling the result
+a Gaussian: the 5-tap is not one, and repeated convolution converges to one
+without ever being one. A level reports a nominal effective scale under
+Gaussian composition, the conventional number every comparable library uses,
+not a measurement.
+
 ## [0.4.0] — 2026-09-05
 
 ### Added
@@ -1392,6 +1499,7 @@ actual functionality.
   `Result<T, Error>` for caller-data failures, `panic!` for
   programmer bugs.
 
+[0.5.0]: https://github.com/karhunen-loeve/fovea/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/karhunen-loeve/fovea/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/karhunen-loeve/fovea/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/karhunen-loeve/fovea/compare/v0.1.1...v0.2.0

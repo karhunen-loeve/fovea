@@ -210,25 +210,22 @@
 //! use fovea::CoordinateF64;
 //! use fovea::features::HasPosition;
 //! use fovea::features::detect::{detect_corners_in_level, CornerParams, NmsRadius, ShiTomasi};
-//! use fovea::image::{Image, OriginOffset, ScaledImage};
+//! use fovea::image::{Image, PlacedPyramid, Pyramid};
 //! use fovea::pixel::MonoF32;
-//! use fovea::{pixel_distance, sigma};
-//! use fovea::transform::pyr_down;
+//! use fovea::sigma;
+//! use fovea::transform::{Gaussian, PyramidMethod};
 //!
 //! let base: Image<MonoF32> = Image::generate(48, 48, |x, y| {
 //!     MonoF32::new(if (16..32).contains(&x) && (16..32).contains(&y) { 1.0 } else { 0.0 })
 //! });
 //!
-//! // Octave 1: pyr_down keeps even samples — distance 2, origin unshifted.
-//! let level = ScaledImage::new(
-//!     pyr_down(&base),
-//!     pixel_distance!(2.0),
-//!     OriginOffset::ZERO,
-//!     sigma!(1.0),
-//! );
+//! // Octave 1. The level carries the grid the builder computed, so the
+//! // sampling convention is never restated here.
+//! let pyramid: PlacedPyramid<MonoF32> = Gaussian.build(&base, 2);
+//! let level = pyramid.level(1);
 //!
 //! let params = CornerParams::try_new(sigma!(1.0), 0.05, NmsRadius::new(2).unwrap())?;
-//! let corners = detect_corners_in_level(&level, ShiTomasi, params);
+//! let corners = detect_corners_in_level(level, ShiTomasi, params);
 //!
 //! // Found on a 24×24 level, reported in the 48×48 base frame: an x of 30
 //! // is not a coordinate the level could have produced.

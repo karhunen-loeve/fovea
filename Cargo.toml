@@ -8,7 +8,7 @@ license.workspace      = true
 authors.workspace      = true
 readme                 = "README.md"
 repository             = "https://github.com/karhunen-loeve/fovea"
-homepage               = "https://github.com/karhunen-loeve/fovea"
+homepage               = "https://karhunen-loeve.github.io/"
 documentation          = "https://docs.rs/fovea"
 keywords               = ["image", "computer-vision", "pixel", "color", "type-safe"]
 categories             = ["computer-vision", "graphics", "multimedia::images"]
@@ -29,7 +29,7 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
-fovea-derive = { version = "0.4.0", path = "../fovea-derive" }
+fovea-derive = { version = "0.5.0", path = "../fovea-derive" }
 
 [dev-dependencies]
 criterion = { version = "0.7.0", features = ["html_reports"] }

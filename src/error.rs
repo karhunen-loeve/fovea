@@ -87,14 +87,14 @@ pub enum Error {
     /// A pyramid was constructed from an empty level list.
     ///
     /// Returned by
-    /// [`Pyramid::try_from_levels`](crate::image::Pyramid::try_from_levels) —
+    /// [`LevelChain::try_from_levels`](crate::image::LevelChain::try_from_levels) —
     /// a pyramid always contains at least one level.
     EmptyPyramid,
 
     /// Pyramid levels are not ordered finest to coarsest.
     ///
     /// Returned by
-    /// [`Pyramid::try_from_levels`](crate::image::Pyramid::try_from_levels)
+    /// [`LevelChain::try_from_levels`](crate::image::LevelChain::try_from_levels)
     /// when a level is larger than its predecessor along either axis.
     /// Levels must be non-increasing in both width and height (equal sizes
     /// are allowed — same-size levels occur in scale stacks and sub-band
@@ -107,6 +107,26 @@ pub enum Error {
         previous: Size,
         /// The dimensions of the offending level.
         current: Size,
+    },
+
+    /// Pyramid levels do not halve from one level to the next.
+    ///
+    /// Returned by [`Dyadic::try_new`](crate::image::Dyadic::try_new) when a
+    /// level's size is not its predecessor's ceiling-halved size along both
+    /// axes, which is the relation [`pyr_down`](crate::transform::pyr_down)
+    /// produces. A chain may be perfectly well ordered and still not be
+    /// dyadic: equal-size neighbours and a chain that shrinks by some other
+    /// factor both pass
+    /// [`LevelChain::try_from_levels`](crate::image::LevelChain::try_from_levels)
+    /// on purpose. Because the relation holds between two runtime sizes,
+    /// this is a recoverable error, not a panic.
+    NotDyadic {
+        /// Index of the first level that does not halve its predecessor.
+        index: usize,
+        /// The dimensions of the preceding level.
+        parent: Size,
+        /// The dimensions of the offending level.
+        child: Size,
     },
 
     /// A computed value violates a parameter type's invariant.
@@ -283,6 +303,24 @@ impl fmt::Display for Error {
                     index, current.width, current.height, previous.width, previous.height
                 )
             }
+            Error::NotDyadic {
+                index,
+                parent,
+                child,
+            } => {
+                write!(
+                    f,
+                    "not dyadic: level {} is {}x{}, but its predecessor {}x{} halves to \
+                     {}x{} (every level must be ceil(parent / 2) along both axes)",
+                    index,
+                    child.width,
+                    child.height,
+                    parent.width,
+                    parent.height,
+                    parent.width / 2 + parent.width % 2,
+                    parent.height / 2 + parent.height % 2
+                )
+            }
             Error::InvalidParameter(reason) => {
                 write!(f, "invalid parameter: {}", reason)
             }
@@ -453,6 +491,20 @@ mod tests {
             err.to_string(),
             "pyramid level order: level 2 is 8x6, larger than its \
              predecessor 4x3 (levels must be finest to coarsest)"
+        );
+    }
+
+    #[test]
+    fn display_not_dyadic() {
+        let err = Error::NotDyadic {
+            index: 1,
+            parent: Size::new(101, 68),
+            child: Size::new(30, 34),
+        };
+        assert_eq!(
+            err.to_string(),
+            "not dyadic: level 1 is 30x34, but its predecessor 101x68 halves to \
+             51x34 (every level must be ceil(parent / 2) along both axes)"
         );
     }
 

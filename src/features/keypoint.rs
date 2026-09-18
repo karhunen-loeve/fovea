@@ -218,16 +218,17 @@ impl Corner {
     /// ```
     /// use fovea::CoordinateF64;
     /// use fovea::features::{Corner, HasPosition};
-    /// use fovea::image::{Image, OriginOffset, ScaledImage};
+    /// use fovea::image::{Image, OriginOffset, PlacedImage};
     /// use fovea::pixel::MonoF32;
-    /// use fovea::{pixel_distance, sigma};
+    /// use fovea::pixel_distance;
     ///
-    /// // Level 1 of a 2× pyramid built by even-sample decimation.
-    /// let level = ScaledImage::new(
+    /// // Level 1 of a 2× pyramid built by even-sample decimation. Lifting a
+    /// // position needs the grid and nothing else, so the level states the
+    /// // grid and claims no σ.
+    /// let level = PlacedImage::new(
     ///     Image::<MonoF32>::zero(8, 8),
     ///     pixel_distance!(2.0),
     ///     OriginOffset::ZERO,
-    ///     sigma!(1.0),
     /// );
     ///
     /// // Detected at (3.5, 2.0) on the level → (7.0, 4.0) in the base image.

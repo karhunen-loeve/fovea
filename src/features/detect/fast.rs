@@ -554,25 +554,21 @@ where
 /// use fovea::border::Skip;
 /// use fovea::features::HasPosition;
 /// use fovea::features::detect::{fast_in_level, FastParams, NmsRadius, SegmentTest};
-/// use fovea::image::{Image, OriginOffset, ScaledImage};
+/// use fovea::image::{Image, PlacedPyramid, Pyramid};
 /// use fovea::pixel::MonoF32;
-/// use fovea::{pixel_distance, sigma};
-/// use fovea::transform::pyr_down;
+/// use fovea::transform::{Gaussian, PyramidMethod};
 ///
 /// let base: Image<MonoF32> = Image::generate(64, 64, |x, y| {
 ///     MonoF32::new(if (20..44).contains(&x) && (20..44).contains(&y) { 1.0 } else { 0.0 })
 /// });
 ///
-/// // Octave 1: pyr_down keeps even samples — distance 2, origin unshifted.
-/// let level = ScaledImage::new(
-///     pyr_down(&base),
-///     pixel_distance!(2.0),
-///     OriginOffset::ZERO,
-///     sigma!(1.0),
-/// );
+/// // Octave 1. The level carries the grid the builder computed, so the
+/// // sampling convention is never restated here.
+/// let pyramid: PlacedPyramid<MonoF32> = Gaussian.build(&base, 2);
+/// let level = pyramid.level(1);
 ///
 /// let params = FastParams::new(SegmentTest::new(0.15, 9).unwrap(), NmsRadius::new(2).unwrap());
-/// let corners = fast_in_level(&level, params, &Skip);
+/// let corners = fast_in_level(level, params, &Skip);
 ///
 /// // Found on a 32×32 level, reported in the 64×64 base frame.
 /// assert_eq!(corners.len(), 4, "{corners:?}");
@@ -874,9 +870,9 @@ mod tests {
     use crate::Coordinate;
     use crate::border::{Clamp, Constant, Mirror, Skip};
     use crate::features::{HasPosition, HasResponse, retain_top_n};
-    use crate::image::{OriginOffset, Pyramid, ScaledImage};
+    use crate::image::{OriginOffset, PlacedImage, PlacedPyramid, Pyramid};
     use crate::pixel::{Mono8, Mono16, MonoF64};
-    use crate::transform::{pyr_down, rotate_90};
+    use crate::transform::{Gaussian, PyramidMethod, pyr_down, rotate_90};
     use crate::{pixel_distance, sigma};
 
     // ── Fixtures ────────────────────────────────────────────────────────
@@ -1846,18 +1842,13 @@ mod tests {
     #[test]
     fn detection_on_the_base_level_is_the_identity_lift() {
         let image = square(24, 8, 16);
-        let level = ScaledImage::new(
-            image.clone(),
-            pixel_distance!(1.0),
-            OriginOffset::ZERO,
-            sigma!(0.5),
-        );
+        let pyramid: PlacedPyramid<MonoF32> = Gaussian.build(&image, 1);
         let params = FastParams::new(
             SegmentTest::new(0.1, 9).unwrap(),
             NmsRadius::new(3).unwrap(),
         );
         assert_eq!(
-            fast_in_level(&level, params, &Skip),
+            fast_in_level(pyramid.finest(), params, &Skip),
             fast(&image, params, &Skip)
         );
     }
@@ -1865,17 +1856,12 @@ mod tests {
     #[test]
     fn detection_on_a_coarse_level_reports_base_coordinates() {
         let base = square(48, 16, 32);
-        let level = ScaledImage::new(
-            pyr_down(&base),
-            pixel_distance!(2.0),
-            OriginOffset::ZERO,
-            sigma!(1.0),
-        );
+        let pyramid: PlacedPyramid<MonoF32> = Gaussian.build(&base, 2);
         let params = FastParams::new(
             SegmentTest::new(0.1, 9).unwrap(),
             NmsRadius::new(2).unwrap(),
         );
-        let corners = fast_in_level(&level, params, &Skip);
+        let corners = fast_in_level(pyramid.level(1), params, &Skip);
         assert_eq!(corners.len(), 4, "{corners:?}");
 
         for corner in &corners {
@@ -1896,17 +1882,14 @@ mod tests {
             NmsRadius::new(2).unwrap(),
         );
 
-        let unshifted = ScaledImage::new(
-            coarse.clone(),
-            pixel_distance!(2.0),
-            OriginOffset::ZERO,
-            sigma!(1.0),
-        );
-        let shifted = ScaledImage::new(
+        // Hand-assembled on purpose: the shifted origin is the subject of
+        // this test, not a convention a builder could supply. No σ is
+        // invented for it, because none is read.
+        let unshifted = PlacedImage::new(coarse.clone(), pixel_distance!(2.0), OriginOffset::ZERO);
+        let shifted = PlacedImage::new(
             coarse,
             pixel_distance!(2.0),
             OriginOffset::new(0.5, 0.5).unwrap(),
-            sigma!(1.0),
         );
 
         let a = fast_in_level(&unshifted, params, &Skip);
@@ -1922,21 +1905,7 @@ mod tests {
     #[test]
     fn a_pyramid_can_be_swept_level_by_level() {
         let base = square(48, 12, 36);
-        let levels = vec![
-            ScaledImage::new(
-                base.clone(),
-                pixel_distance!(1.0),
-                OriginOffset::ZERO,
-                sigma!(0.5),
-            ),
-            ScaledImage::new(
-                pyr_down(&base),
-                pixel_distance!(2.0),
-                OriginOffset::ZERO,
-                sigma!(1.0),
-            ),
-        ];
-        let pyramid = Pyramid::try_from_levels(levels).unwrap();
+        let pyramid: PlacedPyramid<MonoF32> = Gaussian.build(&base, 2);
         let params = FastParams::new(
             SegmentTest::new(0.1, 9).unwrap(),
             NmsRadius::new(2).unwrap(),

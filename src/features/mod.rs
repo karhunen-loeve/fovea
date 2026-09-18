@@ -88,27 +88,22 @@
 //! ```
 //! use fovea::CoordinateF64;
 //! use fovea::features::{retain_top_n, Corner, HasPosition};
-//! use fovea::image::{Image, ImageView, OriginOffset, ScaledImage};
+//! use fovea::image::{Image, ImageView, PlacedPyramid, Pyramid};
 //! use fovea::pixel::MonoF32;
-//! use fovea::{pixel_distance, sigma};
-//! use fovea::transform::pyr_down;
+//! use fovea::transform::{Gaussian, PyramidMethod};
 //!
 //! let base: Image<MonoF32> = Image::fill(16, 16, MonoF32::new(0.5));
-//! let coarse = pyr_down(&base);
 //!
-//! // pyr_down keeps even samples: distance 2, origin unshifted, σ = 1.
-//! let level = ScaledImage::new(
-//!     coarse,
-//!     pixel_distance!(2.0),
-//!     OriginOffset::ZERO,
-//!     sigma!(1.0),
-//! );
+//! // The level carries the grid the build computed: distance 2, origin
+//! // unshifted. Nothing here restates it, so nothing can restate it wrongly.
+//! let pyramid: PlacedPyramid<MonoF32> = Gaussian.build(&base, 2);
+//! let level = pyramid.level(1);
 //! assert_eq!(level.size().width, 8);
 //!
 //! // Two detections in the level's own coordinates.
 //! let mut corners = vec![
-//!     Corner::from_level(&level, CoordinateF64::new(1.0, 1.0), 0.3),
-//!     Corner::from_level(&level, CoordinateF64::new(3.5, 2.0), 0.9),
+//!     Corner::from_level(level, CoordinateF64::new(1.0, 1.0), 0.3),
+//!     Corner::from_level(level, CoordinateF64::new(3.5, 2.0), 0.9),
 //! ];
 //!
 //! retain_top_n(&mut corners, 1);
