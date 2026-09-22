@@ -83,7 +83,7 @@ assert_eq!(frame.pixel_at(width - 1, height - 1), Mono8::new(1));
 # Ok::<(), fovea::Error>(())
 ```
 
-The surprise is that no stride is passed anywhere. `ImageRef` keeps the row pitch of the buffer it was built from, and a sub-view inherits it, so viewing the plane at its own width and cropping to the image is the whole technique.
+No stride argument appears anywhere, because the width slot carries it. `ImageRef::new` sets the row pitch to the width it is given, and a sub-view keeps its parent's pitch while narrowing its size. Passing `row_stride` as the width is what tells the view about the padding; cropping to the image is what removes it.
 
 The sub-view borrows its parent, so both `let` bindings are load bearing. Written as one chained expression the same code fails to compile with `E0716`: the `ImageRef` would be a temporary, dropped at the end of the statement while `frame` still points into it.
 
