@@ -17,9 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `YUV_420_888` case, where `rowStride` is wider than the frame, without a
   worked answer. The page gains a `rowStride` section with a compiling
   example: view the plane at the width the buffer actually has, then `roi`
-  the padding away. Nothing is copied and no stride is passed anywhere,
-  because a sub-view inherits its parent's row pitch. Both previous
-  hand-waves point at it.
+  the padding away. Nothing is copied, and no stride parameter appears,
+  because the width argument carries the row pitch and a sub-view keeps its
+  parent's. Both previous hand-waves point at it.
 
 - The same section records the two things that example invites a reader to
   get wrong: the sub-view borrows its parent, so writing it as one chained
