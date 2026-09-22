@@ -137,7 +137,7 @@ The output type follows from the sample type (`BayerRggb12` → `Rgb12`), so a t
 ## Common mistakes
 
 - **Treating BGR as RGB.** Use `Bgr8` / `Bgr16` at the boundary, then convert with `ColorSwap` only when you mean to.
-- **Ignoring stride.** A region in a padded frame is not contiguous. See [Padded rows](#padded-rows-a-rowstride-wider-than-the-image) for the zero-copy route.
+- **Ignoring stride.** A region in a padded frame is not always contiguous. See [Padded rows](#padded-rows-a-rowstride-wider-than-the-image) for the zero-copy route.
 - **Using `Srgb8` for linear camera data.** sRGB means a transfer function. Most raw camera data is linear mono or linear RGB/BGR.
 - **Inventing runtime flags for layout.** Prefer distinct pixel types. The type should say what the bytes mean.
 - **Typing a CFA frame as `Mono<N>`.** It loses the mosaic pattern, and with it every guard against blurring, resizing, or odd-origin-cropping across colour channels. Use the `bayer` types.
