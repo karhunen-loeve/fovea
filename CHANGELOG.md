@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] — 2026-09-22
+
+### Documentation
+
+- **The camera-buffer guide shows the strided view it used to only name.**
+  `guide::camera_buffers` twice told the reader to reach for a borrowed
+  strided view and twice declined to show one, which left the common Android
+  `YUV_420_888` case, where `rowStride` is wider than the frame, without a
+  worked answer. The page gains a `rowStride` section with a compiling
+  example: view the plane at the width the buffer actually has, then `roi`
+  the padding away. Nothing is copied, and no stride parameter appears,
+  because the width argument carries the row pitch and a sub-view keeps its
+  parent's. Both previous hand-waves point at it.
+
+- The same section records the two things that example invites a reader to
+  get wrong: the sub-view borrows its parent, so writing it as one chained
+  expression fails with `E0716`, and `roi` is gated on
+  `OriginInvariantPixel`, which a caller's own pixel type has to implement
+  before it can be cropped.
+
+- `tests/camera_buffers.rs` pins the three guarantees the example makes: the
+  packed constructor refuses a padded buffer, the strided route reads every
+  sample, and a neighbourhood operation on the sub-view agrees with the same
+  operation on a packed image.
+
 ## [0.5.0] — 2026-09-18
 
 ### Changed
@@ -1499,6 +1524,7 @@ actual functionality.
   `Result<T, Error>` for caller-data failures, `panic!` for
   programmer bugs.
 
+[0.5.1]: https://github.com/karhunen-loeve/fovea/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/karhunen-loeve/fovea/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/karhunen-loeve/fovea/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/karhunen-loeve/fovea/compare/v0.2.0...v0.3.0
