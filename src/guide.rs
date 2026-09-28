@@ -14,3 +14,6 @@ pub mod camera_buffers {}
 
 #[doc = include_str!("guide/large-images.md")]
 pub mod large_images {}
+
+#[doc = include_str!("guide/scales-of-measurement.md")]
+pub mod scales_of_measurement {}

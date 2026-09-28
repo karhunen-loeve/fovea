@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documentation
+
+- **A guide page on scales of measurement.** `guide::scales_of_measurement`
+  explains which operations a value admits, using Stevens' levels (nominal,
+  ordinal, interval, ratio), circular scales for `Orientation` and
+  `AxialOrientation`, and vector quantities such as complex amplitudes. It
+  also states a current limitation: per-channel operations check the layout
+  (`HomogeneousPixel`) and not yet the level, so the channel-wise maximum of
+  two `Label32` images compiles.
+
 ## [0.5.1] — 2026-09-22
 
 ### Documentation
