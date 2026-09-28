@@ -16,7 +16,7 @@
 
 use crate::pixel::{
     BoundedChannel, FromLinear, HomogeneousPixel, LinearChannel, MonoF32, MonoF64, PlainChannel,
-    PlainPixel, ZeroablePixel,
+    PlainPixel, ZeroablePixel, impl_channelwise_math,
 };
 use std::num::Saturating;
 
@@ -222,6 +222,11 @@ unsafe impl HomogeneousPixel for i64 {
     type Channel = i64;
     type Channels = [i64; 1];
 }
+
+// A bare integer pixel is a sample value, so channel-wise mathematics on it
+// is meaningful. Nominal integers (component labels, palette indices) have
+// their own pixel types, which is what lets them opt out.
+impl_channelwise_math!(u8, u16, u32, u64, i8, i16, i32, i64);
 
 // `f32` / `f64` are not pixels. They remain `LinearChannel`
 // implementors below (the arithmetic role) but do not implement

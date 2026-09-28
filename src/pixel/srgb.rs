@@ -6,7 +6,7 @@
 //! attempts to use them with interpolation algorithms. Convert to linear
 //! light first with the `SrgbGamma` strategy.
 
-use fovea_derive::{HomogeneousPixel, PlainPixel, WhiteChannel, ZeroablePixel};
+use fovea_derive::{ChannelwiseMath, HomogeneousPixel, PlainPixel, WhiteChannel, ZeroablePixel};
 
 use std::num::Saturating;
 
@@ -47,6 +47,7 @@ use crate::pixel::impl_origin_invariant_pixel;
     Hash,
     PlainPixel,
     HomogeneousPixel,
+    ChannelwiseMath,
     ZeroablePixel,
     WhiteChannel,
 )]
@@ -96,6 +97,7 @@ impl Srgb8 {
     Hash,
     PlainPixel,
     HomogeneousPixel,
+    ChannelwiseMath,
     ZeroablePixel,
     WhiteChannel,
 )]
@@ -175,6 +177,7 @@ impl Srgba8 {
     PartialOrd,
     PlainPixel,
     HomogeneousPixel,
+    ChannelwiseMath,
     ZeroablePixel,
     WhiteChannel,
 )]
@@ -213,6 +216,7 @@ impl SrgbMono8 {
     Hash,
     PlainPixel,
     HomogeneousPixel,
+    ChannelwiseMath,
     ZeroablePixel,
     WhiteChannel,
 )]
@@ -274,6 +278,7 @@ impl SrgbMonoA8 {
     Hash,
     PlainPixel,
     HomogeneousPixel,
+    ChannelwiseMath,
     ZeroablePixel,
     WhiteChannel,
 )]
@@ -323,6 +328,7 @@ impl Srgb16 {
     Hash,
     PlainPixel,
     HomogeneousPixel,
+    ChannelwiseMath,
     ZeroablePixel,
     WhiteChannel,
 )]
@@ -382,6 +388,7 @@ impl Srgba16 {
     PartialOrd,
     PlainPixel,
     HomogeneousPixel,
+    ChannelwiseMath,
     ZeroablePixel,
     WhiteChannel,
 )]
@@ -420,6 +427,7 @@ impl SrgbMono16 {
     Hash,
     PlainPixel,
     HomogeneousPixel,
+    ChannelwiseMath,
     ZeroablePixel,
     WhiteChannel,
 )]
@@ -489,6 +497,7 @@ impl SrgbMonoA16 {
     Hash,
     PlainPixel,
     HomogeneousPixel,
+    ChannelwiseMath,
     ZeroablePixel,
     WhiteChannel,
 )]
@@ -541,6 +550,7 @@ impl SrgbBgr8 {
     Hash,
     PlainPixel,
     HomogeneousPixel,
+    ChannelwiseMath,
     ZeroablePixel,
     WhiteChannel,
 )]
@@ -595,6 +605,7 @@ impl SrgbBgra8 {
     Hash,
     PlainPixel,
     HomogeneousPixel,
+    ChannelwiseMath,
     ZeroablePixel,
     WhiteChannel,
 )]
@@ -645,6 +656,7 @@ impl SrgbBgr16 {
     Hash,
     PlainPixel,
     HomogeneousPixel,
+    ChannelwiseMath,
     ZeroablePixel,
     WhiteChannel,
 )]

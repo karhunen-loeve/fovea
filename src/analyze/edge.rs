@@ -49,7 +49,7 @@ use core::ops::Add;
 
 use crate::border::Clamp;
 use crate::image::{BinaryImage, Image, RasterImage};
-use crate::pixel::{FromLinear, LinearPixel, SingleChannel, ZeroablePixel};
+use crate::pixel::{ChannelwiseMath, FromLinear, LinearPixel, SingleChannel, ZeroablePixel};
 use crate::transform::{
     MagnitudeChannel, gaussian_blur, gradient_magnitude, non_maximum_suppression_from_gradients,
     scharr_x, scharr_y,
@@ -140,6 +140,7 @@ where
         + Default
         + ZeroablePixel
         + SingleChannel
+        + ChannelwiseMath
         + FromLinear<Acc>
         + LinearPixel<f32, Accumulator = Acc>
         + Add<Output = Acc>,

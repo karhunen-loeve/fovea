@@ -21,7 +21,7 @@ use std::ops::Sub as StdSub;
 
 use crate::error::Error;
 use crate::image::{Image, RasterImage, RasterImageMut};
-use crate::pixel::{HomogeneousPixel, LinearPixel, LinearSpace, ZeroablePixel};
+use crate::pixel::{ChannelwiseMath, HomogeneousPixel, LinearPixel, LinearSpace, ZeroablePixel};
 
 // ─── CombinePixels trait ─────────────────────────────────────────────────────
 
@@ -395,12 +395,25 @@ impl<P: Copy + StdMul<Output = P>> CombinePixels<P, P> for PixelMultiply {
 /// // Result is the same regardless of operand order
 /// assert_eq!(AbsDiff.combine(&Mono8::new(150), &Mono8::new(100)), Mono8::new(50));
 /// ```
+///
+/// The difference of two palette indices says nothing about the colours they
+/// point to, so an indexed image is rejected at compile time:
+///
+/// ```compile_fail
+/// use fovea::image::Image;
+/// use fovea::pixel::Indexed8;
+/// use fovea::transform::{AbsDiff, combine_images};
+///
+/// let indexed = Image::fill(4, 4, Indexed8(3));
+/// // ERROR: `Indexed8: ChannelwiseMath` is not satisfied.
+/// let _ = combine_images(&indexed, &indexed, AbsDiff);
+/// ```
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct AbsDiff;
 
 impl<P> CombinePixels<P, P> for AbsDiff
 where
-    P: HomogeneousPixel,
+    P: ChannelwiseMath,
     P::Channel: PartialOrd + StdSub<Output = P::Channel>,
 {
     type Output = P;
@@ -441,12 +454,25 @@ where
 /// assert_eq!(Max.combine(&Mono8::new(100), &Mono8::new(200)), Mono8::new(200));
 /// assert_eq!(Max.combine(&Mono8::new(200), &Mono8::new(100)), Mono8::new(200));
 /// ```
+///
+/// A component label is ordered as a number but is not a quantity, so the
+/// maximum of two label images is rejected at compile time:
+///
+/// ```compile_fail
+/// use fovea::image::Image;
+/// use fovea::pixel::Label32;
+/// use fovea::transform::{Max, combine_images};
+///
+/// let labels = Image::fill(4, 4, Label32::new(7));
+/// // ERROR: `Label32: ChannelwiseMath` is not satisfied.
+/// let _ = combine_images(&labels, &labels, Max);
+/// ```
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Max;
 
 impl<P> CombinePixels<P, P> for Max
 where
-    P: HomogeneousPixel,
+    P: ChannelwiseMath,
     P::Channel: Ord,
 {
     type Output = P;
@@ -481,7 +507,7 @@ pub struct Min;
 
 impl<P> CombinePixels<P, P> for Min
 where
-    P: HomogeneousPixel,
+    P: ChannelwiseMath,
     P::Channel: Ord,
 {
     type Output = P;
@@ -666,7 +692,7 @@ pub struct Magnitude;
 
 impl<P> CombinePixels<P, P> for Magnitude
 where
-    P: HomogeneousPixel,
+    P: ChannelwiseMath,
     P::Channel: MagnitudeChannel,
 {
     type Output = P;
@@ -711,7 +737,7 @@ pub struct MagnitudeHypot;
 
 impl<P> CombinePixels<P, P> for MagnitudeHypot
 where
-    P: HomogeneousPixel,
+    P: ChannelwiseMath,
     P::Channel: MagnitudeChannel,
 {
     type Output = P;
@@ -791,7 +817,7 @@ pub struct Direction;
 
 impl<P> CombinePixels<P, P> for Direction
 where
-    P: HomogeneousPixel,
+    P: ChannelwiseMath,
     P::Channel: DirectionChannel,
 {
     type Output = P;
@@ -897,7 +923,7 @@ pub fn abs_diff<IA, IB>(a: &IA, b: &IB) -> Result<Image<IA::Pixel>, Error>
 where
     IA: RasterImage,
     IB: RasterImage<Pixel = IA::Pixel>,
-    IA::Pixel: HomogeneousPixel + ZeroablePixel,
+    IA::Pixel: ChannelwiseMath + ZeroablePixel,
     <IA::Pixel as HomogeneousPixel>::Channel:
         PartialOrd + StdSub<Output = <IA::Pixel as HomogeneousPixel>::Channel>,
 {
@@ -926,7 +952,7 @@ pub fn image_min<IA, IB>(a: &IA, b: &IB) -> Result<Image<IA::Pixel>, Error>
 where
     IA: RasterImage,
     IB: RasterImage<Pixel = IA::Pixel>,
-    IA::Pixel: HomogeneousPixel + ZeroablePixel,
+    IA::Pixel: ChannelwiseMath + ZeroablePixel,
     <IA::Pixel as HomogeneousPixel>::Channel: Ord,
 {
     combine_images(a, b, Min)
@@ -954,7 +980,7 @@ pub fn image_max<IA, IB>(a: &IA, b: &IB) -> Result<Image<IA::Pixel>, Error>
 where
     IA: RasterImage,
     IB: RasterImage<Pixel = IA::Pixel>,
-    IA::Pixel: HomogeneousPixel + ZeroablePixel,
+    IA::Pixel: ChannelwiseMath + ZeroablePixel,
     <IA::Pixel as HomogeneousPixel>::Channel: Ord,
 {
     combine_images(a, b, Max)

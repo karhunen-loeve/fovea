@@ -9,7 +9,7 @@ use crate::image::{
     Image, ImageView, ImageViewMut, MAX_RADIUS, RasterImage, RasterImageMut, gaussian_kernel_1d,
     gaussian_kernel_size,
 };
-use crate::pixel::{MonoF64, SingleChannel};
+use crate::pixel::{ChannelwiseMath, MonoF64, SingleChannel};
 use crate::transform::convolve_separable;
 use crate::{Error, Sigma, sigma};
 
@@ -257,7 +257,7 @@ pub fn ssim<A, B, P>(a: &A, b: &B, params: SsimParams) -> Result<f64, Error>
 where
     A: RasterImage<Pixel = P>,
     B: RasterImage<Pixel = P>,
-    P: SingleChannel,
+    P: SingleChannel + ChannelwiseMath,
     P::Channel: StatisticsChannel,
 {
     let map = ssim_map(a, b, params)?;
@@ -377,7 +377,7 @@ pub fn ssim_map<A, B, P>(a: &A, b: &B, params: SsimParams) -> Result<Image<MonoF
 where
     A: RasterImage<Pixel = P>,
     B: RasterImage<Pixel = P>,
-    P: SingleChannel,
+    P: SingleChannel + ChannelwiseMath,
     P::Channel: StatisticsChannel,
 {
     if a.size() != b.size() {
@@ -495,7 +495,7 @@ where
 fn finite_mean<I, P>(image: &I) -> f64
 where
     I: RasterImage<Pixel = P>,
-    P: SingleChannel,
+    P: SingleChannel + ChannelwiseMath,
     P::Channel: StatisticsChannel,
 {
     use crate::analyze::statistics::{ChannelStatistics, image_statistics};

@@ -42,10 +42,31 @@ Two consequences run through the crate:
 Per-channel operations, such as a channel-wise maximum or a gradient
 magnitude, apply a scalar operation to each channel on its own. They are
 meaningful only when each channel on its own is a quantity on one of these
-levels. **Current limitation:** these operations require `HomogeneousPixel`,
-which guarantees the layout (every channel has the same type) and does not
-yet check the level. The channel-wise maximum of two `Label32` images
-therefore compiles, although it has no meaning.
+levels. Two traits keep the two questions apart. `HomogeneousPixel` guarantees
+the layout: every channel has the same type. `ChannelwiseMath` states that
+every channel is at least an interval-scale quantity on its own, and the
+channel-wise operations (maxima, differences, gradients, thresholds,
+statistics, histograms) require it. `Label32` and `Indexed8` have a
+homogeneous layout and do not implement `ChannelwiseMath`, so the channel-wise
+maximum of two label images does not compile:
+
+```rust,compile_fail
+use fovea::image::Image;
+use fovea::pixel::Label32;
+use fovea::transform::{Max, combine_images};
+
+let labels = Image::fill(4, 4, Label32::new(7));
+// ERROR: `Label32: ChannelwiseMath` is not satisfied.
+let _ = combine_images(&labels, &labels, Max);
+```
+
+One marker covers every level from interval upward, which is stricter than the
+systematic requires in two places. A histogram only needs to count (nominal)
+or to bin (ordinal), and a maximum or a threshold only needs an order, yet both
+require `ChannelwiseMath`. No pixel type in the crate is ordinal without being
+interval, so the second case excludes nothing today. For the first, counting
+pixels per label is what `connected_components_with_stats` reports. A custom
+pixel type opts in with `#[derive(ChannelwiseMath)]`.
 
 ## 2. Circular scales
 

@@ -7,15 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`pixel::ChannelwiseMath`, a marker for pixels whose channels are
+  quantities.** It states that every channel is a scalar quantity on its own,
+  so a scalar operation applied per channel means something.
+  `HomogeneousPixel` keeps its old promise, which was only ever about layout:
+  every channel has the same type, stored as an array. Implemented by the
+  `Mono`, `MonoA`, `Rgb`, `Rgba`, `Bgr` and `Bgra` families (integer and
+  float), the `Srgb` family, the twenty Bayer types and the bare integer
+  pixels (`u8` to `i64`). **Not** implemented by `Label32` and `Indexed8`,
+  whose values are identifiers rather than quantities. The trait is safe to
+  implement: a wrong claim gives meaningless numbers, not undefined
+  behaviour.
+- `#[derive(ChannelwiseMath)]`, re-exported at the crate root beside the
+  other pixel derives. It is deliberately not implied by
+  `#[derive(HomogeneousPixel)]`.
+
+### Changed
+
+- **Breaking:** the channel-wise operations require `ChannelwiseMath`
+  instead of `HomogeneousPixel`. That covers the combiners `AbsDiff`,
+  `Max`, `Min`, `Magnitude`, `MagnitudeHypot` and `Direction` with
+  `abs_diff`, `image_max` and `image_min`; `gradient_magnitude`,
+  `gradient_direction` and `non_maximum_suppression`; the conversions
+  `TruncateThreshold`, `ToZeroThreshold`, `ToZeroThresholdInv`, `BinaryMask`
+  and `Clamp`; `image_statistics`, `squared_error`, `histogram`,
+  `equalize_image` and `equalize_image_into`; `match_template` with `SAD`,
+  `SSD` and `NCC`; and, because they call those, `canny`,
+  `otsu_binary_mask`, `ssim` and `ssim_map`. The channel-wise maximum of two
+  `Label32` images, the difference of two `Indexed8` images and a histogram
+  or Otsu threshold of palette indices compiled before and are compile
+  errors now. `ImagePlanes` and `ChannelLut` still need only
+  `HomogeneousPixel`: splitting into planes and an arbitrary per-channel
+  lookup are meaningful on identifiers too. **Migration:** a custom pixel
+  type used with any of these operations adds `ChannelwiseMath` to its
+  derive list, next to `HomogeneousPixel`. A generic function that forwards
+  to one of them replaces its `HomogeneousPixel` bound with
+  `ChannelwiseMath`, which implies it.
+
 ### Documentation
 
 - **A guide page on scales of measurement.** `guide::scales_of_measurement`
   explains which operations a value admits, using Stevens' levels (nominal,
   ordinal, interval, ratio), circular scales for `Orientation` and
   `AxialOrientation`, and vector quantities such as complex amplitudes. It
-  also states a current limitation: per-channel operations check the layout
-  (`HomogeneousPixel`) and not yet the level, so the channel-wise maximum of
-  two `Label32` images compiles.
+  shows how `HomogeneousPixel` (layout) and `ChannelwiseMath` (level) keep
+  the two questions apart, and where one marker is stricter than the
+  systematic requires.
 
 ## [0.5.1] — 2026-09-22
 

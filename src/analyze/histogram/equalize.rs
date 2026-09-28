@@ -15,7 +15,7 @@ use crate::Error;
 use crate::analyze::histogram::strategy::BinningStrategy;
 use crate::analyze::histogram::{Histogram, NaturalBins, histogram};
 use crate::image::{Image, RasterImage, RasterImageMut};
-use crate::pixel::{Array, HomogeneousPixel, ZeroablePixel};
+use crate::pixel::{Array, ChannelwiseMath, ZeroablePixel};
 use crate::transform::ChannelLut;
 
 /// Build a 256-entry per-channel equalization LUT from a single-channel
@@ -119,7 +119,7 @@ where
 pub fn equalize_image<I, P>(image: &I) -> Result<Image<P>, Error>
 where
     I: RasterImage<Pixel = P>,
-    P: HomogeneousPixel<Channel = Saturating<u8>> + ZeroablePixel,
+    P: ChannelwiseMath<Channel = Saturating<u8>> + ZeroablePixel,
     NaturalBins: BinningStrategy<P::Channel>,
 {
     let mut out = Image::<P>::zero(image.width(), image.height());
@@ -136,7 +136,7 @@ pub fn equalize_image_into<I, O, P>(image: &I, out: &mut O) -> Result<(), Error>
 where
     I: RasterImage<Pixel = P>,
     O: RasterImageMut<Pixel = P>,
-    P: HomogeneousPixel<Channel = Saturating<u8>>,
+    P: ChannelwiseMath<Channel = Saturating<u8>>,
     NaturalBins: BinningStrategy<P::Channel>,
 {
     assert_eq!(

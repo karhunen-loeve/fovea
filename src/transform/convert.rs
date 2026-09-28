@@ -11,11 +11,11 @@ use crate::pixel::bayer::{
 };
 use crate::pixel::{
     Array, Bgr8, Bgr16, Bgr32, Bgr64, BgrF32, BgrF64, Bgra8, Bgra16, Bgra32, Bgra64, BgraF32,
-    BgraF64, HomogeneousPixel, Indexed8, Mono, Mono8, Mono16, Mono32, Mono64, MonoA8, MonoA16,
-    MonoA32, MonoA64, MonoAF32, MonoAF64, MonoF32, MonoF64, PlainChannel, Rgb8, Rgb16, Rgb32,
-    Rgb64, RgbF32, RgbF64, Rgba8, Rgba16, Rgba32, Rgba64, RgbaF32, RgbaF64, Srgb8, Srgb16,
-    SrgbBgr8, SrgbBgr16, SrgbBgra8, SrgbBgra16, SrgbMono8, SrgbMono16, SrgbMonoA8, SrgbMonoA16,
-    Srgba8, Srgba16, WhiteChannel, ZeroablePixel,
+    BgraF64, ChannelwiseMath, HomogeneousPixel, Indexed8, Mono, Mono8, Mono16, Mono32, Mono64,
+    MonoA8, MonoA16, MonoA32, MonoA64, MonoAF32, MonoAF64, MonoF32, MonoF64, PlainChannel, Rgb8,
+    Rgb16, Rgb32, Rgb64, RgbF32, RgbF64, Rgba8, Rgba16, Rgba32, Rgba64, RgbaF32, RgbaF64, Srgb8,
+    Srgb16, SrgbBgr8, SrgbBgr16, SrgbBgra8, SrgbBgra16, SrgbMono8, SrgbMono16, SrgbMonoA8,
+    SrgbMonoA16, Srgba8, Srgba16, WhiteChannel, ZeroablePixel,
 };
 
 // ───────────────────────────────────────────────────────────────────────────────
@@ -1917,7 +1917,7 @@ pub struct TruncateThreshold<P> {
 
 impl<P> ConvertPixel<P, P> for TruncateThreshold<P>
 where
-    P: HomogeneousPixel,
+    P: ChannelwiseMath,
     P::Channel: Ord,
 {
     #[inline]
@@ -1953,7 +1953,7 @@ pub struct ToZeroThreshold<P> {
 
 impl<P> ConvertPixel<P, P> for ToZeroThreshold<P>
 where
-    P: HomogeneousPixel,
+    P: ChannelwiseMath,
     P::Channel: Ord + ZeroablePixel,
 {
     #[inline]
@@ -1993,7 +1993,7 @@ pub struct ToZeroThresholdInv<P> {
 
 impl<P> ConvertPixel<P, P> for ToZeroThresholdInv<P>
 where
-    P: HomogeneousPixel,
+    P: ChannelwiseMath,
     P::Channel: Ord + ZeroablePixel,
 {
     #[inline]
@@ -2046,7 +2046,7 @@ pub struct BinaryMask<P> {
 
 impl<P> ConvertPixel<P, bool> for BinaryMask<P>
 where
-    P: HomogeneousPixel,
+    P: ChannelwiseMath,
     P::Channel: Ord,
 {
     #[inline]
@@ -2197,7 +2197,7 @@ pub struct Clamp<P> {
 
 impl<P> Clamp<P>
 where
-    P: HomogeneousPixel,
+    P: ChannelwiseMath,
     P::Channel: Ord,
 {
     /// Construct a [`Clamp`] strategy from bounds, validating that
@@ -2268,7 +2268,7 @@ impl<P: Copy> Clamp<P> {
 
 impl<P> ConvertPixel<P, P> for Clamp<P>
 where
-    P: HomogeneousPixel,
+    P: ChannelwiseMath,
     P::Channel: Ord,
 {
     #[inline]

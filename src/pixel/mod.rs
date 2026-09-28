@@ -6,7 +6,8 @@
 //! | Trait | What it promises | Typical use |
 //! |---|---|---|
 //! | [`PlainPixel`](crate::pixel::PlainPixel) | stable byte layout, no padding, no invalid bit patterns | raw camera bytes, FFI, GPU upload |
-//! | [`HomogeneousPixel`](crate::pixel::HomogeneousPixel) | every channel has the same channel type | histograms and per-channel transforms |
+//! | [`HomogeneousPixel`](crate::pixel::HomogeneousPixel) | every channel has the same channel type, stored as an array | channel access, planar images |
+//! | [`ChannelwiseMath`](crate::pixel::ChannelwiseMath) | every channel is a quantity on its own | histograms, statistics, thresholds, per-channel differences |
 //! | [`LinearPixel`](crate::pixel::LinearPixel) | arithmetic support for interpolation/blending | filters, resize, combine operations |
 //! | [`LinearSpace`](crate::pixel::LinearSpace) | the values are in a linear space | prevents gamma-incorrect blending |
 //! | [`ZeroablePixel`](crate::pixel::ZeroablePixel) | an all-zero pixel exists | image allocation and output buffers |
@@ -95,13 +96,14 @@ pub use indexed::Indexed8;
 pub use label::Label32;
 
 pub use pixel_traits::{
-    Array, BoundedChannel, FromLinear, HomogeneousPixel, IntegralPixel, IntegralSquaredPixel,
-    LinearChannel, LinearPixel, LinearSpace, OriginInvariantPixel, PlainChannel, PlainPixel,
-    SingleChannel, WhiteChannel, ZeroablePixel, blend,
+    Array, BoundedChannel, ChannelwiseMath, FromLinear, HomogeneousPixel, IntegralPixel,
+    IntegralSquaredPixel, LinearChannel, LinearPixel, LinearSpace, OriginInvariantPixel,
+    PlainChannel, PlainPixel, SingleChannel, WhiteChannel, ZeroablePixel, blend,
 };
 
 pub use pixel_traits::LabelPixel;
 
 pub(crate) use pixel_traits::MAX_PIXEL_SIZE;
+pub(crate) use pixel_traits::impl_channelwise_math;
 pub(crate) use pixel_traits::impl_origin_invariant_pixel;
 pub(crate) use pixel_traits::{impl_single_channel, single_channel_sealed};

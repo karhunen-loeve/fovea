@@ -926,6 +926,21 @@ pub fn blend<T: LinearPixel + LinearSpace>(a: &T, b: &T, alpha: f32) -> T::Accum
     b.scale_add(alpha, a.scale(1.0 - alpha))
 }
 
+/// A pixel whose channels all have one type and lie in memory as a
+/// `[Channel; CHANNEL_COUNT]` array.
+///
+/// `HomogeneousPixel` is a **layout** contract: it says how the channels are
+/// stored, which is all that channel access,
+/// [`ImagePlanes`](crate::image::ImagePlanes) and the planar conversions need.
+/// It says nothing about what the channels mean. A [`Label32`] component ID
+/// and an [`Indexed8`] palette index are homogeneous too, and a per-channel
+/// maximum or difference of either is meaningless. Operations that apply
+/// mathematics channel by channel therefore require [`ChannelwiseMath`],
+/// which carries that semantic claim separately.
+///
+/// [`Label32`]: crate::pixel::Label32
+/// [`Indexed8`]: crate::pixel::Indexed8
+///
 /// # Safety
 ///
 /// Implementers must guarantee, in addition to `PlainPixel` requirements:
@@ -1015,6 +1030,104 @@ pub unsafe trait HomogeneousPixel: PlainPixel {
         Self::Channels::from_fn(|i| self.channel(i))
     }
 }
+
+// ──────────────────────────────────────────────────────────────────────────
+// Channel-wise semantics marker
+// ──────────────────────────────────────────────────────────────────────────
+
+/// A [`HomogeneousPixel`] whose every channel is a scalar quantity on its
+/// own, so that a scalar operation applied per channel means something.
+///
+/// [`HomogeneousPixel`] only promises layout. This marker adds the claim that
+/// channel-wise differences, maxima, thresholds, gradients, statistics and
+/// histograms are meaningful for the pixel, and operations that compute them
+/// require it.
+///
+/// Two kinds of homogeneous pixel deliberately do **not** implement it:
+///
+/// - **A channel that is not a quantity.** [`Label32`] names a connected
+///   component and [`Indexed8`] points into a palette. Labels 7 and 8 are not
+///   "close", and the maximum of two labels is not a label of anything.
+/// - **Channels that together form one value.** The real and imaginary part
+///   of a complex number are coordinates of one amplitude. A channel-wise
+///   maximum or magnitude of them depends on where the real axis happens to
+///   lie, which carries no information.
+///
+/// The claim is about the scale each channel is measured on, not about
+/// linearity: gamma-encoded [`Srgb8`] qualifies, because its encoded values
+/// can be ordered and subtracted meaningfully, although it is not
+/// [`LinearSpace`]. The raw samples of the [`bayer`] types qualify for the
+/// same reason. See [`guide::scales_of_measurement`] for the systematic
+/// behind the split.
+///
+/// Unlike [`HomogeneousPixel`], the trait is safe: a wrong claim produces
+/// meaningless numbers, not undefined behaviour. Custom pixel types opt in
+/// with `#[derive(ChannelwiseMath)]` next to `#[derive(HomogeneousPixel)]`.
+///
+/// [`Label32`]: crate::pixel::Label32
+/// [`Indexed8`]: crate::pixel::Indexed8
+/// [`Srgb8`]: crate::pixel::Srgb8
+/// [`bayer`]: crate::pixel::bayer
+/// [`guide::scales_of_measurement`]: crate::guide::scales_of_measurement
+///
+/// # Examples
+///
+/// A generic operation states the requirement in its bound, and intensity
+/// pixels satisfy it:
+///
+/// ```
+/// use fovea::pixel::{ChannelwiseMath, Mono8, Rgb8};
+///
+/// fn channelwise<P: ChannelwiseMath>() {}
+///
+/// channelwise::<Mono8>();
+/// channelwise::<Rgb8>();
+/// ```
+///
+/// A component label has a homogeneous layout but is rejected at compile
+/// time:
+///
+/// ```compile_fail
+/// use fovea::pixel::{ChannelwiseMath, Label32};
+///
+/// fn channelwise<P: ChannelwiseMath>() {}
+///
+/// // ERROR: `Label32: ChannelwiseMath` is not satisfied.
+/// channelwise::<Label32>();
+/// ```
+///
+/// A custom pixel opts in with the derive:
+///
+/// ```
+/// use fovea::pixel::ChannelwiseMath;
+/// use fovea::{ChannelwiseMath, HomogeneousPixel, PlainPixel};
+/// use std::num::Saturating;
+///
+/// #[derive(Clone, Copy, PlainPixel, HomogeneousPixel, ChannelwiseMath)]
+/// #[repr(C)]
+/// struct Depth16 {
+///     z: Saturating<u16>,
+/// }
+///
+/// fn channelwise<P: ChannelwiseMath>() {}
+/// channelwise::<Depth16>();
+/// ```
+pub trait ChannelwiseMath: HomogeneousPixel {}
+
+/// Implements the safe [`ChannelwiseMath`] marker for each listed type.
+///
+/// Used for the primitive integer pixels, whose `HomogeneousPixel` impls are
+/// hand-written. Derived pixel types use `#[derive(ChannelwiseMath)]`, and
+/// const-generic families implement the marker by hand next to their other
+/// generic impls.
+macro_rules! impl_channelwise_math {
+    ($($t:ty),+ $(,)?) => {
+        $(
+            impl $crate::pixel::ChannelwiseMath for $t {}
+        )+
+    };
+}
+pub(crate) use impl_channelwise_math;
 
 #[cfg(test)]
 mod tests {

@@ -84,7 +84,7 @@ use crate::common::Extremum;
 use crate::error::Error;
 use crate::image::sequential::Image;
 use crate::image::{ImageView, ImageViewMut, RasterImage, RasterImageMut};
-use crate::pixel::{HomogeneousPixel, LinearChannel, MonoF32, ZeroablePixel};
+use crate::pixel::{ChannelwiseMath, HomogeneousPixel, LinearChannel, MonoF32, ZeroablePixel};
 
 // ─── ScorePolarity and MatchMethod traits ────────────────────────────────────
 
@@ -413,7 +413,7 @@ where
     I: RasterImage,
     T: ImageView<Pixel = I::Pixel>,
     O: RasterImageMut<Pixel = MonoF32>,
-    I::Pixel: HomogeneousPixel,
+    I::Pixel: ChannelwiseMath,
     <I::Pixel as HomogeneousPixel>::Channel: PartialOrd
         + StdSub<Output = <I::Pixel as HomogeneousPixel>::Channel>
         + LinearChannel<f32, Accumulator = f32>,
@@ -487,7 +487,7 @@ where
     I: RasterImage,
     T: ImageView<Pixel = I::Pixel>,
     O: RasterImageMut<Pixel = MonoF32>,
-    I::Pixel: HomogeneousPixel,
+    I::Pixel: ChannelwiseMath,
     <I::Pixel as HomogeneousPixel>::Channel:
         PartialOrd + StdSub<Output = <I::Pixel as HomogeneousPixel>::Channel> + LinearChannel<f32>,
     <<I::Pixel as HomogeneousPixel>::Channel as LinearChannel<f32>>::Accumulator: Into<f64>,
@@ -641,7 +641,7 @@ where
     I: RasterImage,
     T: ImageView<Pixel = I::Pixel>,
     O: RasterImageMut<Pixel = MonoF32>,
-    I::Pixel: HomogeneousPixel,
+    I::Pixel: ChannelwiseMath,
     <I::Pixel as HomogeneousPixel>::Channel: LinearChannel<f32>,
     <<I::Pixel as HomogeneousPixel>::Channel as LinearChannel<f32>>::Accumulator: Into<f64>,
 {

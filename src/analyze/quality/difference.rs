@@ -9,7 +9,7 @@
 use crate::Error;
 use crate::analyze::statistics::StatisticsChannel;
 use crate::image::RasterImage;
-use crate::pixel::HomogeneousPixel;
+use crate::pixel::ChannelwiseMath;
 
 use super::PeakValue;
 
@@ -285,7 +285,8 @@ impl SquaredError {
     /// is the maximum over all channels. For a single-channel image this is
     /// [`channel(0)`](Self::channel).
     ///
-    /// Because every channel of a [`HomogeneousPixel`] has the same
+    /// Because every channel of a
+    /// [`HomogeneousPixel`](crate::pixel::HomogeneousPixel) has the same
     /// *included* sample count (equal `nan_count`s), the pooled MSE does
     /// coincide with the mean of the per-channel MSEs; once per-channel NaN
     /// exclusion fires unevenly, it is the count-weighted mean instead. The pooled PSNR does **not** coincide with the mean of the
@@ -360,7 +361,7 @@ pub fn squared_error<A, B, P>(a: &A, b: &B) -> Result<SquaredError, Error>
 where
     A: RasterImage<Pixel = P>,
     B: RasterImage<Pixel = P>,
-    P: HomogeneousPixel,
+    P: ChannelwiseMath,
     P::Channel: StatisticsChannel,
 {
     if a.size() != b.size() {

@@ -50,6 +50,7 @@ pub mod border {
     };
 }
 
+pub use fovea_derive::ChannelwiseMath;
 pub use fovea_derive::HomogeneousPixel;
 pub use fovea_derive::LinearPixel;
 pub use fovea_derive::PlainPixel;

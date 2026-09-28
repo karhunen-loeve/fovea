@@ -14,7 +14,7 @@ use crate::Error;
 use crate::analyze::histogram::strategy::BinningStrategy;
 use crate::analyze::histogram::{Histogram, NaturalBins, histogram};
 use crate::image::{BinaryImage, RasterImage};
-use crate::pixel::SingleChannel;
+use crate::pixel::{ChannelwiseMath, SingleChannel};
 use crate::transform::{BinaryMask, convert_image};
 
 /// Compute Otsu's optimal threshold from a 256-bin histogram.
@@ -154,7 +154,7 @@ where
 pub fn otsu_binary_mask<I, P>(image: &I) -> Result<(u8, BinaryImage), Error>
 where
     I: RasterImage<Pixel = P>,
-    P: SingleChannel + From<u8>,
+    P: SingleChannel + ChannelwiseMath + From<u8>,
     P::Channel: Ord,
     NaturalBins: BinningStrategy<P::Channel>,
 {
@@ -169,7 +169,7 @@ where
 mod tests {
     use super::*;
     use crate::image::{Image, ImageView};
-    use crate::pixel::{Indexed8, Mono8};
+    use crate::pixel::Mono8;
     use std::num::Saturating;
 
     fn hist_from_bins_u8(bins: Vec<u64>) -> Histogram<NaturalBins, u8> {
@@ -356,16 +356,11 @@ mod tests {
     }
 
     #[test]
-    fn otsu_binary_mask_indexed8_runs_on_u8_channel() {
-        // Indexed8 channel type is bare u8; covers the second
-        // NaturalBins impl. Indexed8 implements From<u8> as of this
-        // crate's `pixel::indexed` module.
-        let img = Image::from_vec(
-            2,
-            2,
-            vec![Indexed8(10), Indexed8(10), Indexed8(200), Indexed8(200)],
-        )
-        .unwrap();
+    fn otsu_binary_mask_runs_on_a_bare_u8_channel() {
+        // The primitive `u8` pixel has the bare `u8` channel, which covers
+        // the second NaturalBins impl. `Indexed8` has the same channel type
+        // but is not `ChannelwiseMath`: a palette index is not a quantity.
+        let img = Image::from_vec(2, 2, vec![10u8, 10, 200, 200]).unwrap();
         let (t, mask) = otsu_binary_mask(&img).unwrap();
         assert!((10..200).contains(&(t as u32)));
         assert!(!mask.pixel_at(0, 0));

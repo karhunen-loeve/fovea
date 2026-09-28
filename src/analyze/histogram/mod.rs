@@ -148,7 +148,7 @@ pub use otsu::{otsu_binary_mask, otsu_threshold};
 
 use crate::Error;
 use crate::image::RasterImage;
-use crate::pixel::HomogeneousPixel;
+use crate::pixel::{ChannelwiseMath, HomogeneousPixel};
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // HistogramOutput
@@ -285,7 +285,7 @@ impl<S, V, const N: usize> HistogramOutput<S, V> for [Histogram<S, V>; N] {
 /// See the module-level documentation for end-to-end examples.
 pub fn histogram<P, S, O>(image: &impl RasterImage<Pixel = P>, strategy: &S) -> Result<O, Error>
 where
-    P: HomogeneousPixel,
+    P: ChannelwiseMath,
     S: BinningStrategy<P::Channel> + Clone,
     O: HistogramOutput<S, P::Channel>,
 {
@@ -360,7 +360,7 @@ where
 mod tests {
     use super::*;
     use crate::image::{Image, SubView};
-    use crate::pixel::{Indexed8, Mono8, MonoF32, Rgb8};
+    use crate::pixel::{Mono8, MonoF32, Rgb8};
     use std::num::Saturating;
 
     // Bring the trait into scope so `img.roi(..)` resolves.
@@ -388,16 +388,15 @@ mod tests {
         assert_eq!(h.overflow_count, 0);
     }
 
-    // ── Single-channel: NaturalBins on Indexed8 (channel = u8) ──────────────
+    // ── Single-channel: NaturalBins on a bare u8 channel ────────────────────
+    //
+    // The primitive `u8` pixel covers the bare-`u8` channel impl. `Indexed8`
+    // shares that channel type and is rejected: binning palette indices is
+    // meaningless, which `histogram`'s `ChannelwiseMath` bound enforces.
 
     #[test]
-    fn indexed8_natural_uses_u8_channel_type() {
-        let img = Image::from_vec(
-            2,
-            2,
-            vec![Indexed8(3), Indexed8(3), Indexed8(7), Indexed8(200)],
-        )
-        .unwrap();
+    fn bare_u8_natural_uses_u8_channel_type() {
+        let img = Image::from_vec(2, 2, vec![3u8, 3, 7, 200]).unwrap();
         let h: Histogram<NaturalBins, u8> = histogram(&img, &NaturalBins).unwrap();
 
         assert_eq!(h.count_at_bin(3), 2);

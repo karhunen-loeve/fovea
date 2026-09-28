@@ -20,7 +20,7 @@ use crate::error::Error;
 use crate::image::{
     Image, ImageRef, Neighborhood, RasterImage, RasterImageMut, SeparableKernel, gaussian_kernel_1d,
 };
-use crate::pixel::{FromLinear, HomogeneousPixel, LinearPixel, ZeroablePixel};
+use crate::pixel::{ChannelwiseMath, FromLinear, HomogeneousPixel, LinearPixel, ZeroablePixel};
 use crate::transform::combine::{
     Direction, DirectionChannel, Magnitude, MagnitudeChannel, combine_images,
 };
@@ -822,7 +822,7 @@ pub fn gradient_magnitude<IA, IB, P>(gx: &IA, gy: &IB) -> Result<Image<P>, Error
 where
     IA: RasterImage<Pixel = P>,
     IB: RasterImage<Pixel = P>,
-    P: HomogeneousPixel + ZeroablePixel,
+    P: ChannelwiseMath + ZeroablePixel,
     P::Channel: MagnitudeChannel,
 {
     combine_images(gx, gy, Magnitude)
@@ -861,7 +861,7 @@ pub fn gradient_direction<IA, IB, P>(gx: &IA, gy: &IB) -> Result<Image<P>, Error
 where
     IA: RasterImage<Pixel = P>,
     IB: RasterImage<Pixel = P>,
-    P: HomogeneousPixel + ZeroablePixel,
+    P: ChannelwiseMath + ZeroablePixel,
     P::Channel: DirectionChannel,
 {
     combine_images(gx, gy, Direction)
@@ -1042,7 +1042,7 @@ pub fn non_maximum_suppression<IM, IA, P>(magnitude: &IM, direction: &IA) -> Res
 where
     IM: RasterImage<Pixel = P>,
     IA: RasterImage<Pixel = P>,
-    P: HomogeneousPixel + ZeroablePixel,
+    P: ChannelwiseMath + ZeroablePixel,
     P::Channel: PartialOrd,
     f64: From<P::Channel>,
 {
