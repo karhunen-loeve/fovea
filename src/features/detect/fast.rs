@@ -8,7 +8,7 @@ use crate::error::Error;
 use crate::features::Corner;
 use crate::image::{Decimated, Image, ImageView, RasterImage, RasterImageMut};
 use crate::pixel::{LinearPixel, MonoF32, SingleChannel};
-use crate::{CoordinateF64, Offset, Rectangle, Size};
+use crate::{Coordinate, CoordinateF64, Offset, Rectangle, Size};
 
 use super::peaks::{NmsRadius, corner_peaks, lift_peaks, scan_peaks};
 
@@ -628,7 +628,7 @@ where
     let region = border.output_region(
         size,
         Size::new(FOOTPRINT, FOOTPRINT),
-        (FAST_RING_RADIUS, FAST_RING_RADIUS),
+        Coordinate::new(FAST_RING_RADIUS, FAST_RING_RADIUS),
     );
     let left = region.left().min(size.width);
     let top = region.top().min(size.height);
@@ -665,20 +665,16 @@ where
     f64: From<Acc::Channel>,
     B: BorderPolicy<I>,
 {
-    let (w, h) = (image.width() as isize, image.height() as isize);
+    let size = image.size();
+    let centre = Coordinate::new(x, y);
     let sample = |index: usize| {
-        let offset = FAST_RING[index];
-        let (nx, ny) = (
-            x as isize + offset.dx as isize,
-            y as isize + offset.dy as isize,
-        );
+        let at = centre.step(FAST_RING[index]);
         // In bounds is a direct read; only genuinely outside positions reach
         // the policy — which matters because `Skip` *panics* rather than
         // inventing a sample, and must never be asked inside its own region.
-        let pixel = if (0..w).contains(&nx) && (0..h).contains(&ny) {
-            image.row(ny as usize)[nx as usize]
-        } else {
-            border.pixel_at(image, nx, ny)
+        let pixel = match at.within(size) {
+            Some(c) => image.row(c.y)[c.x],
+            None => border.pixel_at(image, at),
         };
         intensity::<P, Acc>(pixel)
     };

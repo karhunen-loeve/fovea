@@ -2,7 +2,7 @@
 
 use super::{Drawable, hspan, vspan};
 use crate::image::ImageViewMut;
-use crate::{CoordinateI32, Size};
+use crate::{SignedCoordinate, Size};
 
 /// An axis-aligned rectangle, outlined or filled.
 ///
@@ -39,7 +39,7 @@ use crate::{CoordinateI32, Size};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Rect<P> {
     /// Top-left corner of the covered region.
-    pub top_left: CoordinateI32,
+    pub top_left: SignedCoordinate,
     /// Width and height of the covered region, in pixels.
     pub size: Size,
     /// Pixel value written along the border, or over the whole region
@@ -54,21 +54,18 @@ impl<P: Copy> Drawable<P> for Rect<P> {
         if self.size.width == 0 || self.size.height == 0 {
             return;
         }
-        let (x0, y0) = (i64::from(self.top_left.x), i64::from(self.top_left.y));
-        // `Size` performs no validation, and a width past i64::MAX would
-        // wrap the plain cast negative (usize::MAX as i64 is -1), painting
-        // a span to the *left* of the anchor instead of clipping a huge
-        // rectangle. Saturate instead: the far edge lands beyond any frame
-        // and the spans clip it like any other off-image extent.
-        let width = i64::try_from(self.size.width).unwrap_or(i64::MAX);
-        let height = i64::try_from(self.size.height).unwrap_or(i64::MAX);
-        let x1 = x0.saturating_add(width - 1);
-        let y1 = y0.saturating_add(height - 1);
+        let (x0, y0) = (self.top_left.x as i128, self.top_left.y as i128);
+        // `Size` performs no validation, so an extent can be anything up to
+        // usize::MAX. In i128 an isize corner plus a usize extent cannot
+        // overflow, so the far edge is exact rather than saturated, and the
+        // spans clip it like any other off-image extent.
+        let x1 = x0 + self.size.width as i128 - 1;
+        let y1 = y0 + self.size.height as i128 - 1;
         if self.fill {
             // Clip the row range up front so a mostly-off-image rectangle
             // does not iterate its invisible rows.
             let lo = y0.max(0);
-            let hi = y1.min(image.size().height as i64 - 1);
+            let hi = y1.min(image.size().height as i128 - 1);
             for y in lo..=hi {
                 hspan(image, x0, x1, y, self.color);
             }
@@ -108,7 +105,7 @@ impl<P: Copy> Drawable<P> for Rect<P> {
 /// ```
 pub fn draw_rect<P: Copy>(
     image: &mut impl ImageViewMut<Pixel = P>,
-    top_left: impl Into<CoordinateI32>,
+    top_left: impl Into<SignedCoordinate>,
     size: Size,
     color: P,
     fill: bool,
@@ -195,9 +192,10 @@ mod tests {
 
     #[test]
     fn a_pathological_size_clips_instead_of_wrapping() {
-        // `Size` performs no validation, and `usize::MAX as i64` is -1: the
-        // old cast painted a two-pixel span to the *left* of the anchor.
-        // The saturating conversion clips the huge rectangle to the frame.
+        // `Size` performs no validation, and `usize::MAX as i64` is -1: an
+        // earlier cast painted a two-pixel span to the *left* of the anchor.
+        // The far edge is computed in i128 now, so the huge rectangle clips
+        // to the frame.
         let mut image: Image<Mono8> = Image::zero(6, 6);
         draw_rect(&mut image, (2, 2), Size::new(usize::MAX, 2), ink(), true);
         let drawn = inked(&image);

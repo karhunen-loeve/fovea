@@ -1,7 +1,7 @@
 //! Circles — midpoint algorithm, outline and filled.
 
 use super::{Drawable, hspan, put};
-use crate::CoordinateI32;
+use crate::SignedCoordinate;
 use crate::image::ImageViewMut;
 
 /// A circle around a center point, outlined or filled.
@@ -31,7 +31,7 @@ use crate::image::ImageViewMut;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Circle<P> {
     /// Center of the circle.
-    pub center: CoordinateI32,
+    pub center: SignedCoordinate,
     /// Radius in pixels, measured from `center` to the ring.
     pub radius: u32,
     /// Pixel value written on the ring, or over the whole disk when
@@ -44,9 +44,9 @@ pub struct Circle<P> {
 impl<P: Copy> Drawable<P> for Circle<P> {
     fn draw_into(&self, image: &mut impl ImageViewMut<Pixel = P>) {
         let size = image.size();
-        let (w, h) = (size.width as i64, size.height as i64);
-        let (cx, cy) = (i64::from(self.center.x), i64::from(self.center.y));
-        let r = i64::from(self.radius);
+        let (w, h) = (size.width as i128, size.height as i128);
+        let (cx, cy) = (self.center.x as i128, self.center.y as i128);
+        let r = i128::from(self.radius);
         // A circle whose bounding box misses the image has no visible pixels.
         if cx + r < 0 || cx - r >= w || cy + r < 0 || cy - r >= h {
             return;
@@ -70,9 +70,9 @@ impl<P: Copy> Drawable<P> for Circle<P> {
         // the frame's columns.
         let span_reach = (-cx).max(cx - (w - 1)).max(0);
 
-        let mut intervals = [(0i64, -1i64); 8];
+        let mut intervals = [(0i128, -1i128); 8];
         let mut count = 0;
-        let mut push = |lo: i64, hi: i64| {
+        let mut push = |lo: i128, hi: i128| {
             let (lo, hi) = (lo.max(0), hi.min(r));
             if lo <= hi {
                 intervals[count] = (lo, hi);
@@ -122,17 +122,16 @@ impl<P: Copy> Drawable<P> for Circle<P> {
             if lo > hi {
                 continue;
             }
-            let r2 = r as i128 * r as i128;
-            let target = r2 - lo as i128 * lo as i128;
+            let r2 = r * r;
+            let target = r2 - lo * lo;
             let guess = isqrt(target);
-            let mut x = if guess as i128 * (guess as i128 + 1) >= target {
+            let mut x = if guess * (guess + 1) >= target {
                 guess
             } else {
                 guess + 1
             };
             let mut y = lo;
-            let mut d =
-                ((y as i128 + 1) * (y as i128 + 1) + x as i128 * (x as i128 - 1) - r2) as i64;
+            let mut d = (y + 1) * (y + 1) + x * (x - 1) - r2;
             while y <= x && y <= hi {
                 if self.fill {
                     hspan(image, cx - x, cx + x, cy + y, self.color);
@@ -169,7 +168,7 @@ impl<P: Copy> Drawable<P> for Circle<P> {
 /// The at most two intervals of non-negative offsets `o` for which
 /// `c + o` or `c - o` lands inside `0..len`. Either may be empty
 /// (`lo > hi`); callers clamp `lo` to zero.
-fn offset_windows(c: i64, len: i64) -> [(i64, i64); 2] {
+fn offset_windows(c: i128, len: i128) -> [(i128, i128); 2] {
     [(-c, len - 1 - c), (c - (len - 1), c)]
 }
 
@@ -181,22 +180,22 @@ fn offset_windows(c: i64, len: i64) -> [(i64, i64); 2] {
 /// use the same discrete rule: `x(y) <= x_hi` from
 /// `y^2 >= r^2 - x_hi*(x_hi + 1)` and `x(y) >= x_lo` while
 /// `y^2 <= r^2 - x_lo*(x_lo - 1) - 1`.
-fn walk_interval_for_x(r: i64, x_lo: i64, x_hi: i64) -> Option<(i64, i64)> {
+fn walk_interval_for_x(r: i128, x_lo: i128, x_hi: i128) -> Option<(i128, i128)> {
     let x_lo = x_lo.max(0);
     let x_hi = x_hi.min(r);
     if x_lo > x_hi {
         return None;
     }
-    let r2 = r as i128 * r as i128;
-    let y_lo = isqrt(r2 - x_hi as i128 * (x_hi as i128 + 1) - 1);
-    let y_hi = isqrt(r2 - x_lo as i128 * (x_lo as i128 - 1) - 1) + 1;
+    let r2 = r * r;
+    let y_lo = isqrt(r2 - x_hi * (x_hi + 1) - 1);
+    let y_hi = isqrt(r2 - x_lo * (x_lo - 1) - 1) + 1;
     Some((y_lo, y_hi))
 }
 
-/// Integer square root of a non-negative `i128`; `r` for `i32` centers and
-/// a `u32` radius stays far inside the exactly-representable range.
-fn isqrt(v: i128) -> i64 {
-    (v.max(0) as u128).isqrt() as i64
+/// Integer square root of a non-negative `i128`. The arguments are bounded
+/// by `r^2` for a `u32` radius, far inside the exactly representable range.
+fn isqrt(v: i128) -> i128 {
+    (v.max(0) as u128).isqrt() as i128
 }
 
 /// Draws a circle of the given `radius` around `center`.
@@ -217,7 +216,7 @@ fn isqrt(v: i128) -> i64 {
 /// ```
 pub fn draw_circle<P: Copy>(
     image: &mut impl ImageViewMut<Pixel = P>,
-    center: impl Into<CoordinateI32>,
+    center: impl Into<SignedCoordinate>,
     radius: u32,
     color: P,
     fill: bool,
@@ -322,13 +321,13 @@ mod tests {
     /// the interval clip.
     fn reference_circle(
         image: &mut Image<Mono8>,
-        center: (i32, i32),
+        center: (isize, isize),
         radius: u32,
         color: Mono8,
         fill: bool,
     ) {
-        let (cx, cy) = (i64::from(center.0), i64::from(center.1));
-        let r = i64::from(radius);
+        let (cx, cy) = (center.0 as i128, center.1 as i128);
+        let r = i128::from(radius);
         let mut x = r;
         let mut y = 0;
         let mut d = 1 - r;
@@ -441,7 +440,13 @@ mod tests {
             let n = (2 * r + 3) as usize;
             let c = (r + 1) as f64;
             let mut image: Image<Mono8> = Image::zero(n, n);
-            draw_circle(&mut image, ((r + 1) as i32, (r + 1) as i32), r, ink(), true);
+            draw_circle(
+                &mut image,
+                ((r + 1) as isize, (r + 1) as isize),
+                r,
+                ink(),
+                true,
+            );
             for y in 0..n {
                 for x in 0..n {
                     let dist = ((x as f64 - c).powi(2) + (y as f64 - c).powi(2)).sqrt();

@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `#[derive(ChannelwiseMath)]`, re-exported at the crate root beside the
   other pixel derives. It is deliberately not implied by
   `#[derive(HomogeneousPixel)]`.
+- `Coordinate::step(Offset) -> SignedCoordinate`, the total sibling of
+  `Coordinate::checked_add`, and `SignedCoordinate::step` and
+  `SignedCoordinate::within(Size) -> Option<Coordinate>`, which is the whole
+  bounds check in one place.
 
 ### Changed
 
@@ -52,6 +56,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `BinaryThresholdInv` and `PeakValue::of_pixel` therefore reject palette
   indices, which they accepted before. **Migration:** a custom pixel that
   derives or implements `WhiteChannel` also derives `ChannelwiseMath`.
+- **Breaking:** one type for a pixel position that may lie outside the
+  image. `SignedCoordinate { x: isize, y: isize }` replaces
+  `CoordinateI32`, and it is what the drawing primitives, the border
+  policies and the contour tracer now share; before, the same concept was
+  spelled `CoordinateI32`, a bare `(isize, isize)` pair and a private
+  `i64` pair. The width is `isize` because every pixel of every image fits
+  it, so `Coordinate::step` never fails. The drawing primitives stay exact
+  over the whole `isize` plane: a line clipped from endpoints near
+  `isize::MIN` and `isize::MAX` paints the same pixels as the unclipped
+  walk. **Migration:** `CoordinateI32` becomes `SignedCoordinate`; tuple
+  literals such as `(3, -2)` still convert with `.into()`, but a tuple of
+  `i32` variables needs `as isize`.
+- **Breaking:** `BorderPolicy::pixel_at(&self, image, at: SignedCoordinate)`
+  replaces `pixel_at(&self, image, x: isize, y: isize)`. The four callers in
+  the crate formed that position by hand as `x as isize + dx as isize`;
+  they now write `Coordinate::step`, and `Constant` tests the bounds with
+  `SignedCoordinate::within`. **Migration:** a custom border policy reads
+  `at.x` and `at.y`; a caller passes `SignedCoordinate::new(x, y)` or
+  `coordinate.step(offset)`.
+- **Breaking:** an anchor is a `Coordinate`, not a `(usize, usize)` tuple:
+  `Kernel::anchor`, `Neighborhood::anchor` and `Neighborhood::with_anchor`,
+  `BorderPolicy::output_region`, `compute_interior_region`, and the
+  `anchor` parameter of `fold_neighborhood`, `map_neighborhood` and their
+  `_into` and `_fn` variants. **Migration:** `(1, 1)` becomes
+  `Coordinate::new(1, 1)`; code that reads `kernel.anchor().0` reads
+  `.x`.
+- **Breaking:** a displacement in the neighbourhood API is an `Offset`.
+  `MapItem { pixel, dx, dy }` becomes `MapItem { pixel, offset }`, and
+  `Neighborhood::positions()` yields `(Offset, weight)` pairs instead of
+  `(dx, dy, weight)` triples. These were the last public displacement
+  pairs, spelled `isize` where `Offset` is `i32`. **Migration:** read
+  `item.offset.dx` for `item.dx`, and destructure `(offset, w)` or
+  `(Offset { dx, dy }, w)`.
 
 ### Documentation
 

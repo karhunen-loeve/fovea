@@ -12,7 +12,7 @@
 //! | Mask / kernel  | `Neighborhood<W, KW, KH>` + weights  | Any `ImageView<Pixel = bool>` (topology) |
 //! | Weights        | Fixed, pre-set                       | Data-dependent, computed at call time    |
 //! | Center pixel   | Just another `FoldItem` at the anchor| First-class `center` argument            |
-//! | Neighbour item | `FoldItem { pixel, weight }`         | `MapItem { pixel, dx, dy }`              |
+//! | Neighbour item | `FoldItem { pixel, weight }`         | `MapItem { pixel, offset }`              |
 //! | Canonical uses | Convolution, blur, gradient filters  | Median, bilateral, Perona-Malik, NLM     |
 //!
 //! [`fold_neighborhood`]: crate::transform::fold::fold_neighborhood
@@ -20,6 +20,7 @@
 use crate::border::{BorderPolicy, compute_interior_region};
 use crate::image::{Image, ImageView, RasterImage, RasterImageMut};
 use crate::pixel::ZeroablePixel;
+use crate::{Coordinate, Offset};
 
 // ─── MapItem ──────────────────────────────────────────────────────────────────
 
@@ -37,21 +38,20 @@ use crate::pixel::ZeroablePixel;
 /// # Example
 ///
 /// ```
+/// use fovea::Offset;
 /// use fovea::transform::MapItem;
 ///
-/// let item = MapItem { pixel: 42u8, dx: -1, dy: 0 };
+/// let item = MapItem { pixel: 42u8, offset: Offset::new(-1, 0) };
 /// assert_eq!(item.pixel, 42);
-/// assert_eq!(item.dx, -1);
-/// assert_eq!(item.dy, 0);
+/// assert_eq!(item.offset.dx, -1); // one step left of the anchor
+/// assert_eq!(item.offset.dy, 0);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MapItem<P> {
     /// Source pixel value (already border-resolved for boundary positions).
     pub pixel: P,
-    /// Horizontal offset from the anchor (`< 0` = left, `> 0` = right).
-    pub dx: isize,
-    /// Vertical offset from the anchor (`< 0` = up, `> 0` = down).
-    pub dy: isize,
+    /// Displacement from the anchor (`dx < 0` = left, `dy < 0` = up).
+    pub offset: Offset,
 }
 
 // ─── MapOp trait ─────────────────────────────────────────────────────────────
@@ -78,7 +78,7 @@ pub struct MapItem<P> {
 /// - `center` is the source pixel at the anchor coordinate.
 /// - `neighbors` yields a [`MapItem`] for every `true` position in the mask,
 ///   **including the anchor** when `mask[anchor] == true` — it appears as
-///   `MapItem { dx: 0, dy: 0, .. }`.
+///   `MapItem { offset: Offset::ZERO, .. }`.
 ///
 /// This means a full-rectangle mask with the anchor included will cause the
 /// anchor pixel to appear in both `center` and the iterator. Operations that
@@ -251,7 +251,7 @@ where
 ///
 /// For every pixel in `border.output_region(…)`:
 ///
-/// 1. Pre-collect all mask-`true` positions `(dx, dy)` relative to the anchor.
+/// 1. Pre-collect all mask-`true` positions as [`Offset`]s relative to the anchor.
 /// 2. For each output position `(cx, cy)`: fetch `center = src[cx, cy]`, build
 ///    an iterator of [`MapItem`]s from the mask-`true` offsets, call
 ///    `op.map(center, iter)`, and write the result.
@@ -308,7 +308,7 @@ where
 pub fn map_neighborhood_into<I, MI, B, O, M, P>(
     src: &I,
     mask_weights: &MI,
-    anchor: (usize, usize),
+    anchor: Coordinate,
     border: &B,
     output: &mut O,
     mut op: M,
@@ -334,22 +334,22 @@ pub fn map_neighborhood_into<I, MI, B, O, M, P>(
         output_region.size.height,
     );
 
-    // Pre-collect mask-true positions as (dx, dy) offsets relative to the
-    // anchor.  Only these positions are yielded to `op.map`; false entries
-    // are silently skipped.  For typical mask sizes (3×3 .. 7×7) this Vec
-    // stays in L1.
-    // Deliberately a bare `(isize, isize)` displacement rather than the
-    // `Offset` vocabulary type: this feeds the dilate/erode hot loop, and
-    // converting it is a measured performance change for an optimization
-    // pass, not a cleanup.
-    let mask_positions: Vec<(isize, isize)> = {
+    // Pre-collect mask-true positions relative to the anchor.  Only these
+    // positions are yielded to `op.map`; false entries are silently
+    // skipped.  For typical mask sizes (3×3 .. 7×7) this Vec stays in L1.
+    // Each entry carries the displacement twice: as the bare `(isize,
+    // isize)` pair the dilate/erode hot loops index with, and as the
+    // `Offset` that `MapItem` and the boundary path hand on. The hot loops
+    // keep the bare pair deliberately; changing their representation is a
+    // measured performance question for an optimization pass, not a
+    // cleanup.
+    let mask_positions: Vec<(isize, isize, Offset)> = {
         let mut positions = Vec::with_capacity(mask_size.width * mask_size.height);
         for ky in 0..mask_size.height {
             for kx in 0..mask_size.width {
                 if mask_weights.pixel_at(kx, ky) {
-                    let dx = kx as isize - anchor.0 as isize;
-                    let dy = ky as isize - anchor.1 as isize;
-                    positions.push((dx, dy));
+                    let offset = anchor.offset_to(Coordinate::new(kx, ky));
+                    positions.push((offset.dx as isize, offset.dy as isize, offset));
                 }
             }
         }
@@ -397,7 +397,7 @@ pub fn map_neighborhood_into<I, MI, B, O, M, P>(
                     }
 
                     // Kernel-outer sweep
-                    for &(dx, dy) in &mask_positions {
+                    for &(dx, dy, offset) in &mask_positions {
                         let src_row = src.row((cy as isize + dy) as usize);
                         let start = (int_left as isize + dx) as usize;
                         let src_slice = &src_row[start..start + int_width];
@@ -407,8 +407,7 @@ pub fn map_neighborhood_into<I, MI, B, O, M, P>(
                                 &mut acc_row[i],
                                 MapItem {
                                     pixel: src_slice[i],
-                                    dx,
-                                    dy,
+                                    offset,
                                 },
                             );
                         }
@@ -427,13 +426,12 @@ pub fn map_neighborhood_into<I, MI, B, O, M, P>(
                 for cy in int_top..int_bottom {
                     for cx in int_left..int_right {
                         let center = src.pixel_at(cx, cy);
-                        let iter = mask_positions.iter().map(|&(dx, dy)| {
+                        let iter = mask_positions.iter().map(|&(dx, dy, offset)| {
                             let sx = (cx as isize + dx) as usize;
                             let sy = (cy as isize + dy) as usize;
                             MapItem {
                                 pixel: src.pixel_at(sx, sy),
-                                dx,
-                                dy,
+                                offset,
                             }
                         });
                         let result = op.map(center, iter);
@@ -467,9 +465,10 @@ pub fn map_neighborhood_into<I, MI, B, O, M, P>(
             // For non-Skip policies the output region covers the full image,
             // so (cx, cy) is always a valid image coordinate here.
             let center = src.pixel_at(cx, cy);
-            let iter = mask_positions.iter().map(|&(dx, dy)| {
-                let pixel = border.pixel_at(src, cx as isize + dx, cy as isize + dy);
-                MapItem { pixel, dx, dy }
+            let at = Coordinate::new(cx, cy);
+            let iter = mask_positions.iter().map(|&(_, _, offset)| {
+                let pixel = border.pixel_at(src, at.step(offset));
+                MapItem { pixel, offset }
             });
             let result = op.map(center, iter);
             *output.pixel_at_mut(cx - ox, cy - oy) = result;
@@ -524,7 +523,7 @@ pub fn map_neighborhood_into<I, MI, B, O, M, P>(
 pub fn map_neighborhood<I, MI, B, M, P>(
     src: &I,
     mask_weights: &MI,
-    anchor: (usize, usize),
+    anchor: Coordinate,
     border: &B,
     op: M,
 ) -> Image<M::Output>
@@ -582,7 +581,7 @@ where
 pub fn map_neighborhood_fn_into<I, MI, B, O, F, P, Out>(
     src: &I,
     mask_weights: &MI,
-    anchor: (usize, usize),
+    anchor: Coordinate,
     border: &B,
     output: &mut O,
     f: F,
@@ -654,7 +653,7 @@ pub fn map_neighborhood_fn_into<I, MI, B, O, F, P, Out>(
 pub fn map_neighborhood_fn<I, MI, B, F, P, Out>(
     src: &I,
     mask_weights: &MI,
-    anchor: (usize, usize),
+    anchor: Coordinate,
     border: &B,
     f: F,
 ) -> Image<Out>
@@ -685,20 +684,18 @@ mod tests {
     fn map_item_fields() {
         let item = MapItem {
             pixel: 42u8,
-            dx: -1,
-            dy: 2,
+            offset: Offset::new(-1, 2),
         };
         assert_eq!(item.pixel, 42);
-        assert_eq!(item.dx, -1);
-        assert_eq!(item.dy, 2);
+        assert_eq!(item.offset.dx, -1);
+        assert_eq!(item.offset.dy, 2);
     }
 
     #[test]
     fn map_item_is_copy() {
         let item = MapItem {
             pixel: 7u8,
-            dx: 0,
-            dy: 0,
+            offset: Offset::new(0, 0),
         };
         let item2 = item; // Copy
         assert_eq!(item, item2);
@@ -708,8 +705,7 @@ mod tests {
     fn map_item_debug() {
         let item = MapItem {
             pixel: 0u8,
-            dx: 0,
-            dy: 0,
+            offset: Offset::new(0, 0),
         };
         let dbg = format!("{:?}", item);
         assert!(dbg.contains("MapItem"));
@@ -979,8 +975,8 @@ mod tests {
         ]);
         let src = Image::fill(5, 5, 0u8);
 
-        let mut last_dx = 99isize;
-        let mut last_dy = 99isize;
+        let mut last_dx = 99i32;
+        let mut last_dy = 99i32;
 
         let _ = map_neighborhood_fn(
             &src,
@@ -989,8 +985,8 @@ mod tests {
             &Skip,
             |_center: u8, neighbors: &mut dyn Iterator<Item = MapItem<u8>>| {
                 for n in neighbors {
-                    last_dx = n.dx;
-                    last_dy = n.dy;
+                    last_dx = n.offset.dx;
+                    last_dy = n.offset.dy;
                 }
                 0u8
             },
@@ -1010,8 +1006,8 @@ mod tests {
         ]);
         let src = Image::fill(5, 5, 0u8);
 
-        let mut last_dx = 99isize;
-        let mut last_dy = 99isize;
+        let mut last_dx = 99i32;
+        let mut last_dy = 99i32;
 
         let _ = map_neighborhood_fn(
             &src,
@@ -1020,8 +1016,8 @@ mod tests {
             &Skip,
             |_center: u8, neighbors: &mut dyn Iterator<Item = MapItem<u8>>| {
                 for n in neighbors {
-                    last_dx = n.dx;
-                    last_dy = n.dy;
+                    last_dx = n.offset.dx;
+                    last_dy = n.offset.dy;
                 }
                 0u8
             },

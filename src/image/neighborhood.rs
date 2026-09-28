@@ -1,6 +1,7 @@
 use crate::image::ImageView;
 use crate::image::sequential::private;
 use crate::image::sequential::{ContiguousImage, ImageArray};
+use crate::{Coordinate, Offset};
 
 /// A kernel / structuring element that bundles weights and an anchor point.
 ///
@@ -40,8 +41,8 @@ pub trait Kernel {
     /// Returns a reference to the weight grid.
     fn weights(&self) -> &Self::Weights;
 
-    /// Returns the anchor position `(x, y)` within the kernel.
-    fn anchor(&self) -> (usize, usize);
+    /// Returns the anchor position within the kernel.
+    fn anchor(&self) -> Coordinate;
 
     /// Returns a 180°-rotated copy of this kernel.
     ///
@@ -79,6 +80,7 @@ pub trait Kernel {
 /// # Example
 ///
 /// ```
+/// use fovea::Coordinate;
 /// use fovea::image::{Neighborhood, ImageView};
 ///
 /// // A simple 3×3 box blur kernel (un-normalised)
@@ -87,12 +89,13 @@ pub trait Kernel {
 ///     1.0, 1.0, 1.0,
 ///     1.0, 1.0, 1.0,
 /// ]);
-/// assert_eq!(kernel.anchor(), (1, 1));
+/// assert_eq!(kernel.anchor(), Coordinate::new(1, 1));
 /// assert_eq!(kernel.weights().width(), 3);
 /// assert_eq!(kernel.weights().height(), 3);
 /// ```
 ///
 /// ```
+/// use fovea::Offset;
 /// use fovea::image::{Neighborhood, ImageView};
 ///
 /// // Iterate over kernel positions relative to anchor
@@ -100,16 +103,16 @@ pub trait Kernel {
 /// let positions: Vec<_> = kernel.positions().collect();
 /// // dx runs from -1 to +1, dy = 0 (1D horizontal kernel)
 /// assert_eq!(positions.len(), 3);
-/// assert_eq!(positions[0], (-1, 0, 1));
-/// assert_eq!(positions[1], (0, 0, 2));
-/// assert_eq!(positions[2], (1, 0, 1));
+/// assert_eq!(positions[0], (Offset::new(-1, 0), 1));
+/// assert_eq!(positions[1], (Offset::ZERO, 2));
+/// assert_eq!(positions[2], (Offset::new(1, 0), 1));
 /// ```
 pub struct Neighborhood<W: Copy, const KW: usize, const KH: usize>
 where
     private::Dim<W, KW, KH>: private::_Array2D<Pixel = W>,
 {
     weights: ImageArray<W, KW, KH>,
-    anchor: (usize, usize),
+    anchor: Coordinate,
 }
 
 impl<W: Copy, const KW: usize, const KH: usize> Neighborhood<W, KW, KH>
@@ -122,6 +125,7 @@ where
     /// # Example
     ///
     /// ```
+    /// use fovea::Coordinate;
     /// use fovea::image::Neighborhood;
     ///
     /// let kernel = Neighborhood::<f32, 3, 3>::new([
@@ -129,12 +133,12 @@ where
     ///    -1.0,  4.0, -1.0,
     ///     0.0, -1.0,  0.0,
     /// ]);
-    /// assert_eq!(kernel.anchor(), (1, 1));
+    /// assert_eq!(kernel.anchor(), Coordinate::new(1, 1));
     /// ```
     pub fn new(data: <private::Dim<W, KW, KH> as private::_Array2D>::Array) -> Self {
         Self {
             weights: ImageArray::new(data),
-            anchor: (KW / 2, KH / 2),
+            anchor: Coordinate::new(KW / 2, KH / 2),
         }
     }
 
@@ -144,29 +148,30 @@ where
     /// # Panics
     ///
     /// Panics if `anchor` is outside the kernel bounds
-    /// (`anchor.0 >= KW || anchor.1 >= KH`).
+    /// (`anchor.x >= KW || anchor.y >= KH`).
     ///
     /// # Example
     ///
     /// ```
+    /// use fovea::Coordinate;
     /// use fovea::image::Neighborhood;
     ///
     /// // Anchor at top-left corner
     /// let kernel = Neighborhood::<f32, 3, 3>::with_anchor(
     ///     [1.0; 9],
-    ///     (0, 0),
+    ///     Coordinate::new(0, 0),
     /// );
-    /// assert_eq!(kernel.anchor(), (0, 0));
+    /// assert_eq!(kernel.anchor(), Coordinate::new(0, 0));
     /// ```
     pub fn with_anchor(
         data: <private::Dim<W, KW, KH> as private::_Array2D>::Array,
-        anchor: (usize, usize),
+        anchor: Coordinate,
     ) -> Self {
         assert!(
-            anchor.0 < KW && anchor.1 < KH,
+            anchor.x < KW && anchor.y < KH,
             "anchor ({}, {}) is out of bounds for {}x{} kernel",
-            anchor.0,
-            anchor.1,
+            anchor.x,
+            anchor.y,
             KW,
             KH,
         );
@@ -200,7 +205,7 @@ where
     /// The anchor is the point that is aligned with the current output
     /// pixel during convolution or morphological operations. Default is
     /// the center: `(KW / 2, KH / 2)`.
-    pub fn anchor(&self) -> (usize, usize) {
+    pub fn anchor(&self) -> Coordinate {
         self.anchor
     }
 
@@ -222,15 +227,16 @@ where
         self.weights.as_slice()
     }
 
-    /// Iterates over all kernel positions, yielding
-    /// `(dx, dy, &weight)` tuples where `dx` and `dy` are **signed
-    /// offsets relative to the anchor**.
+    /// Iterates over all kernel positions, yielding `(offset, weight)` pairs
+    /// where `offset` is the kernel position's [`Offset`] **relative to the
+    /// anchor**.
     ///
     /// Iteration order is row-major (left-to-right, top-to-bottom).
     ///
     /// # Example
     ///
     /// ```
+    /// use fovea::Offset;
     /// use fovea::image::Neighborhood;
     ///
     /// let kernel = Neighborhood::<f32, 3, 3>::new([
@@ -241,12 +247,12 @@ where
     /// let positions: Vec<_> = kernel.positions().collect();
     /// assert_eq!(positions.len(), 9);
     ///
-    /// // top-left corner: dx = -1, dy = -1, weight = 1.0
-    /// assert_eq!(positions[0], (-1, -1, 1.0));
-    /// // center: dx = 0, dy = 0, weight = 5.0
-    /// assert_eq!(positions[4], (0, 0, 5.0));
-    /// // bottom-right: dx = 1, dy = 1, weight = 9.0
-    /// assert_eq!(positions[8], (1, 1, 9.0));
+    /// // top-left corner: one step left and up, weight = 1.0
+    /// assert_eq!(positions[0], (Offset::new(-1, -1), 1.0));
+    /// // center: the anchor itself, weight = 5.0
+    /// assert_eq!(positions[4], (Offset::ZERO, 5.0));
+    /// // bottom-right: one step right and down, weight = 9.0
+    /// assert_eq!(positions[8], (Offset::new(1, 1), 9.0));
     /// ```
     pub fn positions(&self) -> PositionsIter<'_, W, KW, KH> {
         PositionsIter {
@@ -271,7 +277,7 @@ where
         &self.weights
     }
 
-    fn anchor(&self) -> (usize, usize) {
+    fn anchor(&self) -> Coordinate {
         self.anchor
     }
 
@@ -281,7 +287,7 @@ where
         // reflecting both rows and columns.
         let flipped_weights =
             ImageArray::generate(|x, y| self.weights.pixel_at(KW - 1 - x, KH - 1 - y));
-        let flipped_anchor = (KW - 1 - self.anchor.0, KH - 1 - self.anchor.1);
+        let flipped_anchor = Coordinate::new(KW - 1 - self.anchor.x, KH - 1 - self.anchor.y);
         Self {
             weights: flipped_weights,
             anchor: flipped_anchor,
@@ -352,14 +358,14 @@ where
 
 // ─── PositionsIter ──────────────────────────────────────────────────────
 
-/// Iterator over kernel positions yielding `(dx, dy, weight)` tuples
-/// relative to the anchor. Created by [`Neighborhood::positions`].
+/// Iterator over kernel positions yielding `(offset, weight)` pairs, the
+/// offset relative to the anchor. Created by [`Neighborhood::positions`].
 pub struct PositionsIter<'a, W, const KW: usize, const KH: usize>
 where
     private::Dim<W, KW, KH>: private::_Array2D<Pixel = W>,
 {
     weights: &'a ImageArray<W, KW, KH>,
-    anchor: (usize, usize),
+    anchor: Coordinate,
     x: usize,
     y: usize,
 }
@@ -368,7 +374,7 @@ impl<'a, W: Copy, const KW: usize, const KH: usize> Iterator for PositionsIter<'
 where
     private::Dim<W, KW, KH>: private::_Array2D<Pixel = W>,
 {
-    type Item = (isize, isize, W);
+    type Item = (Offset, W);
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
@@ -376,8 +382,7 @@ where
             return None;
         }
 
-        let dx = self.x as isize - self.anchor.0 as isize;
-        let dy = self.y as isize - self.anchor.1 as isize;
+        let offset = self.anchor.offset_to(Coordinate::new(self.x, self.y));
         let weight = self.weights.pixel_at(self.x, self.y);
 
         self.x += 1;
@@ -386,7 +391,7 @@ where
             self.y += 1;
         }
 
-        Some((dx, dy, weight))
+        Some((offset, weight))
     }
 
     #[inline]
@@ -448,8 +453,8 @@ impl Neighborhood<f32, 3, 3> {
     /// use fovea::image::Neighborhood;
     ///
     /// let k = Neighborhood::box_blur_3x3();
-    /// assert_eq!(k.anchor(), (1, 1));
-    /// let sum: f32 = k.positions().map(|(_, _, w)| w).sum();
+    /// assert_eq!(k.anchor(), fovea::Coordinate::new(1, 1));
+    /// let sum: f32 = k.positions().map(|(_, w)| w).sum();
     /// assert!((sum - 1.0).abs() < 1e-6);
     /// ```
     pub fn box_blur_3x3() -> Self {
@@ -466,7 +471,7 @@ impl Neighborhood<f32, 3, 3> {
     /// use fovea::image::Neighborhood;
     ///
     /// let k = Neighborhood::gaussian_3x3();
-    /// let sum: f32 = k.positions().map(|(_, _, w)| w).sum();
+    /// let sum: f32 = k.positions().map(|(_, w)| w).sum();
     /// assert_eq!(sum, 16.0);
     /// ```
     pub fn gaussian_3x3() -> Self {
@@ -607,7 +612,7 @@ impl Neighborhood<f32, 5, 5> {
     /// use fovea::image::Neighborhood;
     ///
     /// let k = Neighborhood::gaussian_5x5();
-    /// let sum: f32 = k.positions().map(|(_, _, w)| w).sum();
+    /// let sum: f32 = k.positions().map(|(_, w)| w).sum();
     /// assert_eq!(sum, 256.0);
     /// ```
     pub fn gaussian_5x5() -> Self {
@@ -710,7 +715,7 @@ impl Neighborhood<bool, 3, 3> {
     /// use fovea::image::Neighborhood;
     ///
     /// let se = Neighborhood::full_rect_3x3();
-    /// assert_eq!(se.positions().filter(|&(_, _, w)| w).count(), 9);
+    /// assert_eq!(se.positions().filter(|&(_, w)| w).count(), 9);
     /// ```
     pub fn full_rect_3x3() -> Self {
         Self::new([true; 9])
@@ -867,7 +872,7 @@ mod tests {
     #[test]
     fn test_new_default_anchor_3x3() {
         let k = Neighborhood::<f32, 3, 3>::new([0.0; 9]);
-        assert_eq!(k.anchor(), (1, 1));
+        assert_eq!(k.anchor(), Coordinate::new(1, 1));
         assert_eq!(k.kernel_width(), 3);
         assert_eq!(k.kernel_height(), 3);
     }
@@ -875,50 +880,50 @@ mod tests {
     #[test]
     fn test_new_default_anchor_5x5() {
         let k = Neighborhood::<f32, 5, 5>::new([0.0; 25]);
-        assert_eq!(k.anchor(), (2, 2));
+        assert_eq!(k.anchor(), Coordinate::new(2, 2));
     }
 
     #[test]
     fn test_new_default_anchor_1x1() {
         let k = Neighborhood::<f32, 1, 1>::new([1.0]);
-        assert_eq!(k.anchor(), (0, 0));
+        assert_eq!(k.anchor(), Coordinate::new(0, 0));
     }
 
     #[test]
     fn test_new_default_anchor_even_size() {
         // 4×4 kernel: anchor at (2, 2) — integer division
         let k = Neighborhood::<f32, 4, 4>::new([0.0; 16]);
-        assert_eq!(k.anchor(), (2, 2));
+        assert_eq!(k.anchor(), Coordinate::new(2, 2));
     }
 
     #[test]
     fn test_new_default_anchor_non_square() {
         let k = Neighborhood::<f32, 5, 3>::new([0.0; 15]);
-        assert_eq!(k.anchor(), (2, 1));
+        assert_eq!(k.anchor(), Coordinate::new(2, 1));
     }
 
     #[test]
     fn test_with_anchor_custom() {
-        let k = Neighborhood::<f32, 3, 3>::with_anchor([0.0; 9], (0, 0));
-        assert_eq!(k.anchor(), (0, 0));
+        let k = Neighborhood::<f32, 3, 3>::with_anchor([0.0; 9], Coordinate::new(0, 0));
+        assert_eq!(k.anchor(), Coordinate::new(0, 0));
     }
 
     #[test]
     fn test_with_anchor_bottom_right() {
-        let k = Neighborhood::<f32, 3, 3>::with_anchor([0.0; 9], (2, 2));
-        assert_eq!(k.anchor(), (2, 2));
+        let k = Neighborhood::<f32, 3, 3>::with_anchor([0.0; 9], Coordinate::new(2, 2));
+        assert_eq!(k.anchor(), Coordinate::new(2, 2));
     }
 
     #[test]
     #[should_panic(expected = "out of bounds")]
     fn test_with_anchor_out_of_bounds_x() {
-        Neighborhood::<f32, 3, 3>::with_anchor([0.0; 9], (3, 1));
+        Neighborhood::<f32, 3, 3>::with_anchor([0.0; 9], Coordinate::new(3, 1));
     }
 
     #[test]
     #[should_panic(expected = "out of bounds")]
     fn test_with_anchor_out_of_bounds_y() {
-        Neighborhood::<f32, 3, 3>::with_anchor([0.0; 9], (1, 3));
+        Neighborhood::<f32, 3, 3>::with_anchor([0.0; 9], Coordinate::new(1, 3));
     }
 
     // ── Accessors ───────────────────────────────────────────────────
@@ -956,19 +961,19 @@ mod tests {
         assert_eq!(positions.len(), 9);
 
         // Row 0: dy = -1
-        assert_eq!(positions[0], (-1, -1, 1.0));
-        assert_eq!(positions[1], (0, -1, 2.0));
-        assert_eq!(positions[2], (1, -1, 3.0));
+        assert_eq!(positions[0], (Offset::new(-1, -1), 1.0));
+        assert_eq!(positions[1], (Offset::new(0, -1), 2.0));
+        assert_eq!(positions[2], (Offset::new(1, -1), 3.0));
 
         // Row 1: dy = 0
-        assert_eq!(positions[3], (-1, 0, 4.0));
-        assert_eq!(positions[4], (0, 0, 5.0));
-        assert_eq!(positions[5], (1, 0, 6.0));
+        assert_eq!(positions[3], (Offset::new(-1, 0), 4.0));
+        assert_eq!(positions[4], (Offset::new(0, 0), 5.0));
+        assert_eq!(positions[5], (Offset::new(1, 0), 6.0));
 
         // Row 2: dy = 1
-        assert_eq!(positions[6], (-1, 1, 7.0));
-        assert_eq!(positions[7], (0, 1, 8.0));
-        assert_eq!(positions[8], (1, 1, 9.0));
+        assert_eq!(positions[6], (Offset::new(-1, 1), 7.0));
+        assert_eq!(positions[7], (Offset::new(0, 1), 8.0));
+        assert_eq!(positions[8], (Offset::new(1, 1), 9.0));
     }
 
     #[test]
@@ -976,9 +981,9 @@ mod tests {
         let k = Neighborhood::<i32, 3, 1>::new([1, 2, 1]);
         let positions: Vec<_> = k.positions().collect();
         assert_eq!(positions.len(), 3);
-        assert_eq!(positions[0], (-1, 0, 1));
-        assert_eq!(positions[1], (0, 0, 2));
-        assert_eq!(positions[2], (1, 0, 1));
+        assert_eq!(positions[0], (Offset::new(-1, 0), 1));
+        assert_eq!(positions[1], (Offset::new(0, 0), 2));
+        assert_eq!(positions[2], (Offset::new(1, 0), 1));
     }
 
     #[test]
@@ -986,24 +991,24 @@ mod tests {
         let k = Neighborhood::<i32, 1, 3>::new([1, 2, 1]);
         let positions: Vec<_> = k.positions().collect();
         assert_eq!(positions.len(), 3);
-        assert_eq!(positions[0], (0, -1, 1));
-        assert_eq!(positions[1], (0, 0, 2));
-        assert_eq!(positions[2], (0, 1, 1));
+        assert_eq!(positions[0], (Offset::new(0, -1), 1));
+        assert_eq!(positions[1], (Offset::new(0, 0), 2));
+        assert_eq!(positions[2], (Offset::new(0, 1), 1));
     }
 
     #[test]
     fn test_positions_custom_anchor() {
         let k = Neighborhood::<f32, 3, 3>::with_anchor(
             [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0],
-            (0, 0),
+            Coordinate::new(0, 0),
         );
         let positions: Vec<_> = k.positions().collect();
         // With anchor at (0,0), dx and dy are all non-negative
-        assert_eq!(positions[0], (0, 0, 1.0));
-        assert_eq!(positions[1], (1, 0, 2.0));
-        assert_eq!(positions[2], (2, 0, 3.0));
-        assert_eq!(positions[3], (0, 1, 4.0));
-        assert_eq!(positions[8], (2, 2, 9.0));
+        assert_eq!(positions[0], (Offset::new(0, 0), 1.0));
+        assert_eq!(positions[1], (Offset::new(1, 0), 2.0));
+        assert_eq!(positions[2], (Offset::new(2, 0), 3.0));
+        assert_eq!(positions[3], (Offset::new(0, 1), 4.0));
+        assert_eq!(positions[8], (Offset::new(2, 2), 9.0));
     }
 
     #[test]
@@ -1011,7 +1016,7 @@ mod tests {
         let k = Neighborhood::<f32, 1, 1>::new([42.0]);
         let positions: Vec<_> = k.positions().collect();
         assert_eq!(positions.len(), 1);
-        assert_eq!(positions[0], (0, 0, 42.0));
+        assert_eq!(positions[0], (Offset::new(0, 0), 42.0));
     }
 
     #[test]
@@ -1020,14 +1025,14 @@ mod tests {
         let positions: Vec<_> = k.positions().collect();
         assert_eq!(positions.len(), 25);
         // First position: top-left
-        assert_eq!(positions[0].0, -2); // dx
-        assert_eq!(positions[0].1, -2); // dy
+        assert_eq!(positions[0].0.dx, -2); // dx
+        assert_eq!(positions[0].0.dy, -2); // dy
         // Center position (index 12 = 2*5 + 2)
-        assert_eq!(positions[12].0, 0);
-        assert_eq!(positions[12].1, 0);
+        assert_eq!(positions[12].0.dx, 0);
+        assert_eq!(positions[12].0.dy, 0);
         // Last position: bottom-right
-        assert_eq!(positions[24].0, 2);
-        assert_eq!(positions[24].1, 2);
+        assert_eq!(positions[24].0.dx, 2);
+        assert_eq!(positions[24].0.dy, 2);
     }
 
     // ── ExactSizeIterator ───────────────────────────────────────────
@@ -1079,80 +1084,80 @@ mod tests {
     #[test]
     fn test_box_blur_3x3() {
         let k = Neighborhood::box_blur_3x3();
-        assert_eq!(k.anchor(), (1, 1));
-        let sum: f32 = k.positions().map(|(_, _, w)| w).sum();
+        assert_eq!(k.anchor(), Coordinate::new(1, 1));
+        let sum: f32 = k.positions().map(|(_, w)| w).sum();
         assert!((sum - 1.0).abs() < 1e-6);
     }
 
     #[test]
     fn test_gaussian_3x3() {
         let k = Neighborhood::gaussian_3x3();
-        assert_eq!(k.anchor(), (1, 1));
-        let sum: f32 = k.positions().map(|(_, _, w)| w).sum();
+        assert_eq!(k.anchor(), Coordinate::new(1, 1));
+        let sum: f32 = k.positions().map(|(_, w)| w).sum();
         assert_eq!(sum, 16.0);
     }
 
     #[test]
     fn test_gaussian_5x5() {
         let k = Neighborhood::gaussian_5x5();
-        assert_eq!(k.anchor(), (2, 2));
-        let sum: f32 = k.positions().map(|(_, _, w)| w).sum();
+        assert_eq!(k.anchor(), Coordinate::new(2, 2));
+        let sum: f32 = k.positions().map(|(_, w)| w).sum();
         assert_eq!(sum, 256.0);
     }
 
     #[test]
     fn test_sobel_x_antisymmetric() {
         let k = Neighborhood::sobel_x();
-        let sum: f32 = k.positions().map(|(_, _, w)| w).sum();
+        let sum: f32 = k.positions().map(|(_, w)| w).sum();
         assert_eq!(sum, 0.0);
     }
 
     #[test]
     fn test_sobel_y_antisymmetric() {
         let k = Neighborhood::sobel_y();
-        let sum: f32 = k.positions().map(|(_, _, w)| w).sum();
+        let sum: f32 = k.positions().map(|(_, w)| w).sum();
         assert_eq!(sum, 0.0);
     }
 
     #[test]
     fn test_scharr_x_antisymmetric() {
         let k = Neighborhood::scharr_x();
-        let sum: f32 = k.positions().map(|(_, _, w)| w).sum();
+        let sum: f32 = k.positions().map(|(_, w)| w).sum();
         assert_eq!(sum, 0.0);
     }
 
     #[test]
     fn test_scharr_y_antisymmetric() {
         let k = Neighborhood::scharr_y();
-        let sum: f32 = k.positions().map(|(_, _, w)| w).sum();
+        let sum: f32 = k.positions().map(|(_, w)| w).sum();
         assert_eq!(sum, 0.0);
     }
 
     #[test]
     fn test_prewitt_x_antisymmetric() {
         let k = Neighborhood::prewitt_x();
-        let sum: f32 = k.positions().map(|(_, _, w)| w).sum();
+        let sum: f32 = k.positions().map(|(_, w)| w).sum();
         assert_eq!(sum, 0.0);
     }
 
     #[test]
     fn test_prewitt_y_antisymmetric() {
         let k = Neighborhood::prewitt_y();
-        let sum: f32 = k.positions().map(|(_, _, w)| w).sum();
+        let sum: f32 = k.positions().map(|(_, w)| w).sum();
         assert_eq!(sum, 0.0);
     }
 
     #[test]
     fn test_laplacian_sum_zero() {
         let k = Neighborhood::laplacian();
-        let sum: f32 = k.positions().map(|(_, _, w)| w).sum();
+        let sum: f32 = k.positions().map(|(_, w)| w).sum();
         assert_eq!(sum, 0.0);
     }
 
     #[test]
     fn test_laplacian_8_sum_zero() {
         let k = Neighborhood::laplacian_8();
-        let sum: f32 = k.positions().map(|(_, _, w)| w).sum();
+        let sum: f32 = k.positions().map(|(_, w)| w).sum();
         assert_eq!(sum, 0.0);
     }
 
@@ -1165,11 +1170,11 @@ mod tests {
     #[test]
     fn test_identity_3x3() {
         let k = Neighborhood::identity_3x3();
-        let sum: f32 = k.positions().map(|(_, _, w)| w).sum();
+        let sum: f32 = k.positions().map(|(_, w)| w).sum();
         assert_eq!(sum, 1.0);
         assert_eq!(k.weights().pixel_at(1, 1), 1.0);
         // All non-center weights should be 0
-        for (dx, dy, w) in k.positions() {
+        for (Offset { dx, dy }, w) in k.positions() {
             if dx == 0 && dy == 0 {
                 assert_eq!(w, 1.0);
             } else {
@@ -1181,7 +1186,7 @@ mod tests {
     #[test]
     fn test_identity_5x5() {
         let k = Neighborhood::identity_5x5();
-        let sum: f32 = k.positions().map(|(_, _, w)| w).sum();
+        let sum: f32 = k.positions().map(|(_, w)| w).sum();
         assert_eq!(sum, 1.0);
         assert_eq!(k.weights().pixel_at(2, 2), 1.0);
     }
@@ -1189,16 +1194,16 @@ mod tests {
     #[test]
     fn test_box_blur_5x5() {
         let k = Neighborhood::box_blur_5x5();
-        let sum: f32 = k.positions().map(|(_, _, w)| w).sum();
+        let sum: f32 = k.positions().map(|(_, w)| w).sum();
         assert!((sum - 1.0).abs() < 1e-6);
     }
 
     #[test]
     fn test_emboss() {
         let k = Neighborhood::emboss();
-        assert_eq!(k.anchor(), (1, 1));
+        assert_eq!(k.anchor(), Coordinate::new(1, 1));
         // Emboss kernel: -2 + -1 + 0 + -1 + 1 + 1 + 0 + 1 + 2 = 1
-        let sum: f32 = k.positions().map(|(_, _, w)| w).sum();
+        let sum: f32 = k.positions().map(|(_, w)| w).sum();
         assert_eq!(sum, 1.0);
     }
 
@@ -1207,36 +1212,36 @@ mod tests {
     #[test]
     fn test_gaussian_1d_3_h() {
         let k = Neighborhood::gaussian_1d_3_h();
-        assert_eq!(k.anchor(), (1, 0));
+        assert_eq!(k.anchor(), Coordinate::new(1, 0));
         assert_eq!(k.kernel_width(), 3);
         assert_eq!(k.kernel_height(), 1);
-        let sum: f32 = k.positions().map(|(_, _, w)| w).sum();
+        let sum: f32 = k.positions().map(|(_, w)| w).sum();
         assert_eq!(sum, 4.0);
     }
 
     #[test]
     fn test_gaussian_1d_3_v() {
         let k = Neighborhood::gaussian_1d_3_v();
-        assert_eq!(k.anchor(), (0, 1));
+        assert_eq!(k.anchor(), Coordinate::new(0, 1));
         assert_eq!(k.kernel_width(), 1);
         assert_eq!(k.kernel_height(), 3);
-        let sum: f32 = k.positions().map(|(_, _, w)| w).sum();
+        let sum: f32 = k.positions().map(|(_, w)| w).sum();
         assert_eq!(sum, 4.0);
     }
 
     #[test]
     fn test_gaussian_1d_5_h() {
         let k = Neighborhood::gaussian_1d_5_h();
-        assert_eq!(k.anchor(), (2, 0));
-        let sum: f32 = k.positions().map(|(_, _, w)| w).sum();
+        assert_eq!(k.anchor(), Coordinate::new(2, 0));
+        let sum: f32 = k.positions().map(|(_, w)| w).sum();
         assert_eq!(sum, 16.0);
     }
 
     #[test]
     fn test_gaussian_1d_5_v() {
         let k = Neighborhood::gaussian_1d_5_v();
-        assert_eq!(k.anchor(), (0, 2));
-        let sum: f32 = k.positions().map(|(_, _, w)| w).sum();
+        assert_eq!(k.anchor(), Coordinate::new(0, 2));
+        let sum: f32 = k.positions().map(|(_, w)| w).sum();
         assert_eq!(sum, 16.0);
     }
 
@@ -1273,23 +1278,27 @@ mod tests {
     #[test]
     fn test_full_rect_3x3() {
         let se = Neighborhood::full_rect_3x3();
-        assert_eq!(se.anchor(), (1, 1));
+        assert_eq!(se.anchor(), Coordinate::new(1, 1));
         assert!(se.as_slice().iter().all(|&v| v));
     }
 
     #[test]
     fn test_cross_3x3() {
         let se = Neighborhood::cross_3x3();
-        let active: Vec<_> = se.positions().filter(|&(_, _, w)| w).collect();
+        let active: Vec<_> = se.positions().filter(|&(_, w)| w).collect();
         assert_eq!(active.len(), 5); // center row + center column, minus overlap
         // The center pixel should be active
-        assert!(active.iter().any(|&(dx, dy, _)| dx == 0 && dy == 0));
+        assert!(
+            active
+                .iter()
+                .any(|&(Offset { dx, dy }, _)| dx == 0 && dy == 0)
+        );
         // Corners should be inactive
         let corners: Vec<_> = se
             .positions()
-            .filter(|&(dx, dy, _)| dx.abs() == 1 && dy.abs() == 1)
+            .filter(|&(Offset { dx, dy }, _)| dx.abs() == 1 && dy.abs() == 1)
             .collect();
-        assert!(corners.iter().all(|&(_, _, w)| !w));
+        assert!(corners.iter().all(|&(_, w)| !w));
     }
 
     #[test]
@@ -1302,7 +1311,7 @@ mod tests {
     #[test]
     fn test_full_rect_5x5() {
         let se = Neighborhood::full_rect_5x5();
-        assert_eq!(se.anchor(), (2, 2));
+        assert_eq!(se.anchor(), Coordinate::new(2, 2));
         assert_eq!(se.as_slice().len(), 25);
         assert!(se.as_slice().iter().all(|&v| v));
     }
@@ -1310,7 +1319,7 @@ mod tests {
     #[test]
     fn test_cross_5x5() {
         let se = Neighborhood::cross_5x5();
-        let active: Vec<_> = se.positions().filter(|&(_, _, w)| w).collect();
+        let active: Vec<_> = se.positions().filter(|&(_, w)| w).collect();
         // Center row (5) + center column (5) - overlap (1) = 9
         assert_eq!(active.len(), 9);
     }
@@ -1318,7 +1327,7 @@ mod tests {
     #[test]
     fn test_diamond_5x5() {
         let se = Neighborhood::diamond_5x5();
-        let active: Vec<_> = se.positions().filter(|&(_, _, w)| w).collect();
+        let active: Vec<_> = se.positions().filter(|&(_, w)| w).collect();
         // Diamond: 1 + 3 + 5 + 3 + 1 = 13
         assert_eq!(active.len(), 13);
     }
@@ -1326,7 +1335,7 @@ mod tests {
     #[test]
     fn test_circle_5x5() {
         let se = Neighborhood::circle_5x5();
-        let active: Vec<_> = se.positions().filter(|&(_, _, w)| w).collect();
+        let active: Vec<_> = se.positions().filter(|&(_, w)| w).collect();
         // Circle: 3 + 5 + 5 + 5 + 3 = 21
         assert_eq!(active.len(), 21);
     }
@@ -1336,49 +1345,49 @@ mod tests {
     #[test]
     fn test_sobel_x_i32() {
         let k = Neighborhood::sobel_x_i32();
-        let sum: i32 = k.positions().map(|(_, _, w)| w).sum();
+        let sum: i32 = k.positions().map(|(_, w)| w).sum();
         assert_eq!(sum, 0);
     }
 
     #[test]
     fn test_sobel_y_i32() {
         let k = Neighborhood::sobel_y_i32();
-        let sum: i32 = k.positions().map(|(_, _, w)| w).sum();
+        let sum: i32 = k.positions().map(|(_, w)| w).sum();
         assert_eq!(sum, 0);
     }
 
     #[test]
     fn test_laplacian_i32() {
         let k = Neighborhood::laplacian_i32();
-        let sum: i32 = k.positions().map(|(_, _, w)| w).sum();
+        let sum: i32 = k.positions().map(|(_, w)| w).sum();
         assert_eq!(sum, 0);
     }
 
     #[test]
     fn test_scharr_x_i32() {
         let k = Neighborhood::scharr_x_i32();
-        let sum: i32 = k.positions().map(|(_, _, w)| w).sum();
+        let sum: i32 = k.positions().map(|(_, w)| w).sum();
         assert_eq!(sum, 0);
     }
 
     #[test]
     fn test_scharr_y_i32() {
         let k = Neighborhood::scharr_y_i32();
-        let sum: i32 = k.positions().map(|(_, _, w)| w).sum();
+        let sum: i32 = k.positions().map(|(_, w)| w).sum();
         assert_eq!(sum, 0);
     }
 
     #[test]
     fn test_prewitt_x_i32() {
         let k = Neighborhood::prewitt_x_i32();
-        let sum: i32 = k.positions().map(|(_, _, w)| w).sum();
+        let sum: i32 = k.positions().map(|(_, w)| w).sum();
         assert_eq!(sum, 0);
     }
 
     #[test]
     fn test_prewitt_y_i32() {
         let k = Neighborhood::prewitt_y_i32();
-        let sum: i32 = k.positions().map(|(_, _, w)| w).sum();
+        let sum: i32 = k.positions().map(|(_, w)| w).sum();
         assert_eq!(sum, 0);
     }
 
@@ -1432,9 +1441,9 @@ mod tests {
 
     #[test]
     fn test_clone_with_custom_anchor() {
-        let k = Neighborhood::<f32, 3, 3>::with_anchor([1.0; 9], (0, 2));
+        let k = Neighborhood::<f32, 3, 3>::with_anchor([1.0; 9], Coordinate::new(0, 2));
         let k2 = k.clone();
-        assert_eq!(k2.anchor(), (0, 2));
+        assert_eq!(k2.anchor(), Coordinate::new(0, 2));
         assert_eq!(k2.as_slice(), k.as_slice());
     }
 
@@ -1490,7 +1499,7 @@ mod tests {
     #[test]
     fn test_non_square_5x3() {
         let k = Neighborhood::<f32, 5, 3>::new([1.0; 15]);
-        assert_eq!(k.anchor(), (2, 1));
+        assert_eq!(k.anchor(), Coordinate::new(2, 1));
         assert_eq!(k.kernel_width(), 5);
         assert_eq!(k.kernel_height(), 3);
         assert_eq!(k.positions().len(), 15);
@@ -1499,7 +1508,7 @@ mod tests {
     #[test]
     fn test_non_square_3x5() {
         let k = Neighborhood::<f32, 3, 5>::new([1.0; 15]);
-        assert_eq!(k.anchor(), (1, 2));
+        assert_eq!(k.anchor(), Coordinate::new(1, 2));
         assert_eq!(k.kernel_width(), 3);
         assert_eq!(k.kernel_height(), 5);
         assert_eq!(k.positions().len(), 15);
@@ -1510,7 +1519,7 @@ mod tests {
     #[test]
     fn test_u8_weight_neighborhood() {
         let k = Neighborhood::<u8, 3, 3>::new([0, 1, 0, 1, 1, 1, 0, 1, 0]);
-        let active: Vec<_> = k.positions().filter(|&(_, _, w)| w > 0).collect();
+        let active: Vec<_> = k.positions().filter(|&(_, w)| w > 0).collect();
         assert_eq!(active.len(), 5);
     }
 
@@ -1622,13 +1631,13 @@ mod tests {
 
     #[test]
     fn test_flipped_non_centered_anchor() {
-        let kernel = Neighborhood::<f32, 3, 3>::with_anchor([1.0; 9], (0, 0));
+        let kernel = Neighborhood::<f32, 3, 3>::with_anchor([1.0; 9], Coordinate::new(0, 0));
         let flipped = kernel.flipped();
-        assert_eq!(flipped.anchor(), (2, 2));
+        assert_eq!(flipped.anchor(), Coordinate::new(2, 2));
 
-        let kernel2 = Neighborhood::<f32, 5, 3>::with_anchor([1.0; 15], (1, 0));
+        let kernel2 = Neighborhood::<f32, 5, 3>::with_anchor([1.0; 15], Coordinate::new(1, 0));
         let flipped2 = kernel2.flipped();
-        assert_eq!(flipped2.anchor(), (3, 2));
+        assert_eq!(flipped2.anchor(), Coordinate::new(3, 2));
     }
 
     #[test]
@@ -1636,11 +1645,11 @@ mod tests {
         let kernel = Neighborhood::<f32, 3, 3>::box_blur_3x3();
         let flipped = kernel.flipped();
         // 3x3 with center anchor (1,1) → flipped anchor = (3-1-1, 3-1-1) = (1,1)
-        assert_eq!(flipped.anchor(), (1, 1));
+        assert_eq!(flipped.anchor(), Coordinate::new(1, 1));
 
         let kernel5 = Neighborhood::<f32, 5, 5>::box_blur_5x5();
         let flipped5 = kernel5.flipped();
-        assert_eq!(flipped5.anchor(), (2, 2));
+        assert_eq!(flipped5.anchor(), Coordinate::new(2, 2));
     }
 
     #[test]
@@ -1658,7 +1667,7 @@ mod tests {
         let kernel = Neighborhood::<f32, 3, 1>::new([1.0, 2.0, 3.0]);
         let flipped = kernel.flipped();
         assert_eq!(flipped.as_slice(), &[3.0, 2.0, 1.0]);
-        assert_eq!(flipped.anchor(), (1, 0)); // centered stays centered
+        assert_eq!(flipped.anchor(), Coordinate::new(1, 0)); // centered stays centered
     }
 
     #[test]
@@ -1666,7 +1675,7 @@ mod tests {
         let kernel = Neighborhood::<f32, 1, 3>::new([1.0, 2.0, 3.0]);
         let flipped = kernel.flipped();
         assert_eq!(flipped.as_slice(), &[3.0, 2.0, 1.0]);
-        assert_eq!(flipped.anchor(), (0, 1));
+        assert_eq!(flipped.anchor(), Coordinate::new(0, 1));
     }
 
     #[test]
@@ -1690,7 +1699,7 @@ mod tests {
     #[test]
     fn test_kernel_trait_anchor_matches_method() {
         use crate::image::Kernel;
-        let kernel = Neighborhood::<f32, 3, 3>::with_anchor([1.0; 9], (2, 0));
+        let kernel = Neighborhood::<f32, 3, 3>::with_anchor([1.0; 9], Coordinate::new(2, 0));
         assert_eq!(Kernel::anchor(&kernel), Neighborhood::anchor(&kernel));
     }
 }

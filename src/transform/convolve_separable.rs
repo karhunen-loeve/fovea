@@ -37,6 +37,7 @@
 //! the largest per-call allocation on this path, which is what
 //! [`SeparableScratch`] exists to reuse.
 
+use crate::Coordinate;
 use crate::border::BorderPolicy;
 use crate::image::{
     Image, ImageRef, ImageRefMut, ImageView, RasterImage, RasterImageMut, SeparableWeights,
@@ -526,7 +527,7 @@ pub(crate) fn correlate_separable_raw_into<I, HW, VW, B, O, P, Acc, Out>(
     let intermediate: Image<Acc> = fold_neighborhood(
         image,
         h_weights,
-        (h_anchor, 0),
+        Coordinate::new(h_anchor, 0),
         border,
         HFold::<P, Acc>::new(),
     );
@@ -535,7 +536,7 @@ pub(crate) fn correlate_separable_raw_into<I, HW, VW, B, O, P, Acc, Out>(
     fold_neighborhood_into(
         &intermediate,
         v_weights,
-        (0, v_anchor),
+        Coordinate::new(0, v_anchor),
         border,
         output,
         VFold::<Acc, Out>::new(),
@@ -590,7 +591,7 @@ where
             border,
             image.size(),
             h_weights.size(),
-            (h_anchor, 0),
+            Coordinate::new(h_anchor, 0),
         )
         .size;
         let area = mid
@@ -614,7 +615,7 @@ where
             fold_neighborhood_into_with_scratch(
                 image,
                 h_weights,
-                (h_anchor, 0),
+                Coordinate::new(h_anchor, 0),
                 border,
                 &mut mid_view,
                 HFold::<P, Acc>::new(),
@@ -628,7 +629,7 @@ where
         fold_neighborhood_into_with_scratch(
             &mid_view,
             v_weights,
-            (0, v_anchor),
+            Coordinate::new(0, v_anchor),
             border,
             output,
             VFold::<Acc, Out>::new(),
@@ -666,13 +667,13 @@ where
         border,
         image.size(),
         h_weights.size(),
-        (h_anchor, 0),
+        Coordinate::new(h_anchor, 0),
     );
     let output_region = <B as BorderPolicy<Image<Acc>>>::output_region(
         border,
         intermediate_region.size,
         v_weights.size(),
-        (0, v_anchor),
+        Coordinate::new(0, v_anchor),
     );
 
     let mut out = Image::<Out>::zero(output_region.size.width, output_region.size.height);
@@ -940,9 +941,9 @@ mod tests {
         let raw_result: Image<MonoF32> = correlate_separable_raw(
             &src,
             h.weights(),
-            h.anchor().0,
+            h.anchor().x,
             v.weights(),
-            v.anchor().1,
+            v.anchor().y,
             &Clamp,
         );
 
@@ -973,14 +974,14 @@ mod tests {
         // by hand: convolution ≡ correlation with the 180°-rotated kernel.
         // h = [1, 0, 0]/anchor 1 → flipped [0, 0, 1]/anchor 1;
         // v = [0, 0, 1]/anchor 1 → flipped [1, 0, 0]/anchor 1.
-        let h = Neighborhood::<f32, 3, 1>::with_anchor([0.0, 0.0, 1.0], (1, 0));
-        let v = Neighborhood::<f32, 1, 3>::with_anchor([1.0, 0.0, 0.0], (0, 1));
+        let h = Neighborhood::<f32, 3, 1>::with_anchor([0.0, 0.0, 1.0], Coordinate::new(1, 0));
+        let v = Neighborhood::<f32, 1, 3>::with_anchor([1.0, 0.0, 0.0], Coordinate::new(0, 1));
         let raw: Image<MonoF32> = correlate_separable_raw(
             &src,
             h.weights(),
-            h.anchor().0,
+            h.anchor().x,
             v.weights(),
-            v.anchor().1,
+            v.anchor().y,
             &Clamp,
         );
 
@@ -1168,9 +1169,9 @@ mod tests {
         let correlated: Image<MonoF32> = correlate_separable_raw(
             &src,
             h.weights(),
-            h.anchor().0,
+            h.anchor().x,
             v.weights(),
-            v.anchor().1,
+            v.anchor().y,
             &Clamp,
         );
 
@@ -1196,9 +1197,9 @@ mod tests {
         let result: Image<MonoF32> = correlate_separable_raw(
             &src,
             h.weights(),
-            h.anchor().0,
+            h.anchor().x,
             v.weights(),
-            v.anchor().1,
+            v.anchor().y,
             &Clamp,
         );
 
@@ -1228,9 +1229,9 @@ mod tests {
         let sep_result: Image<MonoF32> = correlate_separable_raw(
             &src,
             h.weights(),
-            h.anchor().0,
+            h.anchor().x,
             v.weights(),
-            v.anchor().1,
+            v.anchor().y,
             &Clamp,
         );
 
@@ -1261,9 +1262,9 @@ mod tests {
         let sep_result: Image<MonoF32> = correlate_separable_raw(
             &src,
             h.weights(),
-            h.anchor().0,
+            h.anchor().x,
             v.weights(),
-            v.anchor().1,
+            v.anchor().y,
             &Clamp,
         );
 
@@ -1294,9 +1295,9 @@ mod tests {
         let sep_result: Image<MonoF32> = correlate_separable_raw(
             &src,
             h.weights(),
-            h.anchor().0,
+            h.anchor().x,
             v.weights(),
-            v.anchor().1,
+            v.anchor().y,
             &Clamp,
         );
 
@@ -1327,9 +1328,9 @@ mod tests {
         let sep_result: Image<MonoF32> = correlate_separable_raw(
             &src,
             h.weights(),
-            h.anchor().0,
+            h.anchor().x,
             v.weights(),
-            v.anchor().1,
+            v.anchor().y,
             &Clamp,
         );
 
@@ -1358,9 +1359,9 @@ mod tests {
         let result: Image<MonoF32> = correlate_separable_raw(
             &src,
             h.weights(),
-            h.anchor().0,
+            h.anchor().x,
             v.weights(),
-            v.anchor().1,
+            v.anchor().y,
             &Clamp,
         );
 
@@ -1385,9 +1386,9 @@ mod tests {
         let result: Image<Mono8> = correlate_separable_raw(
             &src,
             h.weights(),
-            h.anchor().0,
+            h.anchor().x,
             v.weights(),
-            v.anchor().1,
+            v.anchor().y,
             &Clamp,
         );
 
@@ -1408,9 +1409,9 @@ mod tests {
         let alloc_result: Image<MonoF32> = correlate_separable_raw(
             &src,
             h.weights(),
-            h.anchor().0,
+            h.anchor().x,
             v.weights(),
-            v.anchor().1,
+            v.anchor().y,
             &Clamp,
         );
 
@@ -1418,9 +1419,9 @@ mod tests {
         correlate_separable_raw_into(
             &src,
             h.weights(),
-            h.anchor().0,
+            h.anchor().x,
             v.weights(),
-            v.anchor().1,
+            v.anchor().y,
             &Clamp,
             &mut into_result,
         );
@@ -1445,9 +1446,9 @@ mod tests {
         let result: Image<MonoF32> = correlate_separable_raw(
             &src,
             h.weights(),
-            h.anchor().0,
+            h.anchor().x,
             v.weights(),
-            v.anchor().1,
+            v.anchor().y,
             &Skip,
         );
 
@@ -1466,9 +1467,9 @@ mod tests {
         let result: Image<MonoF32> = correlate_separable_raw(
             &src,
             h.weights(),
-            h.anchor().0,
+            h.anchor().x,
             v.weights(),
-            v.anchor().1,
+            v.anchor().y,
             &border,
         );
 
@@ -1492,9 +1493,9 @@ mod tests {
         let result: Image<MonoF32> = correlate_separable_raw(
             &src,
             h.weights(),
-            h.anchor().0,
+            h.anchor().x,
             v.weights(),
-            v.anchor().1,
+            v.anchor().y,
             &Clamp,
         );
 
@@ -1511,9 +1512,9 @@ mod tests {
         let result: Image<MonoF32> = correlate_separable_raw(
             &src,
             h.weights(),
-            h.anchor().0,
+            h.anchor().x,
             v.weights(),
-            v.anchor().1,
+            v.anchor().y,
             &Clamp,
         );
 
@@ -1525,27 +1526,27 @@ mod tests {
     fn separable_order_h_then_v() {
         let src = Image::generate(5, 5, |x, y| MonoF32((x * 10 + y) as f32));
 
-        let h = Neighborhood::<f32, 3, 1>::with_anchor([1.0, 0.0, 0.0], (1, 0));
-        let v = Neighborhood::<f32, 1, 3>::with_anchor([0.0, 0.0, 1.0], (0, 1));
+        let h = Neighborhood::<f32, 3, 1>::with_anchor([1.0, 0.0, 0.0], Coordinate::new(1, 0));
+        let v = Neighborhood::<f32, 1, 3>::with_anchor([0.0, 0.0, 1.0], Coordinate::new(0, 1));
 
         let result_hv: Image<MonoF32> = correlate_separable_raw(
             &src,
             h.weights(),
-            h.anchor().0,
+            h.anchor().x,
             v.weights(),
-            v.anchor().1,
+            v.anchor().y,
             &Clamp,
         );
 
-        let h2 = Neighborhood::<f32, 3, 1>::with_anchor([0.0, 0.0, 1.0], (1, 0));
-        let v2 = Neighborhood::<f32, 1, 3>::with_anchor([1.0, 0.0, 0.0], (0, 1));
+        let h2 = Neighborhood::<f32, 3, 1>::with_anchor([0.0, 0.0, 1.0], Coordinate::new(1, 0));
+        let v2 = Neighborhood::<f32, 1, 3>::with_anchor([1.0, 0.0, 0.0], Coordinate::new(0, 1));
 
         let result_vh: Image<MonoF32> = correlate_separable_raw(
             &src,
             h2.weights(),
-            h2.anchor().0,
+            h2.anchor().x,
             v2.weights(),
-            v2.anchor().1,
+            v2.anchor().y,
             &Clamp,
         );
 

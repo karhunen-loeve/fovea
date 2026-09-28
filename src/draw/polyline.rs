@@ -2,7 +2,7 @@
 
 use super::Drawable;
 use super::line::segment;
-use crate::CoordinateI32;
+use crate::SignedCoordinate;
 use crate::image::ImageViewMut;
 
 /// A chain of line segments through a list of points, open or closed.
@@ -41,7 +41,7 @@ use crate::image::ImageViewMut;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Polyline<P> {
     /// Vertices of the chain, connected in order.
-    pub points: Vec<CoordinateI32>,
+    pub points: Vec<SignedCoordinate>,
     /// Pixel value written along every segment.
     pub color: P,
     /// `true` connects the last point back to the first.
@@ -70,7 +70,7 @@ impl<P: Copy> Drawable<P> for Polyline<P> {
 /// draw_polyline(&mut image, &[(0, 4), (3, 1), (7, 5)], Mono8::new(255), false);
 /// assert_eq!(image.pixel_at(3, 1), Mono8::new(255));
 /// ```
-pub fn draw_polyline<P: Copy, C: Into<CoordinateI32> + Copy>(
+pub fn draw_polyline<P: Copy, C: Into<SignedCoordinate> + Copy>(
     image: &mut impl ImageViewMut<Pixel = P>,
     points: &[C],
     color: P,
@@ -81,7 +81,7 @@ pub fn draw_polyline<P: Copy, C: Into<CoordinateI32> + Copy>(
 
 /// Segment chain shared by [`Polyline`] and [`draw_polyline`], so the free
 /// function does not have to clone borrowed points into a `Vec`.
-fn draw_path<P: Copy, C: Into<CoordinateI32> + Copy>(
+fn draw_path<P: Copy, C: Into<SignedCoordinate> + Copy>(
     image: &mut impl ImageViewMut<Pixel = P>,
     points: &[C],
     color: P,
@@ -138,7 +138,7 @@ mod tests {
     #[test]
     fn degenerate_inputs_are_no_ops() {
         let mut image: Image<Mono8> = Image::zero(5, 5);
-        let empty: &[(i32, i32)] = &[];
+        let empty: &[(isize, isize)] = &[];
         draw_polyline(&mut image, empty, ink(), false);
         draw_polyline(&mut image, empty, ink(), true);
         draw_polyline(&mut image, &[(2, 2)], ink(), true);
@@ -154,7 +154,8 @@ mod tests {
 
     #[test]
     fn struct_and_free_function_agree() {
-        let points: Vec<CoordinateI32> = [(0, 5), (3, 0), (6, 5), (0, 5)].map(Into::into).to_vec();
+        let points: Vec<SignedCoordinate> =
+            [(0, 5), (3, 0), (6, 5), (0, 5)].map(Into::into).to_vec();
         let mut via_struct: Image<Mono8> = Image::zero(7, 7);
         Polyline {
             points: points.clone(),

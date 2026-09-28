@@ -1,7 +1,7 @@
 //! Straight line segments — Bresenham's algorithm.
 
 use super::{Drawable, put};
-use crate::CoordinateI32;
+use crate::SignedCoordinate;
 use crate::image::ImageViewMut;
 
 /// A straight line segment between two points, drawn one pixel wide.
@@ -29,9 +29,9 @@ use crate::image::ImageViewMut;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Line<P> {
     /// First endpoint, drawn.
-    pub from: CoordinateI32,
+    pub from: SignedCoordinate,
     /// Second endpoint, drawn.
-    pub to: CoordinateI32,
+    pub to: SignedCoordinate,
     /// Pixel value written along the stroke.
     pub color: P,
 }
@@ -61,8 +61,8 @@ impl<P: Copy> Drawable<P> for Line<P> {
 /// ```
 pub fn draw_line<P: Copy>(
     image: &mut impl ImageViewMut<Pixel = P>,
-    from: impl Into<CoordinateI32>,
-    to: impl Into<CoordinateI32>,
+    from: impl Into<SignedCoordinate>,
+    to: impl Into<SignedCoordinate>,
     color: P,
 ) {
     Line {
@@ -74,8 +74,8 @@ pub fn draw_line<P: Copy>(
 }
 
 /// Bresenham walk shared by [`Line`], [`Polyline`](super::Polyline), and the
-/// free functions. Widens to `i64` so the error terms cannot overflow for any
-/// `i32` endpoints.
+/// free functions. Widens to `i128`, so the extents of any two `isize`
+/// endpoints (up to 2^64) and every walk quantity fit.
 ///
 /// The walk is clipped to the iterations that can touch the frame, so the
 /// cost is proportional to the visible portion, not to the ideal segment:
@@ -83,17 +83,19 @@ pub fn draw_line<P: Copy>(
 /// off. The clip fast-forwards the exact walk state (closed forms for the
 /// minor-axis step count and the error term), so the painted pixels are
 /// identical to those of the unclipped walk; `clipping_matches_the_unclipped_
-/// walk_exactly` pins that equivalence against a reference walk.
+/// walk_exactly` pins that equivalence against a reference walk, and
+/// `extreme_endpoints_paint_what_moderate_ones_do` carries it to the ends of
+/// the `isize` range.
 pub(super) fn segment<P: Copy>(
     image: &mut impl ImageViewMut<Pixel = P>,
-    from: CoordinateI32,
-    to: CoordinateI32,
+    from: SignedCoordinate,
+    to: SignedCoordinate,
     color: P,
 ) {
     let size = image.size();
-    let (w, h) = (size.width as i64, size.height as i64);
-    let (x0, y0) = (i64::from(from.x), i64::from(from.y));
-    let (x1, y1) = (i64::from(to.x), i64::from(to.y));
+    let (w, h) = (size.width as i128, size.height as i128);
+    let (x0, y0) = (from.x as i128, from.y as i128);
+    let (x1, y1) = (to.x as i128, to.y as i128);
     // A segment whose bounding box misses the image has no visible pixels;
     // skip the walk entirely instead of clipping it pixel by pixel.
     if x0.max(x1) < 0 || x0.min(x1) >= w || y0.max(y1) < 0 || y0.min(y1) >= h {
@@ -143,18 +145,19 @@ pub(super) fn segment<P: Copy>(
             return;
         }
         // Smallest t with minor(t) >= k is ceil(m*(2k - 1) / (2n)); largest
-        // t with minor(t) <= k is ceil(m*(2k + 1) / (2n)) - 1. The products
-        // reach 2^65 for i32 endpoints, hence the i128 arithmetic.
-        let ceil_div = |p: i128, q: i128| ((p + q - 1) / q) as i64;
+        // t with minor(t) <= k is ceil(m*(2k + 1) / (2n)) - 1. With m and k
+        // up to 2^64 the products reach 2^129, past i128, so they go
+        // through the exact 256-bit `mul_div_ceil`. All operands are
+        // non-negative here, and each quotient is at most m.
         let lo = if k_lo <= 0 {
             0
         } else {
-            ceil_div((m as i128) * (2 * k_lo as i128 - 1), 2 * n as i128)
+            mul_div_ceil(m as u128, (2 * k_lo - 1) as u128, (2 * n) as u128) as i128
         };
         let hi = if k_hi >= n {
             steps
         } else {
-            ceil_div((m as i128) * (2 * k_hi as i128 + 1), 2 * n as i128) - 1
+            mul_div_ceil(m as u128, (2 * k_hi + 1) as u128, (2 * n) as u128) as i128 - 1
         };
         (lo, hi)
     };
@@ -167,20 +170,30 @@ pub(super) fn segment<P: Copy>(
 
     // Fast-forward the walk state to iteration `t_lo` in closed form. The
     // error term there is `(a - b) - t*n + m*minor(t)` up to the axis swap.
-    let minor_at = |t: i64| -> i64 {
+    let minor_at = |t: i128| -> i128 {
         if n == 0 || t == 0 {
-            0
-        } else {
-            (((2 * n as i128 * t as i128 - m as i128).div_euclid(2 * m as i128)) as i64 + 1).max(0)
+            return 0;
         }
+        // max(0, floor((2*n*t - m) / (2*m)) + 1). The product 2*n*t reaches
+        // 2^129, so it is formed in 256 bits. If it is below m the floor is
+        // -1 and the result 0; otherwise the quotient is at most n.
+        let (hi, lo) = mul_wide((2 * n) as u128, t as u128);
+        let (lo, borrow) = lo.overflowing_sub(m as u128);
+        if hi < u128::from(borrow) {
+            return 0;
+        }
+        let hi = hi - u128::from(borrow);
+        div_wide(hi, lo, (2 * m) as u128).0 as i128 + 1
     };
     let k = minor_at(t_lo);
-    let mut err = ((a - b) as i128
-        + if x_is_major {
-            m as i128 * k as i128 - n as i128 * t_lo as i128
-        } else {
-            n as i128 * t_lo as i128 - m as i128 * k as i128
-        }) as i64;
+    // The two products reach 2^128, but the error term itself is bounded by
+    // the extents (|err| <= 2^64), so arithmetic modulo 2^128 is exact: the
+    // wrapping operations give the true value because it fits an i128.
+    let mut err = (a - b).wrapping_add(if x_is_major {
+        m.wrapping_mul(k).wrapping_sub(n.wrapping_mul(t_lo))
+    } else {
+        n.wrapping_mul(t_lo).wrapping_sub(m.wrapping_mul(k))
+    });
     let (mut x, mut y) = if x_is_major {
         (x0 + sx * t_lo, y0 + sy * k)
     } else {
@@ -204,6 +217,52 @@ pub(super) fn segment<P: Copy>(
             y += sy;
         }
     }
+}
+
+/// The full 256-bit product of two `u128`, as `(high, low)` halves.
+fn mul_wide(a: u128, b: u128) -> (u128, u128) {
+    const LOW: u128 = u64::MAX as u128;
+    let (a_hi, a_lo) = (a >> 64, a & LOW);
+    let (b_hi, b_lo) = (b >> 64, b & LOW);
+    let ll = a_lo * b_lo;
+    let lh = a_lo * b_hi;
+    let hl = a_hi * b_lo;
+    let hh = a_hi * b_hi;
+    // At most three 64-bit terms, so the middle column cannot overflow.
+    let mid = (ll >> 64) + (lh & LOW) + (hl & LOW);
+    let low = (ll & LOW) | ((mid & LOW) << 64);
+    let high = hh + (lh >> 64) + (hl >> 64) + (mid >> 64);
+    (high, low)
+}
+
+/// `(high, low) / d` as `(quotient, remainder)`, for a quotient that fits a
+/// `u128`, which is exactly the condition `high < d`.
+fn div_wide(high: u128, low: u128, d: u128) -> (u128, u128) {
+    debug_assert!(d != 0 && high < d, "the quotient must fit a u128");
+    // Restoring long division, one bit of `low` per step. The remainder
+    // stays below `d`, so after the shift it is below 2*d; a carry out of
+    // bit 127 means it is at least 2^128 > d, and the wrapping subtraction
+    // then yields the true, smaller difference.
+    let mut rem = high;
+    let mut quotient = 0u128;
+    for bit in (0..128).rev() {
+        let carry = rem >> 127;
+        rem = (rem << 1) | ((low >> bit) & 1);
+        quotient <<= 1;
+        if carry == 1 || rem >= d {
+            rem = rem.wrapping_sub(d);
+            quotient |= 1;
+        }
+    }
+    (quotient, rem)
+}
+
+/// `ceil(a * b / d)` without overflow in the product, for a result that
+/// fits a `u128`.
+fn mul_div_ceil(a: u128, b: u128, d: u128) -> u128 {
+    let (high, low) = mul_wide(a, b);
+    let (quotient, rem) = div_wide(high, low, d);
+    quotient + u128::from(rem != 0)
 }
 
 #[cfg(test)]
@@ -293,7 +352,12 @@ mod tests {
         draw_line(&mut image, (-5, -5), (-1, -2), ink());
         draw_line(&mut image, (4, 0), (9, 3), ink());
         draw_line(&mut image, (0, 4), (3, 9), ink());
-        draw_line(&mut image, (i32::MIN, i32::MIN), (-1, i32::MAX), ink());
+        draw_line(
+            &mut image,
+            (isize::MIN, isize::MIN),
+            (-1, isize::MAX),
+            ink(),
+        );
         assert!(inked(&image).is_empty());
     }
 
@@ -308,17 +372,22 @@ mod tests {
     }
 
     /// The unclipped walk, kept as the behavioural reference for the clip.
-    fn reference_segment(image: &mut Image<Mono8>, from: (i32, i32), to: (i32, i32), color: Mono8) {
+    fn reference_segment(
+        image: &mut Image<Mono8>,
+        from: (isize, isize),
+        to: (isize, isize),
+        color: Mono8,
+    ) {
         use crate::image::ImageView;
-        let (mut x, mut y) = (i64::from(from.0), i64::from(from.1));
-        let (x1, y1) = (i64::from(to.0), i64::from(to.1));
+        let (mut x, mut y) = (from.0 as i128, from.1 as i128);
+        let (x1, y1) = (to.0 as i128, to.1 as i128);
         let dx = (x1 - x).abs();
         let dy = -(y1 - y).abs();
         let sx = if x < x1 { 1 } else { -1 };
         let sy = if y < y1 { 1 } else { -1 };
         let mut err = dx + dy;
         loop {
-            if x >= 0 && y >= 0 && x < image.width() as i64 && y < image.height() as i64 {
+            if x >= 0 && y >= 0 && x < image.width() as i128 && y < image.height() as i128 {
                 *image.pixel_at_mut(x as usize, y as usize) = color;
             }
             if x == x1 && y == y1 {
@@ -341,7 +410,7 @@ mod tests {
         // The clip fast-forwards the exact walk state, so it must not move
         // a single pixel relative to the unclipped walk: every endpoint
         // pair around and across a 5x4 frame, in both directions.
-        let coords: Vec<(i32, i32)> = (-6..=9)
+        let coords: Vec<(isize, isize)> = (-6..=9)
             .flat_map(|x| (-6..=9).map(move |y| (x, y)))
             .collect();
         for &from in &coords {
@@ -362,11 +431,11 @@ mod tests {
     #[test]
     fn far_off_image_endpoints_cost_only_the_visible_span() {
         // The walk is clipped to the frame, so a segment whose ideal length
-        // is the whole i32 range completes immediately instead of stepping
-        // pixel by pixel through billions of invisible positions. A hang
+        // is the whole isize range completes immediately instead of stepping
+        // pixel by pixel through quintillions of invisible positions. A hang
         // here is the regression this test pins.
         let mut image: Image<Mono8> = Image::zero(4, 4);
-        draw_line(&mut image, (i32::MIN, 0), (i32::MAX, 0), ink());
+        draw_line(&mut image, (isize::MIN, 0), (isize::MAX, 0), ink());
         assert_eq!(inked(&image), vec![(0, 0), (1, 0), (2, 0), (3, 0)]);
 
         let mut image: Image<Mono8> = Image::zero(4, 4);
@@ -380,13 +449,91 @@ mod tests {
 
         // Steep counterpart, and a shallow segment whose bounding box
         // straddles the frame although the segment itself crosses the
-        // frame's rows a billion pixels to the left of it.
+        // frame's rows far to the left of it.
         let mut image: Image<Mono8> = Image::zero(4, 4);
-        draw_line(&mut image, (1, i32::MIN), (2, i32::MAX), ink());
+        draw_line(&mut image, (1, isize::MIN), (2, isize::MAX), ink());
         assert_eq!(inked(&image).len(), 4);
 
         let mut image: Image<Mono8> = Image::zero(4, 4);
-        draw_line(&mut image, (i32::MIN, -20), (0, 20), ink());
+        draw_line(&mut image, (isize::MIN, -20), (0, 20), ink());
         assert!(inked(&image).is_empty());
+
+        // The full diagonal of the isize plane.
+        let mut image: Image<Mono8> = Image::zero(4, 4);
+        draw_line(
+            &mut image,
+            (isize::MIN, isize::MIN),
+            (isize::MAX, isize::MAX),
+            ink(),
+        );
+        assert_eq!(inked(&image), vec![(0, 0), (1, 1), (2, 2), (3, 3)]);
+    }
+
+    #[test]
+    fn extreme_endpoints_paint_what_moderate_ones_do() {
+        // A segment from `c - K*(p, q)` to `c + K*(p, q)` crosses the frame
+        // at `c`, and there its minor-axis step count is
+        // `q*K + floor((2*q*j - p) / (2*p)) + 1` at major offset `j`: the
+        // `K` terms cancel, so every K large enough to span the frame
+        // paints the same pixels. K = 1000 is checked against the unclipped
+        // reference walk; K near isize::MAX / 5 drives the extents to 2^64
+        // and the clip's products to 2^129, the range `mul_div_ceil`,
+        // `mul_wide` and the modular error term exist for.
+        // Headroom for the centre offset: c + K*p must not overflow.
+        let huge = (isize::MAX - 8) / 5;
+        for (cx, cy) in [(2isize, 1isize), (0, 3), (4, 0)] {
+            for p in -5isize..=5 {
+                for q in -5isize..=5 {
+                    if p == 0 && q == 0 {
+                        continue;
+                    }
+                    let seg = |k: isize| ((cx - k * p, cy - k * q), (cx + k * p, cy + k * q));
+                    let (from, to) = seg(1000);
+                    let mut moderate: Image<Mono8> = Image::zero(5, 4);
+                    draw_line(&mut moderate, from, to, ink());
+                    let mut reference: Image<Mono8> = Image::zero(5, 4);
+                    reference_segment(&mut reference, from, to, ink());
+                    assert_eq!(inked(&moderate), inked(&reference), "p {p}, q {q}");
+
+                    let (from, to) = seg(huge);
+                    let mut extreme: Image<Mono8> = Image::zero(5, 4);
+                    draw_line(&mut extreme, from, to, ink());
+                    assert_eq!(
+                        inked(&extreme),
+                        inked(&moderate),
+                        "p {p}, q {q}, centre ({cx}, {cy}): extreme endpoints diverged"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_wide_arithmetic_is_exact() {
+        // Against native u128 where the product fits.
+        for &(a, b, d) in &[
+            (0u128, 5, 3),
+            (7, 9, 4),
+            (1 << 60, 1 << 60, 3),
+            (12345, 67890, 7),
+        ] {
+            let (hi, lo) = mul_wide(a, b);
+            assert_eq!((hi, lo), (0, a * b));
+            assert_eq!(div_wide(hi, lo, d), (a * b / d, a * b % d));
+            assert_eq!(mul_div_ceil(a, b, d), (a * b).div_ceil(d));
+        }
+        // Past it: (2^128 - 1)^2 = 2^256 - 2^129 + 1.
+        assert_eq!(mul_wide(u128::MAX, u128::MAX), (u128::MAX - 1, 1));
+        // 2^64 * 2^65 / 2^66 = 2^63, exactly, with no remainder.
+        let (hi, lo) = mul_wide(1 << 64, 1 << 65);
+        assert_eq!((hi, lo), (2, 0));
+        assert_eq!(div_wide(hi, lo, 1 << 66), (1 << 63, 0));
+        // (2^127 + 1) * 3 / 2 = 3 * 2^126 + 1.5, which rounds up.
+        assert_eq!(mul_div_ceil((1 << 127) + 1, 3, 2), 3 * (1 << 126) + 2);
+        // Division by a divisor above 2^127 exercises the carry branch.
+        let d = u128::MAX - 6;
+        let (hi, lo) = mul_wide(d - 1, 5);
+        let (q, r) = div_wide(hi, lo, d);
+        assert_eq!((q, r), (4, d - 5));
     }
 }

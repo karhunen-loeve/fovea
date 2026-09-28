@@ -101,6 +101,37 @@ impl Coordinate {
         }
     }
 
+    /// The [`SignedCoordinate`] one [`Offset`] away, which may lie outside
+    /// the image.
+    ///
+    /// The total sibling of [`checked_add`](Self::checked_add): where that
+    /// answers "is there a pixel there", this keeps the position so a
+    /// [`BorderPolicy`](crate::border::BorderPolicy) or a tracer can decide
+    /// what an outside position means. A component past `isize::MAX`, which
+    /// no pixel of any image has, saturates rather than wrapping.
+    ///
+    /// # Example
+    /// ```
+    /// # use fovea::{Coordinate, Offset, SignedCoordinate};
+    /// let c = Coordinate::new(0, 4);
+    /// assert_eq!(c.step(Offset::new(-1, 1)), SignedCoordinate::new(-1, 5));
+    /// ```
+    #[inline]
+    #[must_use]
+    pub const fn step(self, by: Offset) -> SignedCoordinate {
+        let x = if self.x > isize::MAX as usize {
+            isize::MAX
+        } else {
+            self.x as isize
+        };
+        let y = if self.y > isize::MAX as usize {
+            isize::MAX
+        } else {
+            self.y as isize
+        };
+        SignedCoordinate::new(x, y).step(by)
+    }
+
     /// The [`Offset`] that carries `self` to `other`.
     ///
     /// The inverse of [`checked_add`](Self::checked_add) for any pair
@@ -174,82 +205,138 @@ impl From<(f64, f64)> for CoordinateF64 {
     }
 }
 
-/// A **signed** pixel position: a point that may legitimately lie outside
-/// the frame on any side.
+/// A **signed** pixel position: a point on the pixel grid that may
+/// legitimately lie outside the frame on any side.
 ///
 /// The third member of the coordinate family. [`Coordinate`] addresses
-/// pixels that exist, so it is unsigned; [`CoordinateF64`] carries
-/// sub-pixel positions; `CoordinateI32` names whole-pixel positions in the
-/// unbounded drawing plane, which is what the [`draw`](crate::draw)
-/// primitives clip against — a marker centred near the frame edge extends
-/// past it as a matter of course.
+/// pixels that can exist, so it is unsigned; [`CoordinateF64`] carries
+/// sub-pixel positions; `SignedCoordinate` names whole-pixel positions
+/// anywhere on the grid. Three places need one: a neighbourhood that
+/// reaches past the image edge (what a
+/// [`BorderPolicy`](crate::border::BorderPolicy) resolves), a shape that
+/// extends past the frame (what the [`draw`](crate::draw) primitives clip
+/// against), and a contour tracer whose backtrack position sits left of
+/// column 0.
 ///
-/// Tuples convert with `.into()`, so call sites stay terse; the typed
+/// The width is `isize` because no image can hold more than `isize::MAX`
+/// bytes, so every pixel of every image has a `SignedCoordinate`, and
+/// [`Coordinate::step`] never fails.
+///
+/// A signed position becomes a pixel again only relative to an image size,
+/// through [`within`](Self::within), which is the whole bounds check in one
+/// place. Tuples convert with `.into()`, so call sites stay terse; the typed
 /// fields are what make a `(y, x)` transposition visible when shapes are
-/// stored or built from data. An in-frame [`Coordinate`] converts with
-/// `try_from` (fallible only past `i32::MAX`).
+/// stored or built from data.
 ///
 /// # Example
 /// ```
-/// # use fovea::{Coordinate, CoordinateI32};
-/// let p = CoordinateI32::new(-3, 7);
-/// assert_eq!(p.x, -3);
+/// # use fovea::{Coordinate, Offset, SignedCoordinate, Size};
+/// let p = Coordinate::new(0, 4).step(Offset::new(-1, 0));
+/// assert_eq!(p, SignedCoordinate::new(-1, 4)); // left of the frame
+/// assert_eq!(p.within(Size::new(8, 8)), None);
 ///
-/// let q: CoordinateI32 = (4, 5).into();
-/// assert_eq!(q, CoordinateI32::new(4, 5));
+/// let q = p.step(Offset::new(2, 0));
+/// assert_eq!(q.within(Size::new(8, 8)), Some(Coordinate::new(1, 4)));
 ///
-/// let r = CoordinateI32::try_from(Coordinate::new(10, 20))?;
-/// assert_eq!(r, CoordinateI32::new(10, 20));
-/// # Ok::<(), fovea::Error>(())
+/// let r: SignedCoordinate = (4, 5).into();
+/// assert_eq!(r, SignedCoordinate::new(4, 5));
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct CoordinateI32 {
+pub struct SignedCoordinate {
     /// Horizontal position; negative is left of the frame.
-    pub x: i32,
+    pub x: isize,
     /// Vertical position; negative is above the frame.
-    pub y: i32,
+    pub y: isize,
 }
 
-impl CoordinateI32 {
-    /// Creates a `CoordinateI32` at the given `(x, y)` position.
+impl SignedCoordinate {
+    /// Creates a `SignedCoordinate` at the given `(x, y)` position.
     #[inline]
     #[must_use]
-    pub const fn new(x: i32, y: i32) -> Self {
+    pub const fn new(x: isize, y: isize) -> Self {
         Self { x, y }
     }
+
+    /// The position one [`Offset`] away.
+    ///
+    /// Saturates at `isize::MIN` and `isize::MAX` instead of wrapping, so a
+    /// position that far out stays on its side of the grid; no image
+    /// reaches either end, so [`within`](Self::within) reports it outside
+    /// either way.
+    ///
+    /// # Example
+    /// ```
+    /// # use fovea::{Offset, SignedCoordinate};
+    /// let p = SignedCoordinate::new(-1, 3).step(Offset::new(2, -4));
+    /// assert_eq!(p, SignedCoordinate::new(1, -1));
+    /// ```
+    #[inline]
+    #[must_use]
+    pub const fn step(self, by: Offset) -> Self {
+        Self {
+            x: self.x.saturating_add(by.dx as isize),
+            y: self.y.saturating_add(by.dy as isize),
+        }
+    }
+
+    /// The pixel at this position in an image of `size`, or `None` if the
+    /// position lies outside it on any side.
+    ///
+    /// # Example
+    /// ```
+    /// # use fovea::{Coordinate, SignedCoordinate, Size};
+    /// let size = Size::new(4, 3);
+    /// assert_eq!(SignedCoordinate::new(3, 2).within(size), Some(Coordinate::new(3, 2)));
+    /// assert_eq!(SignedCoordinate::new(4, 2).within(size), None); // right of the frame
+    /// assert_eq!(SignedCoordinate::new(0, -1).within(size), None); // above it
+    /// ```
+    #[inline]
+    #[must_use]
+    pub const fn within(self, size: Size) -> Option<Coordinate> {
+        if self.x < 0 || self.y < 0 {
+            return None;
+        }
+        let (x, y) = (self.x as usize, self.y as usize);
+        if x < size.width && y < size.height {
+            Some(Coordinate { x, y })
+        } else {
+            None
+        }
+    }
 }
 
-impl From<(i32, i32)> for CoordinateI32 {
+impl From<(isize, isize)> for SignedCoordinate {
     #[inline]
-    fn from(value: (i32, i32)) -> Self {
+    fn from(value: (isize, isize)) -> Self {
         Self::new(value.0, value.1)
     }
 }
 
-impl From<&(i32, i32)> for CoordinateI32 {
+impl From<&(isize, isize)> for SignedCoordinate {
     #[inline]
-    fn from(value: &(i32, i32)) -> Self {
+    fn from(value: &(isize, isize)) -> Self {
         Self::new(value.0, value.1)
     }
 }
 
-impl From<&CoordinateI32> for CoordinateI32 {
+impl From<&SignedCoordinate> for SignedCoordinate {
     #[inline]
-    fn from(value: &CoordinateI32) -> Self {
+    fn from(value: &SignedCoordinate) -> Self {
         *value
     }
 }
 
-impl TryFrom<Coordinate> for CoordinateI32 {
+impl TryFrom<Coordinate> for SignedCoordinate {
     type Error = Error;
 
-    /// Fails only for a position past `i32::MAX` along either axis, which
-    /// no image this crate can hold in memory produces.
+    /// Fails only for a position past `isize::MAX` along either axis, which
+    /// no pixel of any image can have. [`Coordinate::step`] is the total
+    /// alternative for positions that come from an image.
     fn try_from(value: Coordinate) -> Result<Self, Error> {
-        match (i32::try_from(value.x), i32::try_from(value.y)) {
+        match (isize::try_from(value.x), isize::try_from(value.y)) {
             (Ok(x), Ok(y)) => Ok(Self { x, y }),
             _ => Err(Error::InvalidParameter(format!(
-                "coordinate ({}, {}) does not fit a signed 32-bit position",
+                "coordinate ({}, {}) does not fit a signed position",
                 value.x, value.y
             ))),
         }
@@ -1902,5 +1989,68 @@ mod tests {
         // distinguishable values, where a positional pair would have made
         // the swap invisible.
         assert_ne!(Offset::new(1, -1), Offset::new(-1, 1));
+    }
+
+    #[test]
+    fn step_and_within_agree_with_checked_add() {
+        // `checked_add` answers the lower half of the bounds check and
+        // `within` both halves; wherever the step lands inside the image
+        // the two must name the same pixel, and `within` must refuse
+        // exactly the positions past either edge.
+        let size = Size::new(5, 4);
+        for x in 0..size.width {
+            for y in 0..size.height {
+                let c = Coordinate::new(x, y);
+                for dx in -6..=6 {
+                    for dy in -6..=6 {
+                        let off = Offset::new(dx, dy);
+                        let signed = c.step(off);
+                        assert_eq!(
+                            signed,
+                            SignedCoordinate::new(
+                                x as isize + dx as isize,
+                                y as isize + dy as isize
+                            )
+                        );
+                        let expected = c
+                            .checked_add(off)
+                            .filter(|p| p.x < size.width && p.y < size.height);
+                        assert_eq!(signed.within(size), expected, "{c:?} + {off:?}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn signed_steps_saturate_rather_than_wrapping() {
+        // No image reaches either end of isize, so a saturated position is
+        // still correctly "outside"; a wrapping add would flip it to the
+        // opposite side of the grid.
+        let right = SignedCoordinate::new(isize::MAX, 0).step(Offset::new(1, 0));
+        assert_eq!(right, SignedCoordinate::new(isize::MAX, 0));
+        let up = SignedCoordinate::new(0, isize::MIN).step(Offset::new(0, -1));
+        assert_eq!(up, SignedCoordinate::new(0, isize::MIN));
+        // A Coordinate past isize::MAX, which no pixel has, saturates too.
+        let far = Coordinate::new(usize::MAX, 0).step(Offset::ZERO);
+        assert_eq!(far, SignedCoordinate::new(isize::MAX, 0));
+        assert!(SignedCoordinate::try_from(Coordinate::new(usize::MAX, 0)).is_err());
+        assert_eq!(
+            SignedCoordinate::try_from(Coordinate::new(3, 7)).ok(),
+            Some(SignedCoordinate::new(3, 7))
+        );
+    }
+
+    #[test]
+    fn within_rejects_every_outside_side_and_an_empty_size() {
+        let size = Size::new(3, 2);
+        for p in [(-1, 0), (0, -1), (3, 0), (0, 2), (isize::MIN, isize::MAX)] {
+            assert_eq!(SignedCoordinate::from(p).within(size), None, "{p:?}");
+        }
+        assert_eq!(SignedCoordinate::new(0, 0).within(Size::new(0, 5)), None);
+        assert_eq!(
+            SignedCoordinate::new(2, 1).within(size),
+            Some(Coordinate::new(2, 1))
+        );
     }
 }

@@ -79,6 +79,7 @@ use core::marker::PhantomData;
 use std::ops::Sub as StdSub;
 
 use super::fold::{FoldItem, FoldOp, fold_neighborhood_into};
+use crate::Coordinate;
 use crate::border::Skip;
 use crate::common::Extremum;
 use crate::error::Error;
@@ -431,7 +432,14 @@ where
             expected_w,
             expected_h
         );
-        fold_neighborhood_into(image, template, (0, 0), &Skip, output, SadFold::new());
+        fold_neighborhood_into(
+            image,
+            template,
+            Coordinate::new(0, 0),
+            &Skip,
+            output,
+            SadFold::new(),
+        );
         Ok(())
     }
 }
@@ -505,7 +513,14 @@ where
             expected_w,
             expected_h
         );
-        fold_neighborhood_into(image, template, (0, 0), &Skip, output, SsdFold::new());
+        fold_neighborhood_into(
+            image,
+            template,
+            Coordinate::new(0, 0),
+            &Skip,
+            output,
+            SsdFold::new(),
+        );
         Ok(())
     }
 }
@@ -680,7 +695,7 @@ where
         fold_neighborhood_into(
             image,
             template,
-            (0, 0),
+            Coordinate::new(0, 0),
             &Skip,
             output,
             NccFold {

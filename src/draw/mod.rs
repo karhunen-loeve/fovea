@@ -36,10 +36,11 @@
 //!
 //! ## Signed coordinates, silent clipping
 //!
-//! Drawing positions are `(i32, i32)` — signed, unlike the unsigned
-//! [`Coordinate`](crate::Coordinate) used for ROI offsets — because a shape
-//! is routinely centred on a feature near the image edge and legitimately
-//! extends past it. Every primitive clips: the in-bounds portion is drawn,
+//! Drawing positions are [`SignedCoordinate`](crate::SignedCoordinate)s,
+//! signed unlike the unsigned [`Coordinate`](crate::Coordinate) used for ROI
+//! offsets, because a shape is routinely centred on a feature near the image
+//! edge and legitimately extends past it. Tuples such as `(3, -2)` convert
+//! with `.into()`, and the free functions accept them directly. Every primitive clips: the in-bounds portion is drawn,
 //! out-of-bounds pixels are skipped, no error is returned and no panic
 //! occurs. This is the universal convention for 2D rasterisation.
 //!
@@ -125,8 +126,8 @@ use crate::image::ImageViewMut;
 /// use fovea::pixel::Mono8;
 ///
 /// struct XMarker {
-///     center: (i32, i32),
-///     arm: i32,
+///     center: (isize, isize),
+///     arm: isize,
 ///     color: Mono8,
 /// }
 ///
@@ -154,7 +155,10 @@ pub trait Drawable<P: Copy> {
 
 /// Writes `color` at signed `(x, y)`, skipping out-of-bounds positions.
 #[inline]
-fn put<P: Copy>(image: &mut impl ImageViewMut<Pixel = P>, x: i64, y: i64, color: P) {
+///
+/// The drawing helpers take `i128` so every shape can do its arithmetic on
+/// `isize` positions plus `u32` or `usize` extents without overflow.
+fn put<P: Copy>(image: &mut impl ImageViewMut<Pixel = P>, x: i128, y: i128, color: P) {
     if x >= 0 && y >= 0 {
         if let Some(pixel) = image.get_mut(x as usize, y as usize) {
             *pixel = color;
@@ -164,13 +168,13 @@ fn put<P: Copy>(image: &mut impl ImageViewMut<Pixel = P>, x: i64, y: i64, color:
 
 /// Writes the horizontal run from `x0` to `x1` (either order, inclusive) on
 /// row `y`, clipped to the image bounds.
-fn hspan<P: Copy>(image: &mut impl ImageViewMut<Pixel = P>, x0: i64, x1: i64, y: i64, color: P) {
+fn hspan<P: Copy>(image: &mut impl ImageViewMut<Pixel = P>, x0: i128, x1: i128, y: i128, color: P) {
     let size = image.size();
-    if y < 0 || y >= size.height as i64 {
+    if y < 0 || y >= size.height as i128 {
         return;
     }
     let lo = x0.min(x1).max(0);
-    let hi = x0.max(x1).min(size.width as i64 - 1);
+    let hi = x0.max(x1).min(size.width as i128 - 1);
     for x in lo..=hi {
         *image.pixel_at_mut(x as usize, y as usize) = color;
     }
@@ -178,13 +182,13 @@ fn hspan<P: Copy>(image: &mut impl ImageViewMut<Pixel = P>, x0: i64, x1: i64, y:
 
 /// Writes the vertical run from `y0` to `y1` (either order, inclusive) in
 /// column `x`, clipped to the image bounds.
-fn vspan<P: Copy>(image: &mut impl ImageViewMut<Pixel = P>, x: i64, y0: i64, y1: i64, color: P) {
+fn vspan<P: Copy>(image: &mut impl ImageViewMut<Pixel = P>, x: i128, y0: i128, y1: i128, color: P) {
     let size = image.size();
-    if x < 0 || x >= size.width as i64 {
+    if x < 0 || x >= size.width as i128 {
         return;
     }
     let lo = y0.min(y1).max(0);
-    let hi = y0.max(y1).min(size.height as i64 - 1);
+    let hi = y0.max(y1).min(size.height as i128 - 1);
     for y in lo..=hi {
         *image.pixel_at_mut(x as usize, y as usize) = color;
     }

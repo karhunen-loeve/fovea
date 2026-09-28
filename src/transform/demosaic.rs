@@ -327,8 +327,11 @@ where
 
     let radius = M::RADIUS;
     let window = 2 * radius + 1;
-    let interior =
-        compute_interior_region(image.size(), Size::new(window, window), (radius, radius));
+    let interior = compute_interior_region(
+        image.size(),
+        Size::new(window, window),
+        Coordinate::new(radius, radius),
+    );
 
     // ── HOT PATH — every tap is inside the frame ──────────────────────────
     //
@@ -367,15 +370,9 @@ where
                 }
             }
 
-            let rgb = method.interpolate(Coordinate::new(x, y), |tap| {
-                Mirror
-                    .pixel_at(
-                        image,
-                        x as isize + tap.dx as isize,
-                        y as isize + tap.dy as isize,
-                    )
-                    .to_accumulator()
-                    .0
+            let site = Coordinate::new(x, y);
+            let rgb = method.interpolate(site, |tap| {
+                Mirror.pixel_at(image, site.step(tap)).to_accumulator().0
             });
             *output.pixel_at_mut(x, y) = FromLinear::from_linear(rgb);
         }
@@ -1441,7 +1438,9 @@ mod tests {
         for len in 2..12usize {
             let row: Image<Mono8> = Image::generate(len, 1, |x, _| Mono8::new(x as u8));
             for coord in -6isize..(len as isize + 6) {
-                let reflected = Mirror.pixel_at(&row, coord, 0).value() as isize;
+                let reflected = Mirror
+                    .pixel_at(&row, crate::SignedCoordinate::new(coord, 0))
+                    .value() as isize;
                 assert_eq!(
                     reflected.rem_euclid(2),
                     coord.rem_euclid(2),

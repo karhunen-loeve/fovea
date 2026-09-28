@@ -25,6 +25,7 @@
 //! - `vcvtdq2ps` / `vpmovzxbd` — u8→f32 conversion chain (u8 convolution)
 //! - `vmovdqu` / `vmovups` — packed loads (any vectorised path)
 
+use fovea::Offset;
 use fovea::border::Clamp;
 use fovea::image::{Image, Kernel3x3, Mask3x3, RasterImage};
 use fovea::transform::{
@@ -301,8 +302,7 @@ pub fn map_trait_erode_u8_hot(acc: &mut [u8], src: &[u8]) {
             &mut acc[i],
             MapItem {
                 pixel: src[i],
-                dx: 0,
-                dy: 0,
+                offset: Offset::ZERO,
             },
         );
     }
@@ -318,8 +318,7 @@ pub fn map_trait_dilate_u8_hot(acc: &mut [u8], src: &[u8]) {
             &mut acc[i],
             MapItem {
                 pixel: src[i],
-                dx: 0,
-                dy: 0,
+                offset: Offset::ZERO,
             },
         );
     }
