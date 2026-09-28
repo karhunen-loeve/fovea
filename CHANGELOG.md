@@ -45,6 +45,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   derive list, next to `HomogeneousPixel`. A generic function that forwards
   to one of them replaces its `HomogeneousPixel` bound with
   `ChannelwiseMath`, which implies it.
+- **Breaking:** `WhiteChannel` has `ChannelwiseMath` as its supertrait
+  instead of `HomogeneousPixel`, because "white" is the top of a quantity's
+  range. `Indexed8` no longer implements `WhiteChannel`: index 255 is
+  whatever colour the palette stores there. `Invert`, `BinaryThreshold`,
+  `BinaryThresholdInv` and `PeakValue::of_pixel` therefore reject palette
+  indices, which they accepted before. **Migration:** a custom pixel that
+  derives or implements `WhiteChannel` also derives `ChannelwiseMath`.
 
 ### Documentation
 

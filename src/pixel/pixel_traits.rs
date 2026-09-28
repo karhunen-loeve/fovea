@@ -682,6 +682,27 @@ pub trait BoundedChannel: Copy {
 /// homogeneous pixel (`Invert`, `BinaryThreshold`, `BinaryThresholdInv`)
 /// bind on this trait to preserve the pixel's invariant.
 ///
+/// # Only for quantities
+///
+/// "White" is the top of a quantity's range, so the trait requires
+/// [`ChannelwiseMath`]. A palette index has a largest *value* but no
+/// saturated *meaning*: index 255 is whatever colour the palette stores
+/// there. [`Indexed8`] and [`Label32`] therefore do not implement
+/// `WhiteChannel`, and inverting or binarising them does not compile:
+///
+/// ```compile_fail
+/// use fovea::image::Image;
+/// use fovea::pixel::Indexed8;
+/// use fovea::transform::{Invert, convert_image};
+///
+/// let indexed = Image::fill(4, 4, Indexed8(3));
+/// // ERROR: `Indexed8: WhiteChannel` is not satisfied.
+/// let _: Image<Indexed8> = convert_image(&indexed, Invert);
+/// ```
+///
+/// [`Indexed8`]: crate::pixel::Indexed8
+/// [`Label32`]: crate::pixel::Label32
+///
 /// # Why this is distinct from `BoundedChannel`
 ///
 /// `Mono<BITS>` uses `Saturating<u16>` as its channel type, but
@@ -708,7 +729,7 @@ pub trait BoundedChannel: Copy {
 /// "white" lets reduced-range pixels (`Mono<BITS>`) preserve their
 /// invariant when strategies like `Invert` write a saturated value
 /// back through `from_channels`.
-pub trait WhiteChannel: HomogeneousPixel {
+pub trait WhiteChannel: ChannelwiseMath {
     /// The value the pixel treats as "fully saturated" on every
     /// channel slot.
     ///

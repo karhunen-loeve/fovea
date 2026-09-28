@@ -933,4 +933,32 @@ mod channelwise_math_coverage {
             )
         };
     }
+
+    // `WhiteChannel: ChannelwiseMath` already makes these impossible; the
+    // probe pins it in case the supertrait is ever loosened.
+    trait WhiteFallback {
+        const IS: bool = false;
+    }
+    struct WhiteProbe<T>(PhantomData<T>);
+    impl<T> WhiteFallback for WhiteProbe<T> {}
+    impl<T: WhiteChannel> WhiteProbe<T> {
+        const IS: bool = true;
+    }
+
+    #[test]
+    fn nominal_pixels_have_no_white() {
+        const { assert!(WhiteProbe::<Mono8>::IS) };
+        const {
+            assert!(
+                !WhiteProbe::<Indexed8>::IS,
+                "Indexed8 must not implement WhiteChannel: index 255 is not white"
+            )
+        };
+        const {
+            assert!(
+                !WhiteProbe::<Label32>::IS,
+                "Label32 must not implement WhiteChannel: a component ID is not a quantity"
+            )
+        };
+    }
 }

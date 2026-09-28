@@ -1789,22 +1789,23 @@ impl ConvertPixel<BgraF32, SrgbBgra16> for SrgbGamma {
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 // These strategies implement `ConvertPixel<P, P>` (or `ConvertPixel<P, bool>`
-// for `BinaryMask`) over any `HomogeneousPixel` whose channel type carries
-// the operations the strategy performs. They bind to the minimum trait layer
-// that admits the operation:
+// for `BinaryMask`) over any `ChannelwiseMath` pixel whose channel type
+// carries the operations the strategy performs. They bind to the minimum
+// trait layer that admits the operation:
 //
-//   - `TruncateThreshold<P>`    : channel `Ord`              (min of values)
-//   - `ToZeroThreshold<P>`      : channel `Ord + Zeroable`
-//   - `ToZeroThresholdInv<P>`   : channel `Ord + Zeroable`
-//   - `BinaryMask<P>`           : channel `Ord`              (output `bool`)
-//   - `BinaryThreshold<P>`      : channel `Ord + Zeroable + BoundedChannel`
-//   - `BinaryThresholdInv<P>`   : channel `Ord + Zeroable + BoundedChannel`
-//   - `Invert`                  : channel `BoundedChannel + Sub<Output=Self>`
+//   - `TruncateThreshold<P>`    : `ChannelwiseMath`, channel `Ord`
+//   - `ToZeroThreshold<P>`      : `ChannelwiseMath`, channel `Ord + Zeroable`
+//   - `ToZeroThresholdInv<P>`   : `ChannelwiseMath`, channel `Ord + Zeroable`
+//   - `BinaryMask<P>`           : `ChannelwiseMath`, channel `Ord` (output `bool`)
+//   - `BinaryThreshold<P>`      : `WhiteChannel`, channel `Ord + Zeroable`
+//   - `BinaryThresholdInv<P>`   : `WhiteChannel`, channel `Ord + Zeroable`
+//   - `Invert`                  : `WhiteChannel`, channel `Sub<Output=Self>`
 //
-// `BoundedChannel` is what grants access to the channel's intrinsic
-// maximum; its absence on `f32` / `f64` is load-bearing and is what
-// makes `Invert` / `BinaryThreshold[ Inv]` refuse to compile for
-// float-channel pixels.
+// `WhiteChannel` supplies the pixel's saturated value and has
+// `ChannelwiseMath` as its supertrait, so every strategy here rejects
+// component labels and palette indices. Its absence on float pixels is
+// load-bearing too: it is what makes `Invert` / `BinaryThreshold[ Inv]`
+// refuse to compile for them.
 
 /// Binary threshold: output channel is `Channel::MAX` if `value > thresh`,
 /// else `Channel::zero()`.
@@ -10178,8 +10179,9 @@ mod tests {
         assert_white_channel::<SrgbMonoA8>();
         assert_white_channel::<SrgbMonoA16>();
 
-        // Indexed
-        assert_white_channel::<Indexed8>();
+        // Indexed8 and Label32 are intentionally omitted: a palette index
+        // or a component ID has a largest value but no "white", and
+        // `WhiteChannel: ChannelwiseMath` keeps them out.
 
         // Float pixels (MonoF32/MonoF64, RgbF32/.../BgraF64, MonoAF32/MonoAF64)
         // are intentionally omitted — they do not implement `WhiteChannel`,
