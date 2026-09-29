@@ -5,6 +5,7 @@
 //! and not at all in how their maxima are picked.
 
 use crate::analyze::peak::{Extremum, interpolate_peak};
+use crate::error::{ParameterError, Requirement, Value};
 use crate::features::Corner;
 use crate::image::RasterImage;
 use crate::pixel::SingleChannel;
@@ -68,9 +69,12 @@ impl NmsRadius {
     /// Returns [`Error::InvalidParameter`] if `radius == 0`.
     pub fn try_new(radius: usize) -> Result<Self, Error> {
         if radius == 0 {
-            return Err(Error::InvalidParameter(
-                "window radius must be at least 1".to_string(),
-            ));
+            return Err(ParameterError::new(
+                "NMS radius",
+                Requirement::AtLeast(1),
+                Value::Usize(radius),
+            )
+            .into());
         }
         Ok(Self(radius))
     }

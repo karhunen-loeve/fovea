@@ -5,13 +5,14 @@
 //! and [`SsimParams`] carries the window and the stabilizing constants. See
 //! the [module docs](super) for the full-scale value both need.
 
+use crate::error::{ParameterError, Requirement, Value};
 use crate::image::{
     Image, ImageView, ImageViewMut, MAX_RADIUS, RasterImage, RasterImageMut, gaussian_kernel_1d,
     gaussian_kernel_size,
 };
 use crate::pixel::{ChannelwiseMath, MonoF64, SingleChannel};
 use crate::transform::convolve_separable;
-use crate::{Error, Sigma, sigma};
+use crate::{Error, Sigma, Size, sigma};
 
 use crate::analyze::statistics::StatisticsChannel;
 use crate::border::Skip;
@@ -138,28 +139,32 @@ impl SsimParams {
     /// the same reasoning rejected a zero radius in
     /// [`refine_corners`](crate::features::detect::refine_corners).
     pub fn try_new(peak: PeakValue, sigma: Sigma, k1: f64, k2: f64) -> Result<Self, Error> {
-        for (name, value) in [("k1", k1), ("k2", k2)] {
+        for (name, value) in [("ssim k1", k1), ("ssim k2", k2)] {
             if !(value.is_finite() && value > 0.0) {
-                return Err(Error::InvalidParameter(format!(
-                    "ssim {name} must be finite and positive, got {value}"
-                )));
+                return Err(ParameterError::new(
+                    name,
+                    Requirement::FinitePositive,
+                    Value::F64(value),
+                )
+                .into());
             }
         }
 
+        // A one-tap window has no variance and reduces the score to its
+        // luminance term; see the `# Errors` section above.
         let taps = gaussian_kernel_size(sigma, Self::TRUNCATE);
+        let window = |requirement| {
+            ParameterError::new(
+                "ssim window taps derived from sigma",
+                requirement,
+                Value::Usize(taps),
+            )
+        };
         if taps < 3 {
-            return Err(Error::InvalidParameter(format!(
-                "ssim sigma {} derives a one-tap window, which has no variance \
-                 and reduces the score to its luminance term",
-                sigma.get(),
-            )));
+            return Err(window(Requirement::AtLeast(3)).into());
         }
         if taps > 2 * MAX_RADIUS + 1 {
-            return Err(Error::InvalidParameter(format!(
-                "ssim sigma {} needs a {taps}-tap window, above the {}-tap maximum",
-                sigma.get(),
-                2 * MAX_RADIUS + 1,
-            )));
+            return Err(window(Requirement::AtMost(2 * MAX_RADIUS + 1)).into());
         }
 
         Ok(Self {
@@ -226,9 +231,10 @@ impl SsimParams {
 /// # Errors — Tier 2
 ///
 /// - [`Error::SizeMismatch`] if the two images have different dimensions.
-/// - [`Error::InvalidParameter`] if the window does not fit: an image narrower
-///   or shorter than [`SsimParams::window_size`] has no position where the
-///   full window lies inside the frame, and there is nothing to average.
+/// - [`Error::WindowLargerThanImage`] if the window does not fit: an image
+///   narrower or shorter than [`SsimParams::window_size`] has no position
+///   where the full window lies inside the frame, and there is nothing to
+///   average.
 ///
 /// # Example
 ///
@@ -389,14 +395,10 @@ where
 
     let window = params.window_size();
     if a.width() < window || a.height() < window {
-        return Err(Error::InvalidParameter(format!(
-            "ssim: a {}x{} window does not fit a {}x{} image; no position has the \
-             full window inside the frame",
-            window,
-            window,
-            a.width(),
-            a.height(),
-        )));
+        return Err(Error::WindowLargerThanImage {
+            window: Size::new(window, window),
+            image: a.size(),
+        });
     }
 
     // ── Centre each image on its own mean ────────────────────────────────
@@ -581,7 +583,12 @@ mod tests {
     fn a_non_positive_stabilizing_constant_is_refused() {
         let peak = PeakValue::of_pixel::<Mono8>();
         assert!(SsimParams::try_new(peak, sigma!(1.5), 0.0, 0.03).is_err());
-        assert!(SsimParams::try_new(peak, sigma!(1.5), 0.01, -0.03).is_err());
+        let Err(Error::InvalidParameter(e)) = SsimParams::try_new(peak, sigma!(1.5), 0.01, -0.03)
+        else {
+            panic!("a negative k2 must be rejected as a parameter");
+        };
+        assert_eq!(e.requirement(), Requirement::FinitePositive);
+        assert_eq!(e.value(), Value::F64(-0.03));
         assert!(SsimParams::try_new(peak, sigma!(1.5), f64::NAN, 0.03).is_err());
         assert!(SsimParams::try_new(peak, sigma!(1.5), 0.01, 0.03).is_ok());
     }
@@ -592,11 +599,12 @@ mod tests {
         // variance at all, and a score that is only the luminance term.
         let peak = PeakValue::of_pixel::<Mono8>();
         assert_eq!(gaussian_kernel_size(sigma!(0.1), SsimParams::TRUNCATE), 1);
-        let refused = SsimParams::try_new(peak, sigma!(0.1), 0.01, 0.03);
-        assert!(
-            matches!(refused, Err(Error::InvalidParameter(_))),
-            "{refused:?}"
-        );
+        let Err(Error::InvalidParameter(e)) = SsimParams::try_new(peak, sigma!(0.1), 0.01, 0.03)
+        else {
+            panic!("a one-tap window must be rejected as a parameter");
+        };
+        assert_eq!(e.requirement(), Requirement::AtLeast(3));
+        assert_eq!(e.value(), Value::Usize(1));
 
         // The smallest accepted window is three taps.
         let accepted = SsimParams::try_new(peak, sigma!(0.2), 0.01, 0.03).unwrap();
@@ -609,11 +617,11 @@ mod tests {
         // not: MAX_RADIUS is 64, so radius = round(3σ) > 64 means σ > 21.5.
         let peak = PeakValue::of_pixel::<Mono8>();
         assert!(SsimParams::try_new(peak, sigma!(21.0), 0.01, 0.03).is_ok());
-        let refused = SsimParams::try_new(peak, sigma!(40.0), 0.01, 0.03);
-        assert!(
-            matches!(refused, Err(Error::InvalidParameter(_))),
-            "{refused:?}"
-        );
+        let Err(Error::InvalidParameter(e)) = SsimParams::try_new(peak, sigma!(40.0), 0.01, 0.03)
+        else {
+            panic!("a window past the kernel capacity must be rejected as a parameter");
+        };
+        assert_eq!(e.requirement(), Requirement::AtMost(2 * MAX_RADIUS + 1));
     }
 
     // ── The identities SSIM must satisfy ─────────────────────────────────
@@ -739,10 +747,12 @@ mod tests {
         let params = reference_params();
         let small: Image<Mono8> = Image::fill(10, 32, Mono8::new(0));
         let other: Image<Mono8> = Image::fill(10, 32, Mono8::new(0));
-        let refused = ssim_map(&small, &other, params);
-        assert!(
-            matches!(refused, Err(Error::InvalidParameter(_))),
-            "{refused:?}"
+        assert_eq!(
+            ssim_map(&small, &other, params).unwrap_err(),
+            Error::WindowLargerThanImage {
+                window: Size::new(11, 11),
+                image: Size::new(10, 32),
+            }
         );
 
         // Exactly the window size is the smallest accepted image, and it has

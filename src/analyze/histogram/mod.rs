@@ -270,7 +270,7 @@ impl<S, V, const N: usize> HistogramOutput<S, V> for [Histogram<S, V>; N] {
 ///
 /// # Errors
 ///
-/// Returns [`Error::InvalidBinningStrategy`] if `strategy.validate()`
+/// Returns [`Error::InvalidParameter`] if `strategy.validate()`
 /// rejects the strategy's own configuration (Tier 2).
 /// Validation runs once before any per-pixel work.
 ///
@@ -489,8 +489,8 @@ mod tests {
         };
         let r: Result<Histogram<LinearBins, f32>, _> = histogram(&img, &bad);
         match r {
-            Err(Error::InvalidBinningStrategy(_)) => {}
-            other => panic!("expected InvalidBinningStrategy, got {:?}", other),
+            Err(Error::InvalidParameter(_)) => {}
+            other => panic!("expected InvalidParameter, got {:?}", other),
         }
     }
 
@@ -499,7 +499,7 @@ mod tests {
         let img = Image::from_vec(1, 1, vec![MonoF32::new(0.0)]).unwrap();
         let bad = CustomBins { edges: vec![1.0] };
         let r: Result<Histogram<CustomBins, f32>, _> = histogram(&img, &bad);
-        assert!(matches!(r, Err(Error::InvalidBinningStrategy(_))));
+        assert!(matches!(r, Err(Error::InvalidParameter(_))));
     }
 
     // ── ROI: SubView counts only the selected region ────────────────────────

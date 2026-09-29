@@ -27,8 +27,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Coordinate::checked_add`, and `SignedCoordinate::step` and
   `SignedCoordinate::within(Size) -> Option<Coordinate>`, which is the whole
   bounds check in one place.
+- **`fovea::error`, a public module for what a parameter error carries.**
+  `ParameterError` holds the rejected parameter's name, the `Requirement` it
+  broke (`Finite`, `FinitePositive`, `FiniteNonNegative`, `Odd`,
+  `AtLeast(n)`, `AtMost(n)`, `InRange`, `OpenInterval`, `Ordered`,
+  `StrictlyOrdered`) and the `Value` it received, plus an `index` for one
+  element of several, such as the channel of a `Clamp`. Equality compares
+  floats by bit pattern, so an error carrying NaN equals itself and
+  `assert_eq!` works on it. `Requirement` and `Value` are
+  `#[non_exhaustive]`, so a new rule is not a breaking change.
+  `fovea::Error` stays at the crate root.
+- `Error::WindowLargerThanImage { window, image }`, returned by `ssim` and
+  `ssim_map` when no position has the whole window inside the image.
 
 ### Changed
+
+- **Breaking:** `Error::InvalidParameter` carries a `ParameterError`
+  instead of a `String`. A caller or a test now asks which rule failed
+  (`e.requirement()`) and with which value (`e.value()`) instead of
+  searching the message. The message keeps its form, for example
+  `invalid parameter: sigma must be finite and strictly positive, got -1`,
+  and the literal macros `sigma!`, `pixel_distance!`, `tolerance!`,
+  `window!`, `harris!` and `peak!` fail to build with the same wording that
+  `try_new` reports at run time. `Error` no longer allocates. **Migration:**
+  match `Error::InvalidParameter(e)` and read `e.requirement()`,
+  `e.value()` or `e.index()`; code that needs the text calls
+  `e.to_string()`.
+- **Breaking:** `Error::InvalidBinningStrategy` is gone. `LinearBins`,
+  `CustomBins` and every other `BinningStrategy` report an invalid
+  configuration as `Error::InvalidParameter`, and so does `histogram`,
+  which calls `validate`.
+  **Migration:** match `InvalidParameter` instead; a custom strategy's
+  `validate` returns `ParameterError::new(name, requirement, value).into()`.
+- **Breaking:** `ssim` and `ssim_map` report a window larger than the image
+  as `Error::WindowLargerThanImage` instead of `InvalidParameter`, because
+  the failure is a relation between the parameters and the image, like
+  `TemplateTooLarge`.
+- `HysteresisThresholds::try_new` no longer requires `C: Debug`. The bound
+  existed only to print the two thresholds into the message, and the error
+  now records no value for this generic pair.
 
 - **Breaking:** the channel-wise operations require `ChannelwiseMath`
   instead of `HomogeneousPixel`. That covers the combiners `AbsDiff`,
@@ -65,9 +102,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it, so `Coordinate::step` never fails. The drawing primitives stay exact
   over the whole `isize` plane: a line clipped from endpoints near
   `isize::MIN` and `isize::MAX` paints the same pixels as the unclipped
-  walk. **Migration:** `CoordinateI32` becomes `SignedCoordinate`; tuple
-  literals such as `(3, -2)` still convert with `.into()`, but a tuple of
-  `i32` variables needs `as isize`.
+  walk. Its `TryFrom<Coordinate>` fails with `core::num::TryFromIntError`,
+  std's error for an integer that does not fit, where `CoordinateI32`'s
+  returned `fovea::Error`. **Migration:** `CoordinateI32` becomes
+  `SignedCoordinate`; tuple literals such as `(3, -2)` still convert with
+  `.into()`, but a tuple of `i32` variables needs `as isize`.
 - **Breaking:** `BorderPolicy::pixel_at(&self, image, at: SignedCoordinate)`
   replaces `pixel_at(&self, image, x: isize, y: isize)`. The four callers in
   the crate formed that position by hand as `x as isize + dx as isize`;

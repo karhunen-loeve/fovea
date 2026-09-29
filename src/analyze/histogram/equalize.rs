@@ -98,7 +98,7 @@ where
 ///
 /// # Errors
 ///
-/// Returns [`Error::InvalidBinningStrategy`] (Tier 2) only if the
+/// Returns [`Error::InvalidParameter`] (Tier 2) only if the
 /// internal histogram engine ever does. [`NaturalBins`] has no
 /// configuration to validate, but the `Result` return shape is kept
 /// for future strategy overloads.

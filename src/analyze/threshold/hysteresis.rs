@@ -7,6 +7,7 @@
 
 use crate::Error;
 use crate::analyze::components::{Connectivity8, connected_components};
+use crate::error::{ParameterError, Requirement, Value};
 use crate::image::{BinaryImage, ImageView, RasterImage, RasterImageMut};
 use crate::pixel::{Label32, LabelPixel, SingleChannel};
 
@@ -66,7 +67,7 @@ pub struct HysteresisThresholds<C> {
 
 impl<C> HysteresisThresholds<C>
 where
-    C: PartialOrd + Copy + core::fmt::Debug,
+    C: PartialOrd + Copy,
 {
     /// Creates a threshold pair, validating the `low <= high` relation.
     ///
@@ -75,15 +76,20 @@ where
     ///
     /// # Errors
     ///
-    /// Returns [`Error::InvalidParameter`] if `!(low <= high)`, which
-    /// includes either value being NaN.
+    /// Returns [`Error::InvalidParameter`] with
+    /// [`Requirement::Ordered`] if `!(low <= high)`, which includes either
+    /// value being NaN. The error does not hold the two values, since `C`
+    /// is generic; the caller passed them and still has them.
     pub fn try_new(low: C, high: C) -> Result<Self, Error> {
         if low <= high {
             Ok(Self { low, high })
         } else {
-            Err(Error::InvalidParameter(format!(
-                "hysteresis thresholds must satisfy low <= high, got low {low:?} and high {high:?}"
-            )))
+            Err(ParameterError::new(
+                "hysteresis thresholds",
+                Requirement::Ordered,
+                Value::NotRecorded,
+            )
+            .into())
         }
     }
 }
@@ -494,11 +500,11 @@ mod tests {
     fn computed_pair_reports_misordering_as_a_value() {
         // The `try_new` half: thresholds picked from a magnitude histogram
         // can come out inverted, which is a value the caller handles.
-        let err = HysteresisThresholds::try_new(0.5_f32, 0.2).unwrap_err();
-        assert!(
-            matches!(err, Error::InvalidParameter(ref m) if m.contains("low <= high")),
-            "unexpected error: {err:?}"
-        );
+        let Err(Error::InvalidParameter(e)) = HysteresisThresholds::try_new(0.5_f32, 0.2) else {
+            panic!("a misordered pair must be rejected as a parameter");
+        };
+        assert_eq!(e.requirement(), Requirement::Ordered);
+        assert_eq!(e.value(), Value::NotRecorded);
     }
 
     #[test]

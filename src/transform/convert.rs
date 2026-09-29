@@ -1,6 +1,7 @@
 use core::marker::PhantomData;
 
 use crate::Error;
+use crate::error::{ParameterError, Requirement, Value};
 
 #[cfg(test)]
 use crate::image::ImageView;
@@ -2214,7 +2215,8 @@ where
     ///
     /// Returns [`Error::InvalidParameter`](crate::Error::InvalidParameter)
     /// if any channel of `lo` exceeds the corresponding channel of `hi`,
-    /// naming the first such channel.
+    /// with the first such channel as the error's
+    /// [`index`](crate::error::ParameterError::index).
     ///
     /// # Example
     ///
@@ -2234,10 +2236,14 @@ where
     pub fn try_new(lo: P, hi: P) -> Result<Self, Error> {
         match Self::inverted_channel(lo, hi) {
             None => Ok(Self { lo, hi }),
-            Some(i) => Err(Error::InvalidParameter(format!(
-                "clamp range is inverted on channel {i}: lo > hi, so every \
-                 input would collapse to `hi`"
-            ))),
+            // An inverted range would collapse every input to `hi`.
+            Some(i) => {
+                Err(
+                    ParameterError::new("clamp channel", Requirement::Ordered, Value::NotRecorded)
+                        .at(i)
+                        .into(),
+                )
+            }
         }
     }
 
@@ -2628,10 +2634,12 @@ impl<P: Copy + ZeroablePixel> Depalettize<P> {
     /// ```
     pub fn try_from_slice(entries: &[P]) -> Result<Self, Error> {
         if entries.len() > 256 {
-            return Err(Error::InvalidParameter(format!(
-                "Depalettize palette must have at most 256 entries, got {}",
-                entries.len()
-            )));
+            return Err(ParameterError::new(
+                "Depalettize palette length",
+                Requirement::AtMost(256),
+                Value::Usize(entries.len()),
+            )
+            .into());
         }
         let mut palette = [P::zero(); 256];
         palette[..entries.len()].copy_from_slice(entries);
@@ -7276,13 +7284,11 @@ mod tests {
     #[test]
     fn depalettize_try_from_slice_rejects_over_256() {
         let entries = vec![Rgb8::new(0, 0, 0); 257];
-        match Depalettize::try_from_slice(&entries) {
-            Err(Error::InvalidParameter(reason)) => {
-                assert!(reason.contains("256") && reason.contains("257"), "{reason}");
-            }
-            Err(other) => panic!("expected InvalidParameter, got {other:?}"),
-            Ok(_) => panic!("a 257-entry palette must be rejected"),
-        }
+        let Err(Error::InvalidParameter(e)) = Depalettize::try_from_slice(&entries) else {
+            panic!("a 257-entry palette must be rejected as a parameter");
+        };
+        assert_eq!(e.requirement(), Requirement::AtMost(256));
+        assert_eq!(e.value(), Value::Usize(257));
     }
 
     #[test]
@@ -9321,15 +9327,24 @@ mod tests {
 
     #[test]
     fn clamp_inverted_mono_is_an_error() {
-        let err = Clamp::try_new(Mono8::new(200), Mono8::new(50)).unwrap_err();
-        assert!(format!("{err}").contains("channel 0"), "{err}");
+        let Err(Error::InvalidParameter(e)) = Clamp::try_new(Mono8::new(200), Mono8::new(50))
+        else {
+            panic!("an inverted range must be rejected as a parameter");
+        };
+        assert_eq!(e.requirement(), Requirement::Ordered);
+        assert_eq!(e.index(), Some(0));
     }
 
     #[test]
     fn clamp_inverted_single_channel_names_the_index() {
         // Channels 0 and 2 are fine; channel 1 (green) is inverted.
-        let err = Clamp::try_new(Rgb8::new(10, 200, 10), Rgb8::new(200, 50, 200)).unwrap_err();
-        assert!(format!("{err}").contains("channel 1"), "{err}");
+        let Err(Error::InvalidParameter(e)) =
+            Clamp::try_new(Rgb8::new(10, 200, 10), Rgb8::new(200, 50, 200))
+        else {
+            panic!("an inverted channel must be rejected as a parameter");
+        };
+        assert_eq!(e.index(), Some(1));
+        assert_eq!(e.value(), Value::NotRecorded);
     }
 
     #[test]
@@ -9350,15 +9365,14 @@ mod tests {
     #[test]
     fn clamp_try_new_reports_the_inverted_channel() {
         // Channels 0 and 2 are fine; channel 1 (green) is inverted. The
-        // message names the first offending channel, as `new`'s panic does.
-        let err = Clamp::try_new(Rgb8::new(10, 200, 10), Rgb8::new(200, 50, 200)).unwrap_err();
-        match err {
-            crate::Error::InvalidParameter(reason) => assert!(
-                reason.contains("channel 1"),
-                "reason {reason:?} does not name channel 1"
-            ),
-            other => panic!("expected InvalidParameter, got {other:?}"),
-        }
+        // error names the first offending channel.
+        let Err(Error::InvalidParameter(e)) =
+            Clamp::try_new(Rgb8::new(10, 200, 10), Rgb8::new(200, 50, 200))
+        else {
+            panic!("an inverted channel must be rejected as a parameter");
+        };
+        assert_eq!(e.requirement(), Requirement::Ordered);
+        assert_eq!(e.index(), Some(1));
         assert!(Clamp::try_new(Mono8::new(200), Mono8::new(50)).is_err());
     }
 

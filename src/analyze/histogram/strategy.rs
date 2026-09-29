@@ -16,6 +16,7 @@
 use std::num::Saturating;
 
 use crate::Error;
+use crate::error::{ParameterError, Requirement, Value};
 use crate::pixel::Mono;
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -86,8 +87,11 @@ pub enum BinIndex {
 ///
 /// Strategies whose configuration cannot be invalid (e.g. [`NaturalBins`])
 /// inherit the default `Ok(())`. Data-carrying strategies override and
-/// return [`Error::InvalidBinningStrategy`] on bad input. The `histogram()`
-/// engine calls `validate()` exactly once before any per-pixel work.
+/// return [`Error::InvalidParameter`] on bad input, built from a
+/// [`ParameterError`] that names the field, the
+/// [`Requirement`] it broke and the [`Value`] it holds. A strategy
+/// implemented outside this crate does the same. The `histogram()` engine
+/// calls `validate()` exactly once before any per-pixel work.
 ///
 /// The trait participates in the crate's three-tier error convention
 /// (`validate` is Tier 2; `bin_range` out-of-range is Tier 3).
@@ -120,8 +124,7 @@ pub trait BinningStrategy<V: Copy> {
     /// The default impl returns `Ok(())` — appropriate for parameter-free
     /// strategies such as [`NaturalBins`]. Data-carrying strategies override
     /// to reject invalid configurations (non-finite bounds, empty bin
-    /// counts, non-monotonic edges, …) with
-    /// [`Error::InvalidBinningStrategy`].
+    /// counts, non-monotonic edges, …) with [`Error::InvalidParameter`].
     fn validate(&self) -> Result<(), Error> {
         Ok(())
     }
@@ -278,28 +281,28 @@ pub struct LinearBins {
 impl LinearBins {
     /// Shared validation used by every `BinningStrategy<V>` impl.
     fn validate_self(&self) -> Result<(), Error> {
-        if !self.min.is_finite() {
-            return Err(Error::InvalidBinningStrategy(format!(
-                "LinearBins: min is not finite ({})",
-                self.min
-            )));
-        }
-        if !self.max.is_finite() {
-            return Err(Error::InvalidBinningStrategy(format!(
-                "LinearBins: max is not finite ({})",
-                self.max
-            )));
+        // Both range checks report the pair, so the caller sees which end
+        // is at fault.
+        let range = |requirement| {
+            ParameterError::new(
+                "LinearBins range",
+                requirement,
+                Value::F64Pair(self.min, self.max),
+            )
+        };
+        if !(self.min.is_finite() && self.max.is_finite()) {
+            return Err(range(Requirement::Finite).into());
         }
         if self.min >= self.max {
-            return Err(Error::InvalidBinningStrategy(format!(
-                "LinearBins: min ({}) must be strictly less than max ({})",
-                self.min, self.max
-            )));
+            return Err(range(Requirement::StrictlyOrdered).into());
         }
         if self.bin_count == 0 {
-            return Err(Error::InvalidBinningStrategy(
-                "LinearBins: bin_count must be > 0".to_string(),
-            ));
+            return Err(ParameterError::new(
+                "LinearBins bin_count",
+                Requirement::AtLeast(1),
+                Value::Usize(self.bin_count),
+            )
+            .into());
         }
         Ok(())
     }
@@ -518,25 +521,33 @@ impl CustomBins {
     /// Shared validation used by every `BinningStrategy<V>` impl.
     fn validate_self(&self) -> Result<(), Error> {
         if self.edges.len() < 2 {
-            return Err(Error::InvalidBinningStrategy(format!(
-                "CustomBins: need at least 2 edges, got {}",
-                self.edges.len()
-            )));
+            return Err(ParameterError::new(
+                "CustomBins edge count",
+                Requirement::AtLeast(2),
+                Value::Usize(self.edges.len()),
+            )
+            .into());
         }
         for (i, &e) in self.edges.iter().enumerate() {
             if !e.is_finite() {
-                return Err(Error::InvalidBinningStrategy(format!(
-                    "CustomBins: edge {} is not finite ({})",
-                    i, e
-                )));
+                return Err(ParameterError::new(
+                    "CustomBins edge",
+                    Requirement::Finite,
+                    Value::F64(e),
+                )
+                .at(i)
+                .into());
             }
         }
-        for w in self.edges.windows(2) {
+        for (i, w) in self.edges.windows(2).enumerate() {
             if w[0] >= w[1] {
-                return Err(Error::InvalidBinningStrategy(format!(
-                    "CustomBins: edges must be strictly increasing, found {} >= {}",
-                    w[0], w[1]
-                )));
+                return Err(ParameterError::new(
+                    "CustomBins edge pair",
+                    Requirement::StrictlyOrdered,
+                    Value::F64Pair(w[0], w[1]),
+                )
+                .at(i)
+                .into());
             }
         }
         Ok(())
@@ -644,6 +655,14 @@ impl<const BITS: usize> BinningStrategy<Mono<BITS>> for CustomBins {
 mod tests {
     use super::*;
 
+    /// The rule and value of a rejected configuration, with its index.
+    fn rejection(err: Error) -> (Requirement, Value, Option<usize>) {
+        let Error::InvalidParameter(e) = err else {
+            panic!("expected InvalidParameter, got {err:?}");
+        };
+        (e.requirement(), e.value(), e.index())
+    }
+
     // ── BinIndex ────────────────────────────────────────────────────────────
 
     #[test]
@@ -747,41 +766,52 @@ mod tests {
     fn linear_validate_rejects_non_finite_min() {
         let err =
             <LinearBins as BinningStrategy<f32>>::validate(&lb(f64::NAN, 1.0, 4)).unwrap_err();
-        match err {
-            Error::InvalidBinningStrategy(msg) => assert!(msg.contains("min")),
-            _ => panic!("expected InvalidBinningStrategy"),
-        }
+        // The pair shows which end is at fault.
+        assert_eq!(
+            rejection(err),
+            (Requirement::Finite, Value::F64Pair(f64::NAN, 1.0), None)
+        );
     }
 
     #[test]
     fn linear_validate_rejects_non_finite_max() {
         let err =
             <LinearBins as BinningStrategy<f32>>::validate(&lb(0.0, f64::INFINITY, 4)).unwrap_err();
-        match err {
-            Error::InvalidBinningStrategy(msg) => assert!(msg.contains("max")),
-            _ => panic!("expected InvalidBinningStrategy"),
-        }
+        assert_eq!(
+            rejection(err),
+            (
+                Requirement::Finite,
+                Value::F64Pair(0.0, f64::INFINITY),
+                None
+            )
+        );
     }
 
     #[test]
     fn linear_validate_rejects_min_eq_max() {
         let err = <LinearBins as BinningStrategy<f32>>::validate(&lb(1.0, 1.0, 4)).unwrap_err();
-        assert!(matches!(err, Error::InvalidBinningStrategy(_)));
+        assert_eq!(
+            rejection(err),
+            (Requirement::StrictlyOrdered, Value::F64Pair(1.0, 1.0), None)
+        );
     }
 
     #[test]
     fn linear_validate_rejects_min_gt_max() {
         let err = <LinearBins as BinningStrategy<f32>>::validate(&lb(2.0, 1.0, 4)).unwrap_err();
-        assert!(matches!(err, Error::InvalidBinningStrategy(_)));
+        assert_eq!(
+            rejection(err),
+            (Requirement::StrictlyOrdered, Value::F64Pair(2.0, 1.0), None)
+        );
     }
 
     #[test]
     fn linear_validate_rejects_zero_bin_count() {
         let err = <LinearBins as BinningStrategy<f32>>::validate(&lb(0.0, 1.0, 0)).unwrap_err();
-        match err {
-            Error::InvalidBinningStrategy(msg) => assert!(msg.contains("bin_count")),
-            _ => panic!("expected InvalidBinningStrategy"),
-        }
+        assert_eq!(
+            rejection(err),
+            (Requirement::AtLeast(1), Value::Usize(0), None)
+        );
     }
 
     // ── LinearBins: classification on f32 ───────────────────────────────────
@@ -944,31 +974,51 @@ mod tests {
     #[test]
     fn custom_validate_rejects_zero_or_one_edge() {
         let err = <CustomBins as BinningStrategy<f32>>::validate(&cb(&[])).unwrap_err();
-        assert!(matches!(err, Error::InvalidBinningStrategy(_)));
+        assert_eq!(
+            rejection(err),
+            (Requirement::AtLeast(2), Value::Usize(0), None)
+        );
 
         let err = <CustomBins as BinningStrategy<f32>>::validate(&cb(&[1.0])).unwrap_err();
-        assert!(matches!(err, Error::InvalidBinningStrategy(_)));
+        assert_eq!(
+            rejection(err),
+            (Requirement::AtLeast(2), Value::Usize(1), None)
+        );
     }
 
     #[test]
     fn custom_validate_rejects_non_finite_edge() {
         let err =
             <CustomBins as BinningStrategy<f32>>::validate(&cb(&[0.0, f64::NAN, 1.0])).unwrap_err();
-        match err {
-            Error::InvalidBinningStrategy(msg) => assert!(msg.contains("finite")),
-            _ => panic!("expected InvalidBinningStrategy"),
-        }
+        assert_eq!(
+            rejection(err),
+            (Requirement::Finite, Value::F64(f64::NAN), Some(1))
+        );
     }
 
     #[test]
     fn custom_validate_rejects_non_increasing_edges() {
         let err =
             <CustomBins as BinningStrategy<f32>>::validate(&cb(&[0.0, 1.0, 1.0])).unwrap_err();
-        assert!(matches!(err, Error::InvalidBinningStrategy(_)));
+        assert_eq!(
+            rejection(err),
+            (
+                Requirement::StrictlyOrdered,
+                Value::F64Pair(1.0, 1.0),
+                Some(1)
+            )
+        );
 
         let err =
             <CustomBins as BinningStrategy<f32>>::validate(&cb(&[0.0, 2.0, 1.0])).unwrap_err();
-        assert!(matches!(err, Error::InvalidBinningStrategy(_)));
+        assert_eq!(
+            rejection(err),
+            (
+                Requirement::StrictlyOrdered,
+                Value::F64Pair(2.0, 1.0),
+                Some(1)
+            )
+        );
     }
 
     // ── CustomBins: classification ──────────────────────────────────────────

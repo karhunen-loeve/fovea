@@ -42,7 +42,7 @@
 //! ```
 
 use crate::border::{BorderPolicy, Mirror, compute_interior_region};
-use crate::error::Error;
+use crate::error::{Error, ParameterError, Requirement, Value};
 use crate::image::{Image, ImageView, ImageViewMut};
 use crate::pixel::{
     FromLinear, LinearPixel, MonoF32, RgbF32, ZeroablePixel,
@@ -741,15 +741,21 @@ impl BayerGains {
     /// would erase it — both silent failures at the pixel level, so they
     /// are rejected where the number enters the API.
     pub fn try_new(red: f32, green: f32, blue: f32) -> Result<Self, Error> {
-        let all = [red, green, blue];
-        if all.iter().all(|g| g.is_finite() && *g >= 0.0) {
-            Ok(Self { red, green, blue })
-        } else {
-            Err(Error::InvalidParameter(format!(
-                "BayerGains must be finite and non-negative, got \
-                 red = {red}, green = {green}, blue = {blue}"
-            )))
+        for (name, gain) in [
+            ("red gain", red),
+            ("green gain", green),
+            ("blue gain", blue),
+        ] {
+            if !(gain.is_finite() && gain >= 0.0) {
+                return Err(ParameterError::new(
+                    name,
+                    Requirement::FiniteNonNegative,
+                    Value::F32(gain),
+                )
+                .into());
+            }
         }
+        Ok(Self { red, green, blue })
     }
 
     /// The identity: every gain `1.0`.
@@ -1351,6 +1357,16 @@ mod tests {
         assert!(BayerGains::try_new(-1.0, 1.0, 1.0).is_err());
         assert!(BayerGains::try_new(1.0, f32::NAN, 1.0).is_err());
         assert!(BayerGains::try_new(1.0, 1.0, f32::INFINITY).is_err());
+    }
+
+    #[test]
+    fn try_new_reports_the_first_unusable_gain() {
+        // Green is checked before blue, so the NaN is reported, not the -1.
+        let Err(Error::InvalidParameter(e)) = BayerGains::try_new(1.0, f32::NAN, -1.0) else {
+            panic!("a NaN gain must be rejected as a parameter");
+        };
+        assert_eq!(e.requirement(), Requirement::FiniteNonNegative);
+        assert_eq!(e.value(), Value::F32(f32::NAN));
     }
 
     #[test]

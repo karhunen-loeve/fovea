@@ -1,4 +1,4 @@
-use crate::error::Error;
+use crate::error::{Error, ParameterError, Requirement, Value};
 
 /// The `Size` struct represents the dimensions of an image.
 ///
@@ -327,19 +327,16 @@ impl From<&SignedCoordinate> for SignedCoordinate {
 }
 
 impl TryFrom<Coordinate> for SignedCoordinate {
-    type Error = Error;
+    type Error = core::num::TryFromIntError;
 
     /// Fails only for a position past `isize::MAX` along either axis, which
     /// no pixel of any image can have. [`Coordinate::step`] is the total
     /// alternative for positions that come from an image.
-    fn try_from(value: Coordinate) -> Result<Self, Error> {
-        match (isize::try_from(value.x), isize::try_from(value.y)) {
-            (Ok(x), Ok(y)) => Ok(Self { x, y }),
-            _ => Err(Error::InvalidParameter(format!(
-                "coordinate ({}, {}) does not fit a signed position",
-                value.x, value.y
-            ))),
-        }
+    fn try_from(value: Coordinate) -> Result<Self, Self::Error> {
+        Ok(Self {
+            x: isize::try_from(value.x)?,
+            y: isize::try_from(value.y)?,
+        })
     }
 }
 
@@ -631,9 +628,7 @@ impl Sigma {
         if value.is_finite() && value > 0.0 {
             Ok(Self(value))
         } else {
-            Err(Error::InvalidParameter(format!(
-                "sigma must be finite and strictly positive, got {value}"
-            )))
+            Err(ParameterError::new("sigma", Requirement::FinitePositive, Value::F32(value)).into())
         }
     }
 
@@ -679,13 +674,13 @@ impl Sigma {
 ///
 /// ```compile_fail
 /// use fovea::sigma;
-/// // ERROR: evaluation panicked: sigma must be finite and strictly positive
+/// // ERROR: evaluation panicked: must be finite and strictly positive
 /// let _ = sigma!(0.0);
 /// ```
 #[macro_export]
 macro_rules! sigma {
     ($value:expr) => {
-        const { $crate::Sigma::new($value).expect("sigma must be finite and strictly positive") }
+        const { $crate::Sigma::new($value).expect($crate::error::Requirement::FinitePositive.text()) }
     };
 }
 
@@ -738,9 +733,12 @@ impl PixelDistance {
         if value.is_finite() && value > 0.0 {
             Ok(Self(value))
         } else {
-            Err(Error::InvalidParameter(format!(
-                "pixel distance must be finite and strictly positive, got {value}"
-            )))
+            Err(ParameterError::new(
+                "pixel distance",
+                Requirement::FinitePositive,
+                Value::F64(value),
+            )
+            .into())
         }
     }
 
@@ -773,8 +771,7 @@ impl PixelDistance {
 ///
 /// ```compile_fail
 /// use fovea::pixel_distance;
-/// // ERROR: evaluation panicked: pixel distance must be finite and
-/// // strictly positive
+/// // ERROR: evaluation panicked: must be finite and strictly positive
 /// let _ = pixel_distance!(0.0);
 /// ```
 #[macro_export]
@@ -782,7 +779,7 @@ macro_rules! pixel_distance {
     ($value:expr) => {
         const {
             $crate::PixelDistance::new($value)
-                .expect("pixel distance must be finite and strictly positive")
+                .expect($crate::error::Requirement::FinitePositive.text())
         }
     };
 }
@@ -837,9 +834,12 @@ impl Tolerance {
         if value.is_finite() && value >= 0.0 {
             Ok(Self(value))
         } else {
-            Err(Error::InvalidParameter(format!(
-                "tolerance must be finite and non-negative, got {value}"
-            )))
+            Err(ParameterError::new(
+                "tolerance",
+                Requirement::FiniteNonNegative,
+                Value::F64(value),
+            )
+            .into())
         }
     }
 
@@ -872,13 +872,16 @@ impl Tolerance {
 ///
 /// ```compile_fail
 /// use fovea::tolerance;
-/// // ERROR: evaluation panicked: tolerance must be finite and non-negative
+/// // ERROR: evaluation panicked: must be finite and non-negative
 /// let _ = tolerance!(-0.5);
 /// ```
 #[macro_export]
 macro_rules! tolerance {
     ($value:expr) => {
-        const { $crate::Tolerance::new($value).expect("tolerance must be finite and non-negative") }
+        const {
+            $crate::Tolerance::new($value)
+                .expect($crate::error::Requirement::FiniteNonNegative.text())
+        }
     };
 }
 
@@ -930,7 +933,7 @@ macro_rules! tolerance {
 ///
 /// ```compile_fail
 /// use fovea::window;
-/// // ERROR: evaluation panicked: window side must be odd and non-zero
+/// // ERROR: evaluation panicked: must be odd
 /// let _ = window!(16);
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -962,9 +965,7 @@ impl OddWindowSide {
         if side != 0 && side % 2 == 1 {
             Ok(Self(side))
         } else {
-            Err(Error::InvalidParameter(format!(
-                "window side must be odd and non-zero, got {side}"
-            )))
+            Err(ParameterError::new("window side", Requirement::Odd, Value::Usize(side)).into())
         }
     }
 
@@ -1012,13 +1013,13 @@ impl OddWindowSide {
 ///
 /// ```compile_fail
 /// use fovea::window;
-/// // ERROR: evaluation panicked: window side must be odd and non-zero
+/// // ERROR: evaluation panicked: must be odd
 /// let _ = window!(16);
 /// ```
 #[macro_export]
 macro_rules! window {
     ($side:expr) => {
-        const { $crate::OddWindowSide::new($side).expect("window side must be odd and non-zero") }
+        const { $crate::OddWindowSide::new($side).expect($crate::error::Requirement::Odd.text()) }
     };
 }
 
@@ -1138,9 +1139,7 @@ impl Orientation {
         if radians.is_finite() {
             Ok(Self(wrap_two_pi(radians)))
         } else {
-            Err(Error::InvalidParameter(format!(
-                "orientation must be a finite angle in radians, got {radians}"
-            )))
+            Err(ParameterError::new("orientation", Requirement::Finite, Value::F32(radians)).into())
         }
     }
 
@@ -1284,9 +1283,10 @@ impl AxialOrientation {
         if radians.is_finite() {
             Ok(Self(wrap_pi(radians)))
         } else {
-            Err(Error::InvalidParameter(format!(
-                "axis orientation must be a finite angle in radians, got {radians}"
-            )))
+            Err(
+                ParameterError::new("axis orientation", Requirement::Finite, Value::F64(radians))
+                    .into(),
+            )
         }
     }
 
@@ -1371,14 +1371,11 @@ mod tests {
         // Zero, negative, NaN, infinite: each can flow out of a
         // computation over data, so each is an error value.
         for value in [0.0, -1.0, f32::NAN, f32::INFINITY] {
-            let err = Sigma::try_new(value).unwrap_err();
-            match err {
-                Error::InvalidParameter(reason) => assert!(
-                    reason.contains("sigma"),
-                    "reason {reason:?} does not mention sigma"
-                ),
-                other => panic!("expected InvalidParameter, got {other:?}"),
-            }
+            let Err(Error::InvalidParameter(e)) = Sigma::try_new(value) else {
+                panic!("sigma {value} must be rejected as a parameter");
+            };
+            assert_eq!(e.requirement(), Requirement::FinitePositive);
+            assert_eq!(e.value(), Value::F32(value));
         }
     }
 
@@ -1404,14 +1401,11 @@ mod tests {
     #[test]
     fn pixel_distance_try_new_rejects_invalid_values() {
         for value in [0.0, -2.0, f64::NAN, f64::INFINITY] {
-            let err = PixelDistance::try_new(value).unwrap_err();
-            match err {
-                Error::InvalidParameter(reason) => assert!(
-                    reason.contains("pixel distance"),
-                    "reason {reason:?} does not mention pixel distance"
-                ),
-                other => panic!("expected InvalidParameter, got {other:?}"),
-            }
+            let Err(Error::InvalidParameter(e)) = PixelDistance::try_new(value) else {
+                panic!("pixel distance {value} must be rejected as a parameter");
+            };
+            assert_eq!(e.requirement(), Requirement::FinitePositive);
+            assert_eq!(e.value(), Value::F64(value));
         }
     }
 
@@ -1439,14 +1433,11 @@ mod tests {
         // pixel pitch, say) and land on an even number or zero, so each is
         // an error value rather than a crash.
         for side in [0, 2, 4, 100] {
-            let err = OddWindowSide::try_new(side).unwrap_err();
-            match err {
-                Error::InvalidParameter(reason) => assert!(
-                    reason.contains("odd and non-zero"),
-                    "reason {reason:?} does not name the invariant"
-                ),
-                other => panic!("expected InvalidParameter, got {other:?}"),
-            }
+            let Err(Error::InvalidParameter(e)) = OddWindowSide::try_new(side) else {
+                panic!("window side {side} must be rejected as a parameter");
+            };
+            assert_eq!(e.requirement(), Requirement::Odd);
+            assert_eq!(e.value(), Value::Usize(side));
         }
     }
 
@@ -1510,14 +1501,11 @@ mod tests {
     #[test]
     fn orientation_from_radians_rejects_non_finite() {
         for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
-            let err = Orientation::from_radians(value).unwrap_err();
-            match err {
-                Error::InvalidParameter(reason) => assert!(
-                    reason.contains("orientation"),
-                    "reason {reason:?} does not mention orientation"
-                ),
-                other => panic!("expected InvalidParameter, got {other:?}"),
-            }
+            let Err(Error::InvalidParameter(e)) = Orientation::from_radians(value) else {
+                panic!("orientation {value} must be rejected as a parameter");
+            };
+            assert_eq!(e.requirement(), Requirement::Finite);
+            assert_eq!(e.value(), Value::F32(value));
         }
     }
 
@@ -1632,14 +1620,11 @@ mod tests {
     #[test]
     fn axial_orientation_from_radians_rejects_non_finite() {
         for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-            let err = AxialOrientation::from_radians(value).unwrap_err();
-            match err {
-                Error::InvalidParameter(reason) => assert!(
-                    reason.contains("axis orientation"),
-                    "reason {reason:?} does not mention axis orientation"
-                ),
-                other => panic!("expected InvalidParameter, got {other:?}"),
-            }
+            let Err(Error::InvalidParameter(e)) = AxialOrientation::from_radians(value) else {
+                panic!("axis orientation {value} must be rejected as a parameter");
+            };
+            assert_eq!(e.requirement(), Requirement::Finite);
+            assert_eq!(e.value(), Value::F64(value));
         }
     }
 

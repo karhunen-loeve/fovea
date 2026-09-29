@@ -22,7 +22,7 @@
 //! that and its absolute σ. The two aliases [`PlacedPyramid<P>`] and
 //! [`ScaledPyramid<P>`] name the chains the two Gaussian builders return.
 
-use crate::error::Error;
+use crate::error::{Error, ParameterError, Requirement, Value};
 use crate::image::{Image, ImageView, RasterImage};
 use crate::{CoordinateF64, PixelDistance, Sigma, Size};
 
@@ -767,9 +767,7 @@ impl OriginOffset {
     /// infinite.
     pub fn try_new(x: f64, y: f64) -> Result<Self, Error> {
         Self::new(x, y).ok_or_else(|| {
-            Error::InvalidParameter(format!(
-                "origin offset must be finite along both axes, got ({x}, {y})"
-            ))
+            ParameterError::new("origin offset", Requirement::Finite, Value::F64Pair(x, y)).into()
         })
     }
 

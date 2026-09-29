@@ -19,8 +19,16 @@
 extern crate self as fovea;
 
 mod common;
-mod error;
 mod internal;
+
+/// The crate's error type and the payload of its parameter errors.
+///
+/// [`Error`] is also re-exported at the crate root, where most code names
+/// it. This module holds what [`Error::InvalidParameter`] carries: a
+/// [`ParameterError`](error::ParameterError) with the rejected parameter's
+/// name, the [`Requirement`](error::Requirement) it broke and the
+/// [`Value`](error::Value) it received.
+pub mod error;
 
 /// Image types, views, and containers.
 ///

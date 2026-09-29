@@ -4,7 +4,7 @@
 //! arc of them is entirely brighter, or entirely darker, than the centre.
 
 use crate::border::BorderPolicy;
-use crate::error::Error;
+use crate::error::{Error, ParameterError, Requirement, Value};
 use crate::features::Corner;
 use crate::image::{Decimated, Image, ImageView, RasterImage, RasterImageMut};
 use crate::pixel::{LinearPixel, MonoF32, SingleChannel};
@@ -200,14 +200,20 @@ impl SegmentTest {
     /// strictly positive, or if `arc_length` is outside `9..=16`.
     pub fn try_new(threshold: f32, arc_length: usize) -> Result<Self, Error> {
         if !(threshold.is_finite() && threshold > 0.0) {
-            return Err(Error::InvalidParameter(format!(
-                "FAST threshold must be finite and strictly positive, got {threshold}"
-            )));
+            return Err(ParameterError::new(
+                "FAST threshold",
+                Requirement::FinitePositive,
+                Value::F32(threshold),
+            )
+            .into());
         }
         if !(9..=16).contains(&arc_length) {
-            return Err(Error::InvalidParameter(format!(
-                "FAST arc_length must satisfy 9 <= n <= 16, got {arc_length}"
-            )));
+            return Err(ParameterError::new(
+                "FAST arc_length",
+                Requirement::InRange { min: 9, max: 16 },
+                Value::Usize(arc_length),
+            )
+            .into());
         }
         Ok(Self {
             threshold,
@@ -990,26 +996,22 @@ mod tests {
     #[test]
     fn segment_test_rejects_a_threshold_that_admits_everything() {
         for threshold in [0.0, -0.1, f32::NAN, f32::INFINITY] {
-            match SegmentTest::try_new(threshold, 9).unwrap_err() {
-                Error::InvalidParameter(reason) => assert!(
-                    reason.contains("threshold"),
-                    "reason {reason:?} does not mention the threshold"
-                ),
-                other => panic!("expected InvalidParameter, got {other:?}"),
-            }
+            let Err(Error::InvalidParameter(e)) = SegmentTest::try_new(threshold, 9) else {
+                panic!("threshold {threshold} must be rejected as a parameter");
+            };
+            assert_eq!(e.requirement(), Requirement::FinitePositive);
+            assert_eq!(e.value(), Value::F32(threshold));
         }
     }
 
     #[test]
     fn segment_test_rejects_an_arc_that_admits_edges_or_nothing() {
         for n in [0, 1, 8, 17, 100] {
-            match SegmentTest::try_new(0.1, n).unwrap_err() {
-                Error::InvalidParameter(reason) => assert!(
-                    reason.contains("arc_length"),
-                    "reason {reason:?} does not mention arc_length"
-                ),
-                other => panic!("expected InvalidParameter, got {other:?}"),
-            }
+            let Err(Error::InvalidParameter(e)) = SegmentTest::try_new(0.1, n) else {
+                panic!("arc length {n} must be rejected as a parameter");
+            };
+            assert_eq!(e.requirement(), Requirement::InRange { min: 9, max: 16 });
+            assert_eq!(e.value(), Value::Usize(n));
         }
     }
 
@@ -1038,10 +1040,11 @@ mod tests {
     fn nms_radius_carries_the_at_least_one_invariant() {
         // The validation FastParams and CornerParams used to hand-write.
         assert!(NmsRadius::new(0).is_none());
-        match NmsRadius::try_new(0).unwrap_err() {
-            Error::InvalidParameter(reason) => assert!(reason.contains("radius")),
-            other => panic!("expected InvalidParameter, got {other:?}"),
-        }
+        let Err(Error::InvalidParameter(e)) = NmsRadius::try_new(0) else {
+            panic!("a zero radius must be rejected as a parameter");
+        };
+        assert_eq!(e.requirement(), Requirement::AtLeast(1));
+        assert_eq!(e.value(), Value::Usize(0));
         assert_eq!(NmsRadius::try_new(2).unwrap().get(), 2);
     }
 

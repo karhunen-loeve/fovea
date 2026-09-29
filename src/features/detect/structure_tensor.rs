@@ -7,7 +7,7 @@
 use core::ops::{Add, Mul};
 
 use crate::border::Clamp;
-use crate::error::Error;
+use crate::error::{Error, ParameterError, Requirement, Value};
 use crate::features::Corner;
 use crate::image::{Decimated, Image, ImageView, RasterImage, RasterImageMut};
 use crate::pixel::{FromLinear, LinearPixel, SingleChannel, ZeroablePixel};
@@ -210,9 +210,7 @@ impl Harris {
         if k.is_finite() && k > 0.0 && k < 0.25 {
             Ok(Self(k))
         } else {
-            Err(Error::InvalidParameter(format!(
-                "Harris k must satisfy 0 < k < 0.25, got {k}"
-            )))
+            Err(ParameterError::new("Harris k", HARRIS_K, Value::F32(k)).into())
         }
     }
 
@@ -253,15 +251,29 @@ impl Harris {
 ///
 /// ```compile_fail
 /// use fovea::harris;
-/// // ERROR: evaluation panicked: Harris k must satisfy 0 < k < 0.25
+/// // ERROR: evaluation panicked: must lie strictly between 0 and 0.25
 /// let _ = harris!(0.25);
 /// ```
 #[macro_export]
 macro_rules! harris {
+    // The bounds are part of the wording, and a `const` block cannot format
+    // a float, so this one message is a literal. A test pins it to the
+    // `Display` of the requirement `Harris::try_new` reports.
     ($k:expr) => {
-        const { $crate::features::detect::Harris::new($k).expect("Harris k must satisfy 0 < k < 0.25") }
+        const {
+            $crate::features::detect::Harris::new($k)
+                .expect("must lie strictly between 0 and 0.25")
+        }
     };
 }
+
+/// The invariant of [`Harris`]'s sensitivity, shared by
+/// [`Harris::try_new`] and the test that pins the
+/// [`harris!`](crate::harris) message.
+const HARRIS_K: Requirement = Requirement::OpenInterval {
+    low: 0.0,
+    high: 0.25,
+};
 
 impl<C: CornerResponseChannel> CornerResponse<C> for Harris {
     #[inline(always)]
@@ -602,9 +614,12 @@ impl CornerParams {
     /// infinite.
     pub fn try_new(window: Sigma, threshold: f32, nms_radius: NmsRadius) -> Result<Self, Error> {
         if !threshold.is_finite() {
-            return Err(Error::InvalidParameter(format!(
-                "corner response threshold must be finite, got {threshold}"
-            )));
+            return Err(ParameterError::new(
+                "corner response threshold",
+                Requirement::Finite,
+                Value::F32(threshold),
+            )
+            .into());
         }
         Ok(Self {
             window,
@@ -944,14 +959,19 @@ mod tests {
         // make det − k·tr² non-positive for every tensor, so nothing can
         // ever be detected. Both are silent failures, hence errors.
         for k in [0.0, -0.04, 0.25, 0.5, f32::NAN, f32::INFINITY] {
-            let err = Harris::try_new(k).unwrap_err();
-            match err {
-                Error::InvalidParameter(reason) => {
-                    assert!(reason.contains("k"), "reason {reason:?} does not mention k");
-                }
-                other => panic!("expected InvalidParameter, got {other:?}"),
-            }
+            let Err(Error::InvalidParameter(e)) = Harris::try_new(k) else {
+                panic!("Harris k {k} must be rejected as a parameter");
+            };
+            assert_eq!(e.requirement(), HARRIS_K);
+            assert_eq!(e.value(), Value::F32(k));
         }
+    }
+
+    #[test]
+    fn harris_macro_message_matches_the_runtime_requirement() {
+        // `harris!` cannot format its bounds in a `const` block, so its
+        // message is a literal; this keeps it equal to what `try_new` prints.
+        assert_eq!(HARRIS_K.to_string(), "must lie strictly between 0 and 0.25");
     }
 
     #[test]
@@ -1063,15 +1083,13 @@ mod tests {
     #[test]
     fn corner_params_try_new_rejects_a_non_finite_threshold() {
         for threshold in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
-            let err = CornerParams::try_new(sigma!(1.0), threshold, NmsRadius::new(2).unwrap())
-                .unwrap_err();
-            match err {
-                Error::InvalidParameter(reason) => assert!(
-                    reason.contains("threshold"),
-                    "reason {reason:?} does not mention the threshold"
-                ),
-                other => panic!("expected InvalidParameter, got {other:?}"),
-            }
+            let Err(Error::InvalidParameter(e)) =
+                CornerParams::try_new(sigma!(1.0), threshold, NmsRadius::new(2).unwrap())
+            else {
+                panic!("threshold {threshold} must be rejected as a parameter");
+            };
+            assert_eq!(e.requirement(), Requirement::Finite);
+            assert_eq!(e.value(), Value::F32(threshold));
         }
     }
 

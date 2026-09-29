@@ -79,6 +79,7 @@ pub use structural::{SsimParams, ssim, ssim_map};
 
 use crate::Error;
 use crate::analyze::statistics::StatisticsChannel;
+use crate::error::{ParameterError, Requirement, Value};
 use crate::pixel::WhiteChannel;
 
 /// The value a quality metric treats as full scale: finite and strictly
@@ -169,9 +170,10 @@ impl PeakValue {
         if value.is_finite() && value > 0.0 {
             Ok(Self(value))
         } else {
-            Err(Error::InvalidParameter(format!(
-                "peak value must be finite and strictly positive, got {value}"
-            )))
+            Err(
+                ParameterError::new("peak value", Requirement::FinitePositive, Value::F64(value))
+                    .into(),
+            )
         }
     }
 
@@ -240,8 +242,7 @@ impl PeakValue {
 ///
 /// ```compile_fail
 /// use fovea::peak;
-/// // ERROR: evaluation panicked: peak value must be finite and strictly
-/// // positive
+/// // ERROR: evaluation panicked: must be finite and strictly positive
 /// let _ = peak!(0.0);
 /// ```
 #[macro_export]
@@ -249,7 +250,7 @@ macro_rules! peak {
     ($value:expr) => {
         const {
             $crate::analyze::quality::PeakValue::new($value)
-                .expect("peak value must be finite and strictly positive")
+                .expect($crate::error::Requirement::FinitePositive.text())
         }
     };
 }
