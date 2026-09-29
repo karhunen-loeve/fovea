@@ -142,13 +142,13 @@ where
         }
     }
 
-    /// Creates a new `Neighborhood` with the given weight data and an
-    /// explicit anchor position.
+    /// Creates a new `Neighborhood` with the given weight data and the
+    /// anchor at `(AX, AY)`.
     ///
-    /// # Panics
-    ///
-    /// Panics if `anchor` is outside the kernel bounds
-    /// (`anchor.x >= KW || anchor.y >= KH`).
+    /// The anchor is a pair of const generics, like the kernel size, so an
+    /// anchor outside the kernel is a **compile error** rather than a panic:
+    /// the bound `AX < KW && AY < KH` is checked in a `const` block when the
+    /// call is compiled.
     ///
     /// # Example
     ///
@@ -156,28 +156,35 @@ where
     /// use fovea::Coordinate;
     /// use fovea::image::Neighborhood;
     ///
-    /// // Anchor at top-left corner
-    /// let kernel = Neighborhood::<f32, 3, 3>::with_anchor(
-    ///     [1.0; 9],
-    ///     Coordinate::new(0, 0),
-    /// );
+    /// // Anchor at the top-left corner
+    /// let kernel = Neighborhood::<f32, 3, 3>::with_anchor::<0, 0>([1.0; 9]);
     /// assert_eq!(kernel.anchor(), Coordinate::new(0, 0));
     /// ```
-    pub fn with_anchor(
+    ///
+    /// An anchor outside the kernel does not build:
+    ///
+    /// ```compile_fail
+    /// use fovea::image::Neighborhood;
+    ///
+    /// // ERROR: evaluation panicked: the anchor lies outside the kernel
+    /// let _ = Neighborhood::<f32, 3, 3>::with_anchor::<3, 1>([1.0; 9]);
+    /// ```
+    ///
+    /// ```compile_fail
+    /// use fovea::image::Neighborhood;
+    ///
+    /// // ERROR: evaluation panicked: the anchor lies outside the kernel
+    /// let _ = Neighborhood::<f32, 3, 3>::with_anchor::<1, 3>([1.0; 9]);
+    /// ```
+    pub fn with_anchor<const AX: usize, const AY: usize>(
         data: <private::Dim<W, KW, KH> as private::_Array2D>::Array,
-        anchor: Coordinate,
     ) -> Self {
-        assert!(
-            anchor.x < KW && anchor.y < KH,
-            "anchor ({}, {}) is out of bounds for {}x{} kernel",
-            anchor.x,
-            anchor.y,
-            KW,
-            KH,
-        );
+        const {
+            assert!(AX < KW && AY < KH, "the anchor lies outside the kernel");
+        }
         Self {
             weights: ImageArray::new(data),
-            anchor,
+            anchor: Coordinate::new(AX, AY),
         }
     }
 
@@ -904,26 +911,14 @@ mod tests {
 
     #[test]
     fn test_with_anchor_custom() {
-        let k = Neighborhood::<f32, 3, 3>::with_anchor([0.0; 9], Coordinate::new(0, 0));
+        let k = Neighborhood::<f32, 3, 3>::with_anchor::<0, 0>([0.0; 9]);
         assert_eq!(k.anchor(), Coordinate::new(0, 0));
     }
 
     #[test]
     fn test_with_anchor_bottom_right() {
-        let k = Neighborhood::<f32, 3, 3>::with_anchor([0.0; 9], Coordinate::new(2, 2));
+        let k = Neighborhood::<f32, 3, 3>::with_anchor::<2, 2>([0.0; 9]);
         assert_eq!(k.anchor(), Coordinate::new(2, 2));
-    }
-
-    #[test]
-    #[should_panic(expected = "out of bounds")]
-    fn test_with_anchor_out_of_bounds_x() {
-        Neighborhood::<f32, 3, 3>::with_anchor([0.0; 9], Coordinate::new(3, 1));
-    }
-
-    #[test]
-    #[should_panic(expected = "out of bounds")]
-    fn test_with_anchor_out_of_bounds_y() {
-        Neighborhood::<f32, 3, 3>::with_anchor([0.0; 9], Coordinate::new(1, 3));
     }
 
     // ── Accessors ───────────────────────────────────────────────────
@@ -998,10 +993,9 @@ mod tests {
 
     #[test]
     fn test_positions_custom_anchor() {
-        let k = Neighborhood::<f32, 3, 3>::with_anchor(
-            [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0],
-            Coordinate::new(0, 0),
-        );
+        let k = Neighborhood::<f32, 3, 3>::with_anchor::<0, 0>([
+            1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0,
+        ]);
         let positions: Vec<_> = k.positions().collect();
         // With anchor at (0,0), dx and dy are all non-negative
         assert_eq!(positions[0], (Offset::new(0, 0), 1.0));
@@ -1441,7 +1435,7 @@ mod tests {
 
     #[test]
     fn test_clone_with_custom_anchor() {
-        let k = Neighborhood::<f32, 3, 3>::with_anchor([1.0; 9], Coordinate::new(0, 2));
+        let k = Neighborhood::<f32, 3, 3>::with_anchor::<0, 2>([1.0; 9]);
         let k2 = k.clone();
         assert_eq!(k2.anchor(), Coordinate::new(0, 2));
         assert_eq!(k2.as_slice(), k.as_slice());
@@ -1631,11 +1625,11 @@ mod tests {
 
     #[test]
     fn test_flipped_non_centered_anchor() {
-        let kernel = Neighborhood::<f32, 3, 3>::with_anchor([1.0; 9], Coordinate::new(0, 0));
+        let kernel = Neighborhood::<f32, 3, 3>::with_anchor::<0, 0>([1.0; 9]);
         let flipped = kernel.flipped();
         assert_eq!(flipped.anchor(), Coordinate::new(2, 2));
 
-        let kernel2 = Neighborhood::<f32, 5, 3>::with_anchor([1.0; 15], Coordinate::new(1, 0));
+        let kernel2 = Neighborhood::<f32, 5, 3>::with_anchor::<1, 0>([1.0; 15]);
         let flipped2 = kernel2.flipped();
         assert_eq!(flipped2.anchor(), Coordinate::new(3, 2));
     }
@@ -1699,7 +1693,7 @@ mod tests {
     #[test]
     fn test_kernel_trait_anchor_matches_method() {
         use crate::image::Kernel;
-        let kernel = Neighborhood::<f32, 3, 3>::with_anchor([1.0; 9], Coordinate::new(2, 0));
+        let kernel = Neighborhood::<f32, 3, 3>::with_anchor::<2, 0>([1.0; 9]);
         assert_eq!(Kernel::anchor(&kernel), Neighborhood::anchor(&kernel));
     }
 }

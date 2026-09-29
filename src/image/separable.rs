@@ -185,45 +185,53 @@ impl<const HK: usize, const VK: usize> SeparableKernel<HK, VK> {
         }
     }
 
-    /// Creates a separable kernel with explicit weights and explicit
-    /// anchor positions.
+    /// Creates a separable kernel with explicit weights and the anchors at
+    /// `HA` (horizontal) and `VA` (vertical).
     ///
-    /// # Panics
-    ///
-    /// Panics if `h_anchor >= HK` or `v_anchor >= VK`.
+    /// The anchors are const generics, like the kernel lengths, so an anchor
+    /// outside its kernel is a **compile error** rather than a panic: the
+    /// bounds `HA < HK` and `VA < VK` are checked in a `const` block when the
+    /// call is compiled.
     ///
     /// # Example
     ///
     /// ```
     /// use fovea::image::SeparableKernel;
     ///
-    /// let k = SeparableKernel::with_anchors(
-    ///     [1.0, 0.0, 0.0], 0,
-    ///     [0.0, 0.0, 1.0], 2,
-    /// );
+    /// let k = SeparableKernel::with_anchors::<0, 2>([1.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
     /// assert_eq!(k.h_anchor(), 0);
     /// assert_eq!(k.v_anchor(), 2);
     /// ```
-    pub fn with_anchors(
+    ///
+    /// An anchor outside its kernel does not build:
+    ///
+    /// ```compile_fail
+    /// use fovea::image::SeparableKernel;
+    ///
+    /// // ERROR: evaluation panicked: the horizontal anchor lies outside the kernel
+    /// let _ = SeparableKernel::with_anchors::<3, 0>([1.0, 2.0, 3.0], [1.0]);
+    /// ```
+    ///
+    /// ```compile_fail
+    /// use fovea::image::SeparableKernel;
+    ///
+    /// // ERROR: evaluation panicked: the vertical anchor lies outside the kernel
+    /// let _ = SeparableKernel::with_anchors::<0, 2>([1.0], [1.0, 2.0]);
+    /// ```
+    pub fn with_anchors<const HA: usize, const VA: usize>(
         h_weights: [f32; HK],
-        h_anchor: usize,
         v_weights: [f32; VK],
-        v_anchor: usize,
     ) -> Self {
         let () = Self::_ASSERT_NONZERO;
-        assert!(
-            h_anchor < HK,
-            "h_anchor ({h_anchor}) out of bounds for horizontal kernel of size {HK}"
-        );
-        assert!(
-            v_anchor < VK,
-            "v_anchor ({v_anchor}) out of bounds for vertical kernel of size {VK}"
-        );
+        const {
+            assert!(HA < HK, "the horizontal anchor lies outside the kernel");
+            assert!(VA < VK, "the vertical anchor lies outside the kernel");
+        }
         Self {
             h_weights,
-            h_anchor,
+            h_anchor: HA,
             v_weights,
-            v_anchor,
+            v_anchor: VA,
         }
     }
 
@@ -257,10 +265,7 @@ impl<const HK: usize, const VK: usize> SeparableKernel<HK, VK> {
     /// ```
     /// use fovea::image::SeparableKernel;
     ///
-    /// let k = SeparableKernel::with_anchors(
-    ///     [1.0, 2.0, 3.0], 0,
-    ///     [4.0, 5.0], 0,
-    /// );
+    /// let k = SeparableKernel::with_anchors::<0, 0>([1.0, 2.0, 3.0], [4.0, 5.0]);
     /// let f = k.flipped();
     /// assert_eq!(f.h_weights(), &[3.0, 2.0, 1.0]);
     /// assert_eq!(f.v_weights(), &[5.0, 4.0]);
@@ -716,23 +721,11 @@ mod tests {
 
     #[test]
     fn with_anchors_explicit() {
-        let k = SeparableKernel::with_anchors([1.0, 2.0, 3.0], 0, [4.0, 5.0], 1);
+        let k = SeparableKernel::with_anchors::<0, 1>([1.0, 2.0, 3.0], [4.0, 5.0]);
         assert_eq!(k.h_anchor(), 0);
         assert_eq!(k.v_anchor(), 1);
         assert_eq!(k.h_weights(), &[1.0, 2.0, 3.0]);
         assert_eq!(k.v_weights(), &[4.0, 5.0]);
-    }
-
-    #[test]
-    #[should_panic(expected = "h_anchor")]
-    fn with_anchors_h_out_of_bounds() {
-        SeparableKernel::with_anchors([1.0, 2.0, 3.0], 3, [1.0], 0);
-    }
-
-    #[test]
-    #[should_panic(expected = "v_anchor")]
-    fn with_anchors_v_out_of_bounds() {
-        SeparableKernel::with_anchors([1.0], 0, [1.0, 2.0], 2);
     }
 
     #[test]
@@ -755,7 +748,7 @@ mod tests {
 
     #[test]
     fn flipped_mirrors_anchors() {
-        let k = SeparableKernel::with_anchors([1.0, 2.0, 3.0], 0, [4.0, 5.0, 6.0], 2);
+        let k = SeparableKernel::with_anchors::<0, 2>([1.0, 2.0, 3.0], [4.0, 5.0, 6.0]);
         let f = k.flipped();
         assert_eq!(f.h_anchor(), 2); // 3 - 1 - 0
         assert_eq!(f.v_anchor(), 0); // 3 - 1 - 2
@@ -771,7 +764,7 @@ mod tests {
 
     #[test]
     fn flipped_involution() {
-        let k = SeparableKernel::with_anchors([1.0, 2.0, 3.0], 0, [4.0, 5.0], 1);
+        let k = SeparableKernel::with_anchors::<0, 1>([1.0, 2.0, 3.0], [4.0, 5.0]);
         let ff = k.flipped().flipped();
         assert_eq!(k, ff);
     }
@@ -918,7 +911,7 @@ mod tests {
 
     #[test]
     fn clone_produces_equal_kernel() {
-        let k = SeparableKernel::with_anchors([1.0, 2.0, 3.0], 0, [4.0, 5.0], 1);
+        let k = SeparableKernel::with_anchors::<0, 1>([1.0, 2.0, 3.0], [4.0, 5.0]);
         let c = k.clone();
         assert_eq!(k, c);
     }
@@ -941,8 +934,8 @@ mod tests {
 
     #[test]
     fn partial_eq_different_anchors() {
-        let a = SeparableKernel::with_anchors([1.0, 2.0, 3.0], 0, [1.0], 0);
-        let b = SeparableKernel::with_anchors([1.0, 2.0, 3.0], 2, [1.0], 0);
+        let a = SeparableKernel::with_anchors::<0, 0>([1.0, 2.0, 3.0], [1.0]);
+        let b = SeparableKernel::with_anchors::<2, 0>([1.0, 2.0, 3.0], [1.0]);
         assert_ne!(a, b);
     }
 
@@ -1148,7 +1141,7 @@ mod tests {
         // The trait must not paraphrase the struct: same weights, same
         // anchors, same flip — including for an asymmetric kernel, where a
         // wrong flip would be invisible on a palindrome.
-        let k = SeparableKernel::with_anchors([1.0, 2.0, 3.0], 0, [4.0, 5.0], 1);
+        let k = SeparableKernel::with_anchors::<0, 1>([1.0, 2.0, 3.0], [4.0, 5.0]);
 
         assert_eq!(SeparableWeights::h_weights(&k), &k.h_weights()[..]);
         assert_eq!(SeparableWeights::v_weights(&k), &k.v_weights()[..]);

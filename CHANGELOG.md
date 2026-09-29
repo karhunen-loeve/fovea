@@ -89,6 +89,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pairs, spelled `isize` where `Offset` is `i32`. **Migration:** read
   `item.offset.dx` for `item.dx`, and destructure `(offset, w)` or
   `(Offset { dx, dy }, w)`.
+- **Breaking:** a kernel's explicit anchor is a pair of const generics, so
+  an anchor outside the kernel no longer panics at run time but fails to
+  build. `Neighborhood::with_anchor::<AX, AY>(data)` replaces
+  `with_anchor(data, anchor)`, and
+  `SeparableKernel::with_anchors::<HA, VA>(h_weights, v_weights)` replaces
+  `with_anchors(h_weights, h_anchor, v_weights, v_anchor)`. The kernel's
+  size was already const generic, and every anchor in the crate was a
+  literal. **Migration:** `with_anchor(data, Coordinate::new(0, 2))`
+  becomes `with_anchor::<0, 2>(data)`; `with_anchors(h, 0, v, 2)` becomes
+  `with_anchors::<0, 2>(h, v)`.
 
 ### Documentation
 

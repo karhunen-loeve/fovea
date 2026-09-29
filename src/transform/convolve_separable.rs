@@ -966,7 +966,7 @@ mod tests {
         let src = Image::generate(5, 5, |x, y| MonoF32((x * 10 + y) as f32));
 
         // h = [1, 0, 0], anchor 1 ; v = [0, 0, 1], anchor 1
-        let sep = SeparableKernel::with_anchors([1.0, 0.0, 0.0], 1, [0.0, 0.0, 1.0], 1);
+        let sep = SeparableKernel::with_anchors::<1, 1>([1.0, 0.0, 0.0], [0.0, 0.0, 1.0]);
         let result: Image<MonoF32> = convolve_separable(&src, &sep, &Clamp);
 
         // The correlation core does not flip, so to match the (flipping)
@@ -974,8 +974,8 @@ mod tests {
         // by hand: convolution ≡ correlation with the 180°-rotated kernel.
         // h = [1, 0, 0]/anchor 1 → flipped [0, 0, 1]/anchor 1;
         // v = [0, 0, 1]/anchor 1 → flipped [1, 0, 0]/anchor 1.
-        let h = Neighborhood::<f32, 3, 1>::with_anchor([0.0, 0.0, 1.0], Coordinate::new(1, 0));
-        let v = Neighborhood::<f32, 1, 3>::with_anchor([1.0, 0.0, 0.0], Coordinate::new(0, 1));
+        let h = Neighborhood::<f32, 3, 1>::with_anchor::<1, 0>([0.0, 0.0, 1.0]);
+        let v = Neighborhood::<f32, 1, 3>::with_anchor::<0, 1>([1.0, 0.0, 0.0]);
         let raw: Image<MonoF32> = correlate_separable_raw(
             &src,
             h.weights(),
@@ -1526,8 +1526,8 @@ mod tests {
     fn separable_order_h_then_v() {
         let src = Image::generate(5, 5, |x, y| MonoF32((x * 10 + y) as f32));
 
-        let h = Neighborhood::<f32, 3, 1>::with_anchor([1.0, 0.0, 0.0], Coordinate::new(1, 0));
-        let v = Neighborhood::<f32, 1, 3>::with_anchor([0.0, 0.0, 1.0], Coordinate::new(0, 1));
+        let h = Neighborhood::<f32, 3, 1>::with_anchor::<1, 0>([1.0, 0.0, 0.0]);
+        let v = Neighborhood::<f32, 1, 3>::with_anchor::<0, 1>([0.0, 0.0, 1.0]);
 
         let result_hv: Image<MonoF32> = correlate_separable_raw(
             &src,
@@ -1538,8 +1538,8 @@ mod tests {
             &Clamp,
         );
 
-        let h2 = Neighborhood::<f32, 3, 1>::with_anchor([0.0, 0.0, 1.0], Coordinate::new(1, 0));
-        let v2 = Neighborhood::<f32, 1, 3>::with_anchor([1.0, 0.0, 0.0], Coordinate::new(0, 1));
+        let h2 = Neighborhood::<f32, 3, 1>::with_anchor::<1, 0>([0.0, 0.0, 1.0]);
+        let v2 = Neighborhood::<f32, 1, 3>::with_anchor::<0, 1>([1.0, 0.0, 0.0]);
 
         let result_vh: Image<MonoF32> = correlate_separable_raw(
             &src,

@@ -1243,10 +1243,9 @@ mod tests {
         let src = make_5x5();
         // Weight 1.0 at array position [0][0] = anchor (0,0), all others 0.0.
         // sum_fold will return pixel_at(anchor) * 1.0 = the source pixel.
-        let kernel = Neighborhood::<f32, 3, 3>::with_anchor(
-            [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-            Coordinate::new(0, 0),
-        );
+        let kernel = Neighborhood::<f32, 3, 3>::with_anchor::<0, 0>([
+            1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        ]);
 
         // With anchor at (0,0): left margin = 0, top margin = 0,
         // right margin = 2, bottom margin = 2.
@@ -1886,10 +1885,9 @@ mod tests {
         // Asymmetric weights with an off-centre anchor: the interior
         // rectangle is not symmetric, so an `acc_row` sized or offset
         // wrongly would show up here.
-        let kernel = Neighborhood::<f32, 3, 3>::with_anchor(
-            [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
-            Coordinate::new(0, 2),
-        );
+        let kernel = Neighborhood::<f32, 3, 3>::with_anchor::<0, 2>([
+            0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0,
+        ]);
 
         let mut scratch = FoldScratch::new();
 
