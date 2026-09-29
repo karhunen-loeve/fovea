@@ -39,6 +39,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `fovea::Error` stays at the crate root.
 - `Error::WindowLargerThanImage { window, image }`, returned by `ssim` and
   `ssim_map` when no position has the whole window inside the image.
+- **Complex pixels, `pixel::ComplexF32` and `pixel::ComplexF64`.** One
+  complex value `re + im·i` per pixel, laid out as two floats with `re`
+  first. `*` between two of them is the complex product, so `PixelMultiply`
+  multiplies complex images as complex numbers; `+`, `-`, negation and
+  multiplication by a real scalar work on both parts. Methods `magnitude`,
+  `phase`, `conjugate` and `norm_sqr`. They are `HomogeneousPixel`, so
+  `ImagePlanes` splits a complex image into its two planes, and
+  `LinearSpace`, so blurring, resizing and blending work. They are **not**
+  `ChannelwiseMath`, `WhiteChannel` or `PartialOrd`: a per-part maximum,
+  difference, threshold or gradient magnitude of a complex image does not
+  compile, because it depends on where the real axis lies.
+- Four conversion strategies from a complex image to a real one,
+  `RealPart`, `ImaginaryPart`, `ComplexMagnitude` and `ComplexPhase`
+  (`ComplexF32` to `MonoF32`, `ComplexF64` to `MonoF64`), and the combiner
+  `FromParts`, which builds a complex image from a real and an imaginary one
+  through `combine_images`. `ComplexMultiply` names the complex product of
+  two complex images.
 
 ### Changed
 
@@ -147,7 +164,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `AxialOrientation`, and vector quantities such as complex amplitudes. It
   shows how `HomogeneousPixel` (layout) and `ChannelwiseMath` (level) keep
   the two questions apart, and where one marker is stricter than the
-  systematic requires.
+  systematic requires. Its section on vector quantities says how
+  `ComplexF32` and `ComplexF64` map onto them, and the quick choice table of
+  `guide::pixel_types` lists them.
 
 ## [0.5.1] — 2026-09-22
 

@@ -21,7 +21,10 @@ use std::ops::Sub as StdSub;
 
 use crate::error::Error;
 use crate::image::{Image, RasterImage, RasterImageMut};
-use crate::pixel::{ChannelwiseMath, HomogeneousPixel, LinearPixel, LinearSpace, ZeroablePixel};
+use crate::pixel::{
+    ChannelwiseMath, ComplexF32, ComplexF64, HomogeneousPixel, LinearPixel, LinearSpace, MonoF32,
+    MonoF64, ZeroablePixel,
+};
 
 // ─── CombinePixels trait ─────────────────────────────────────────────────────
 
@@ -828,6 +831,91 @@ where
             result.set_channel(i, DirectionChannel::direction(a.channel(i), b.channel(i)));
         }
         result
+    }
+}
+
+// ─── Complex ─────────────────────────────────────────────────────────────────
+
+/// A complex image from a real and an imaginary one.
+///
+/// The way back from [`RealPart`](crate::transform::RealPart) and
+/// [`ImaginaryPart`](crate::transform::ImaginaryPart): the first image gives
+/// `re`, the second `im`. Through [`combine_images`] the two must have the
+/// same size, which is checked there. `MonoF32` pairs give `ComplexF32`,
+/// `MonoF64` pairs give `ComplexF64`.
+///
+/// # Example
+///
+/// ```
+/// use fovea::image::{Image, ImageView};
+/// use fovea::pixel::{ComplexF32, MonoF32};
+/// use fovea::transform::{FromParts, combine_images};
+///
+/// let re = Image::fill(2, 2, MonoF32::new(3.0));
+/// let im = Image::fill(2, 2, MonoF32::new(4.0));
+/// let z = combine_images(&re, &im, FromParts)?;
+/// assert_eq!(z.pixel_at(1, 1), ComplexF32::new(3.0, 4.0));
+/// # Ok::<(), fovea::Error>(())
+/// ```
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct FromParts;
+
+impl CombinePixels<MonoF32, MonoF32> for FromParts {
+    type Output = ComplexF32;
+
+    #[inline(always)]
+    fn combine(&self, re: &MonoF32, im: &MonoF32) -> ComplexF32 {
+        ComplexF32::new(re.0, im.0)
+    }
+}
+
+impl CombinePixels<MonoF64, MonoF64> for FromParts {
+    type Output = ComplexF64;
+
+    #[inline(always)]
+    fn combine(&self, re: &MonoF64, im: &MonoF64) -> ComplexF64 {
+        ComplexF64::new(re.0, im.0)
+    }
+}
+
+/// The complex product of two complex images, pixel by pixel.
+///
+/// `(a + bi)(c + di) = (ac − bd) + (ad + bc)i` at every pixel. The same
+/// result as [`PixelMultiply`], which uses the pixel's `*`, and on a
+/// complex pixel `*` is the complex product; this name says so at the call
+/// site.
+///
+/// # Example
+///
+/// ```
+/// use fovea::image::{Image, ImageView};
+/// use fovea::pixel::ComplexF32;
+/// use fovea::transform::{ComplexMultiply, combine_images};
+///
+/// let a = Image::fill(2, 2, ComplexF32::new(1.0, 2.0));
+/// let b = Image::fill(2, 2, ComplexF32::new(3.0, -1.0));
+/// let product = combine_images(&a, &b, ComplexMultiply)?;
+/// assert_eq!(product.pixel_at(0, 0), ComplexF32::new(5.0, 5.0));
+/// # Ok::<(), fovea::Error>(())
+/// ```
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ComplexMultiply;
+
+impl CombinePixels<ComplexF32, ComplexF32> for ComplexMultiply {
+    type Output = ComplexF32;
+
+    #[inline(always)]
+    fn combine(&self, a: &ComplexF32, b: &ComplexF32) -> ComplexF32 {
+        *a * *b
+    }
+}
+
+impl CombinePixels<ComplexF64, ComplexF64> for ComplexMultiply {
+    type Output = ComplexF64;
+
+    #[inline(always)]
+    fn combine(&self, a: &ComplexF64, b: &ComplexF64) -> ComplexF64 {
+        *a * *b
     }
 }
 

@@ -12,11 +12,11 @@ use crate::pixel::bayer::{
 };
 use crate::pixel::{
     Array, Bgr8, Bgr16, Bgr32, Bgr64, BgrF32, BgrF64, Bgra8, Bgra16, Bgra32, Bgra64, BgraF32,
-    BgraF64, ChannelwiseMath, HomogeneousPixel, Indexed8, Mono, Mono8, Mono16, Mono32, Mono64,
-    MonoA8, MonoA16, MonoA32, MonoA64, MonoAF32, MonoAF64, MonoF32, MonoF64, PlainChannel, Rgb8,
-    Rgb16, Rgb32, Rgb64, RgbF32, RgbF64, Rgba8, Rgba16, Rgba32, Rgba64, RgbaF32, RgbaF64, Srgb8,
-    Srgb16, SrgbBgr8, SrgbBgr16, SrgbBgra8, SrgbBgra16, SrgbMono8, SrgbMono16, SrgbMonoA8,
-    SrgbMonoA16, Srgba8, Srgba16, WhiteChannel, ZeroablePixel,
+    BgraF64, ChannelwiseMath, ComplexF32, ComplexF64, HomogeneousPixel, Indexed8, Mono, Mono8,
+    Mono16, Mono32, Mono64, MonoA8, MonoA16, MonoA32, MonoA64, MonoAF32, MonoAF64, MonoF32,
+    MonoF64, PlainChannel, Rgb8, Rgb16, Rgb32, Rgb64, RgbF32, RgbF64, Rgba8, Rgba16, Rgba32,
+    Rgba64, RgbaF32, RgbaF64, Srgb8, Srgb16, SrgbBgr8, SrgbBgr16, SrgbBgra8, SrgbBgra16, SrgbMono8,
+    SrgbMono16, SrgbMonoA8, SrgbMonoA16, Srgba8, Srgba16, WhiteChannel, ZeroablePixel,
 };
 
 // ───────────────────────────────────────────────────────────────────────────────
@@ -2740,6 +2740,131 @@ macro_rules! impl_bayer_to_mono_generic {
 }
 
 impl_bayer_to_mono_generic!(BayerRggb, BayerBggr, BayerGrbg, BayerGbrg);
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Complex parts: RealPart, ImaginaryPart, ComplexMagnitude, ComplexPhase
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// The real part of a complex pixel, as a real one.
+///
+/// One of four named ways from a complex image to a real one, beside
+/// [`ImaginaryPart`], [`ComplexMagnitude`] and [`ComplexPhase`]. Each keeps
+/// one real number of the two, so each is a loss the caller names.
+/// [`FromParts`](crate::transform::FromParts) goes back from a real and an
+/// imaginary image.
+///
+/// The magnitude survives a common phase rotation of the whole image; a part
+/// on its own does not, because it depends on where the real axis lies. The
+/// two parts are therefore meant for data whose phase reference is fixed by
+/// construction, such as an analytic signal, whose real part is the signal
+/// itself.
+///
+/// `ComplexF32` converts to `MonoF32`, `ComplexF64` to `MonoF64`.
+///
+/// # Example
+///
+/// ```
+/// # use fovea::image::{Image, ImageView};
+/// # use fovea::pixel::{ComplexF32, MonoF32};
+/// # use fovea::transform::{RealPart, convert_image};
+/// let z = Image::fill(2, 2, ComplexF32::new(3.0, 4.0));
+/// let re: Image<MonoF32> = convert_image(&z, RealPart);
+/// assert_eq!(re.pixel_at(0, 0), MonoF32::new(3.0));
+/// ```
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RealPart;
+
+/// The imaginary part of a complex pixel, as a real one.
+///
+/// See [`RealPart`] for the family.
+///
+/// # Example
+///
+/// ```
+/// # use fovea::image::{Image, ImageView};
+/// # use fovea::pixel::{ComplexF64, MonoF64};
+/// # use fovea::transform::{ImaginaryPart, convert_image};
+/// let z = Image::fill(2, 2, ComplexF64::new(3.0, 4.0));
+/// let im: Image<MonoF64> = convert_image(&z, ImaginaryPart);
+/// assert_eq!(im.pixel_at(0, 0), MonoF64::new(4.0));
+/// ```
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ImaginaryPart;
+
+/// The absolute value `|z|` of a complex pixel, as a real one.
+///
+/// Per pixel this is [`ComplexF32::magnitude`]. It is a different operation
+/// from the [`Magnitude`](crate::transform::Magnitude) combiner, which takes
+/// two real gradient images. See [`RealPart`] for the family.
+///
+/// # Example
+///
+/// ```
+/// # use fovea::image::{Image, ImageView};
+/// # use fovea::pixel::{ComplexF32, MonoF32};
+/// # use fovea::transform::{ComplexMagnitude, convert_image};
+/// let z = Image::fill(2, 2, ComplexF32::new(3.0, 4.0));
+/// let mag: Image<MonoF32> = convert_image(&z, ComplexMagnitude);
+/// assert_eq!(mag.pixel_at(0, 0), MonoF32::new(5.0));
+/// ```
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ComplexMagnitude;
+
+/// The argument of a complex pixel in radians, in `(−π, π]`, as a real one.
+///
+/// Per pixel this is [`ComplexF32::phase`]. See [`RealPart`] for the family.
+///
+/// # Example
+///
+/// ```
+/// # use fovea::image::{Image, ImageView};
+/// # use fovea::pixel::{ComplexF32, MonoF32};
+/// # use fovea::transform::{ComplexPhase, convert_image};
+/// let z = Image::fill(2, 2, ComplexF32::new(0.0, 2.0));
+/// let phase: Image<MonoF32> = convert_image(&z, ComplexPhase);
+/// assert_eq!(phase.pixel_at(0, 0), MonoF32::new(core::f32::consts::FRAC_PI_2));
+/// ```
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ComplexPhase;
+
+macro_rules! impl_complex_parts {
+    ($($Complex:ty => $Mono:ty),+ $(,)?) => {
+        $(
+            impl ConvertPixel<$Complex, $Mono> for RealPart {
+                #[inline]
+                fn convert(&self, src: &$Complex) -> $Mono {
+                    <$Mono>::new(src.re)
+                }
+            }
+
+            impl ConvertPixel<$Complex, $Mono> for ImaginaryPart {
+                #[inline]
+                fn convert(&self, src: &$Complex) -> $Mono {
+                    <$Mono>::new(src.im)
+                }
+            }
+
+            impl ConvertPixel<$Complex, $Mono> for ComplexMagnitude {
+                #[inline]
+                fn convert(&self, src: &$Complex) -> $Mono {
+                    <$Mono>::new(src.magnitude())
+                }
+            }
+
+            impl ConvertPixel<$Complex, $Mono> for ComplexPhase {
+                #[inline]
+                fn convert(&self, src: &$Complex) -> $Mono {
+                    <$Mono>::new(src.phase())
+                }
+            }
+        )+
+    };
+}
+
+impl_complex_parts! {
+    ComplexF32 => MonoF32,
+    ComplexF64 => MonoF64,
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // PixelMap — closure-based custom conversion

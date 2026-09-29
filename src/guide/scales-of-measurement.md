@@ -128,13 +128,23 @@ operations are the ones that are invariant under its admissible
 transformations. Derived quantities fall back into the families above: the
 magnitude is a ratio scale, the phase is a circular scale.
 
+In fovea these values are `ComplexF32` and `ComplexF64`. Their layout is two
+floats, so they are `HomogeneousPixel` and an image of them splits into
+planes. They are `LinearSpace`, so blurring, resizing and blending work. They
+are not `ChannelwiseMath` and have no `PartialOrd`, so a channel-wise maximum,
+difference or gradient magnitude of a complex image does not compile. The
+conversions `ComplexMagnitude` and `ComplexPhase` lead to the ratio and the
+circular scale. `RealPart` and `ImaginaryPart` are for the cases where the
+phase reference is fixed by construction, such as the real part of an
+analytic signal, which is the signal itself.
+
 ## Summary
 
 | Family | Defined by | Examples |
 |---|---|---|
 | Linear | Stevens' chain: nominal, ordinal, interval, ratio | intensities, encoded values, IDs |
 | Circular | a modulus: 2π for directions, π for axes | `Orientation`, `AxialOrientation` |
-| Vector | the group of admissible transformations | complex amplitudes |
+| Vector | the group of admissible transformations | complex amplitudes: `ComplexF32`, `ComplexF64` |
 
 When an operation looks questionable on some pixel type, the useful question
 is which family and level the value belongs to, and whether the operation

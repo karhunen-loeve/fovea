@@ -245,6 +245,16 @@ test_pixel_family!(monof64, MonoF64, name: "MonoF64",
     sample: MonoF64::new(0.42), different: MonoF64::new(0.99),
     channels: [0.42f64], other_ch: 0.99f64, align: 8);
 
+// ── Complex float ───────────────────────────────────────────────────────────
+
+test_pixel_family!(complexf32, ComplexF32, name: "ComplexF32",
+    sample: ComplexF32::new(0.25, -0.5), different: ComplexF32::new(0.1, 0.2),
+    channels: [0.25f32, -0.5f32], other_ch: 0.99f32, align: 4);
+
+test_pixel_family!(complexf64, ComplexF64, name: "ComplexF64",
+    sample: ComplexF64::new(0.25, -0.5), different: ComplexF64::new(0.1, 0.2),
+    channels: [0.25f64, -0.5f64], other_ch: 0.99f64, align: 8);
+
 // ── MonoA integer ───────────────────────────────────────────────────────────
 
 test_pixel_family!(monoa8, MonoA8, name: "MonoA8",
@@ -595,6 +605,8 @@ fn origin_invariant_marker_covers_all_families() {
         Mono64,
         MonoF32,
         MonoF64,
+        ComplexF32,
+        ComplexF64,
         Mono10,
         Mono12,
         Mono14,
@@ -934,6 +946,50 @@ mod channelwise_math_coverage {
         };
     }
 
+    #[test]
+    fn complex_pixels_never_claim_channelwise_math() {
+        const {
+            assert!(
+                !Probe::<ComplexF32>::IS,
+                "ComplexF32 must not implement ChannelwiseMath: re and im are one value"
+            )
+        };
+        const {
+            assert!(
+                !Probe::<ComplexF64>::IS,
+                "ComplexF64 must not implement ChannelwiseMath: re and im are one value"
+            )
+        };
+    }
+
+    // A derived `PartialOrd` would compare `re` first and make a "maximum"
+    // of complex values compile.
+    trait OrderFallback {
+        const IS: bool = false;
+    }
+    struct OrderProbe<T>(PhantomData<T>);
+    impl<T> OrderFallback for OrderProbe<T> {}
+    impl<T: PartialOrd> OrderProbe<T> {
+        const IS: bool = true;
+    }
+
+    #[test]
+    fn complex_pixels_have_no_order() {
+        const { assert!(OrderProbe::<MonoF32>::IS) };
+        const {
+            assert!(
+                !OrderProbe::<ComplexF32>::IS,
+                "ComplexF32 must not implement PartialOrd: the complex plane has no order"
+            )
+        };
+        const {
+            assert!(
+                !OrderProbe::<ComplexF64>::IS,
+                "ComplexF64 must not implement PartialOrd: the complex plane has no order"
+            )
+        };
+    }
+
     // `WhiteChannel: ChannelwiseMath` already makes these impossible; the
     // probe pins it in case the supertrait is ever loosened.
     trait WhiteFallback {
@@ -958,6 +1014,12 @@ mod channelwise_math_coverage {
             assert!(
                 !WhiteProbe::<Label32>::IS,
                 "Label32 must not implement WhiteChannel: a component ID is not a quantity"
+            )
+        };
+        const {
+            assert!(
+                !WhiteProbe::<ComplexF32>::IS,
+                "ComplexF32 must not implement WhiteChannel: a complex value has no white"
             )
         };
     }

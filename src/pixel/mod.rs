@@ -16,6 +16,10 @@
 //! gamma-encoded display/file data, while [`Rgb8`](crate::pixel::Rgb8) is linear-light RGB. They may
 //! occupy similar bytes, but they are not the same pixel type.
 //!
+//! Complex values, such as the response of a quadrature filter, use
+//! [`ComplexF32`](crate::pixel::ComplexF32) or
+//! [`ComplexF64`](crate::pixel::ComplexF64).
+//!
 //! Raw single-sensor colour data lives in its own submodule, [`bayer`](crate::pixel::bayer) —
 //! twenty colour-filter-array types that keep the mosaic pattern in the
 //! pixel type, and withhold the traits that would let you interpolate or
@@ -28,6 +32,7 @@
 //! see [`crate::guide::pixel_conversions`].
 
 pub mod bayer;
+mod complex;
 mod indexed;
 mod label;
 mod mono;
@@ -90,6 +95,8 @@ pub use srgb::{
     Srgb8, Srgb16, SrgbBgr8, SrgbBgr16, SrgbBgra8, SrgbBgra16, SrgbMono8, SrgbMono16, SrgbMonoA8,
     SrgbMonoA16, Srgba8, Srgba16,
 };
+
+pub use complex::{ComplexF32, ComplexF64};
 
 pub use indexed::Indexed8;
 
