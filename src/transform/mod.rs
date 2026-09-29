@@ -140,10 +140,10 @@ pub use combine::{
 };
 pub use convert::{
     AddAlpha, BayerToMono, BinaryMask, BinaryThreshold, BinaryThresholdInv, BrightnessContrast,
-    Broadcast, ChannelLut, Clamp, ColorSwap, ComplexMagnitude, ComplexPhase, ConvertPixel,
-    ConvertPixelExt, Depalettize, FullRange, ImaginaryPart, Invert, Luminance, Lut, Narrow,
-    PixelMap, RealPart, SrgbGamma, Then, ToZeroThreshold, ToZeroThresholdInv, TruncateThreshold,
-    convert_image, convert_image_into,
+    Broadcast, Bt601, Bt709, ChannelLut, Clamp, ColorSwap, ComplexMagnitude, ComplexPhase,
+    ConvertPixel, ConvertPixelExt, Depalettize, FullRange, ImaginaryPart, Invert, Luminance,
+    LuminanceStandard, Lut, Narrow, PixelMap, RealPart, SrgbGamma, Then, ToZeroThreshold,
+    ToZeroThresholdInv, TruncateThreshold, convert_image, convert_image_into,
 };
 pub use convolve::{convolve, convolve_into, correlate, correlate_into};
 pub use convolve_separable::{SeparableScratch, convolve_separable, convolve_separable_into};

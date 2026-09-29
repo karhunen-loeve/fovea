@@ -80,6 +80,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as `Error::WindowLargerThanImage` instead of `InvalidParameter`, because
   the failure is a relation between the parameters and the image, like
   `TemplateTooLarge`.
+- **Breaking:** `Luminance` takes the colour standard whose weights it uses,
+  as a value: `Luminance(Bt709)` or `Luminance(Bt601)`. A bare `Luminance`
+  no longer compiles, so no conversion to grey picks a standard silently.
+  Until now every `Luminance` used the BT.601 weights `0.299, 0.587, 0.114`
+  on linear light, where they give the luminance of no primaries in current
+  use. `Bt709` has the weights `0.2126, 0.7152, 0.0722`, which on linear
+  light give the luminance for the BT.709 and sRGB primaries: the right
+  choice for an image decoded from sRGB with `SrgbGamma`. For integer
+  pixels `Bt709` uses fixed-point weights that sum to 65536, so grey stays
+  exactly grey. `LuminanceStandard` is the sealed trait both implement, and
+  its `WEIGHTS` constant gives their weights. **Migration:** `Luminance`
+  becomes `Luminance(Bt601)` to keep every result bit for bit, or
+  `Luminance(Bt709)` for physical luminance, which changes the numbers
+  (pure red in `Rgb8` goes from 77 to 54, pure green from 149 to 182).
 - `HysteresisThresholds::try_new` no longer requires `C: Debug`. The bound
   existed only to print the two thresholds into the message, and the error
   now records no value for this generic pair.

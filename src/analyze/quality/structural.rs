@@ -224,7 +224,7 @@ impl SsimParams {
 /// settled definition — per channel then averaged, on Y'CbCr, on luma alone —
 /// so this crate declines to pick one silently, and a multi-channel pixel type
 /// simply does not compile. Convert first and name the choice:
-/// `convert_image(&rgb, Luminance)` for the luma reading, or compare planes for
+/// `convert_image(&rgb, Luminance(Bt709))` for a grey reading, or compare planes for
 /// the per-channel one. This is the same bound, for the same reason, as
 /// [`image_moments`](crate::analyze::statistics::image_moments).
 ///

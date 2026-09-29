@@ -92,18 +92,18 @@ Use `SrgbGamma` to move between sRGB and linear-light pixels.
 
 ## How do I convert between pixel types? What is a strategy?
 
-A strategy names the semantics of the conversion. `SrgbGamma` applies the sRGB transfer function. `Luminance` chooses a grayscale formula. `FullRange` maps the full numeric range. `Narrow` preserves numeric values and clamps when narrowing.
+A strategy names the semantics of the conversion. `SrgbGamma` applies the sRGB transfer function. `Luminance(Bt709)` names the weights of a grayscale conversion. `FullRange` maps the full numeric range. `Narrow` preserves numeric values and clamps when narrowing.
 
 ```rust
 use fovea::image::{Image, ImageView};
 use fovea::pixel::{Mono8, Rgb8};
-use fovea::transform::{Broadcast, Luminance, convert_image};
+use fovea::transform::{Broadcast, Bt709, Luminance, convert_image};
 
 let gray = Image::fill(2, 1, Mono8::new(128));
 let rgb: Image<Rgb8> = convert_image(&gray, Broadcast);
 assert_eq!(rgb.pixel_at(0, 0), Rgb8::new(128, 128, 128));
 
-let back: Image<Mono8> = convert_image(&rgb, Luminance);
+let back: Image<Mono8> = convert_image(&rgb, Luminance(Bt709));
 assert_eq!(back.pixel_at(0, 0), Mono8::new(128));
 ```
 

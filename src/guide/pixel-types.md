@@ -86,7 +86,7 @@ When a conversion can lose information or change meaning, name the strategy.
 | Strategy | Meaning |
 |---|---|
 | `SrgbGamma` | Decode or encode the sRGB transfer function. |
-| `Luminance` | Convert color to grayscale using BT.601 luminance. |
+| `Luminance` | Convert color to grayscale with a named standard's weights, `Bt709` for linear sRGB data. |
 | `Broadcast` | Copy mono into every color channel. |
 | `ColorSwap` | Swap RGB and BGR channel order. |
 | `FullRange` | Map the full source numeric range to the full destination range. |

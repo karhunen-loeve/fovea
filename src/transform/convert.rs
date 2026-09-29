@@ -126,37 +126,115 @@ pub struct FullRange;
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Narrow;
 
-/// Luminance conversion strategy (BT.601).
+/// Luminance conversion strategy: colour to grey with the weights of a named
+/// standard.
 ///
-/// Converts color pixels to grayscale using the ITU-R BT.601 luminance
-/// formula:
+/// `Y = w_r · R + w_g · G + w_b · B`, where the weights come from the
+/// standard the caller names, [`Bt709`] or [`Bt601`]. There is no default:
+/// the right weights depend on the primaries of the source, which a linear
+/// `Rgb8` does not record, so the call site says which ones it means.
 ///
-/// ```text
-/// Y = 0.299 · R + 0.587 · G + 0.114 · B
-/// ```
+/// | Standard | Weights | Luminance of linear light for |
+/// |---|---|---|
+/// | [`Bt709`] | `0.2126, 0.7152, 0.0722` | BT.709 and sRGB primaries, D65 |
+/// | [`Bt601`] | `0.299, 0.587, 0.114` | the NTSC 1953 primaries, illuminant C |
 ///
-/// For integer types an exact integer approximation is used:
+/// The sources are linear light. **For an image decoded from an sRGB file
+/// with [`SrgbGamma`], `Luminance(Bt709)` is the physical luminance.**
+/// `Luminance(Bt601)` gives the numbers this strategy computed before it
+/// took a standard, which are the luminance of no primaries in current use.
+/// Both standards define these weights for gamma-encoded signals too, where
+/// they give luma; that is why there is no impl for the `Srgb` family, whose
+/// luma would be a different operation.
 ///
-/// ```text
-/// Y = (77·R + 150·G + 29·B + 128) >> 8
-/// ```
+/// Integer pixels use fixed-point weights that sum to the scale, so a grey
+/// input stays exactly grey: `(77·R + 150·G + 29·B + 128) >> 8` for `Bt601`,
+/// unchanged from before, and `(13933·R + 46871·G + 4732·B + 32768) >> 16`
+/// for `Bt709`.
 ///
-/// where `77 + 150 + 29 = 256`.
-///
-/// For RGBA / BGRA sources the alpha channel is ignored.
+/// RGBA and BGRA sources drop their alpha on the way to a `Mono` pixel and
+/// keep it on the way to a `MonoA` pixel.
 ///
 /// # Examples
 /// ```
 /// # use fovea::pixel::{Rgb8, Mono8};
-/// # use fovea::transform::{ConvertPixel, Luminance};
+/// # use fovea::transform::{Bt601, Bt709, ConvertPixel, Luminance};
 /// let white = Rgb8::new(255, 255, 255);
-/// assert_eq!(Luminance.convert(&white), Mono8::new(255));
+/// assert_eq!(Luminance(Bt709).convert(&white), Mono8::new(255));
 ///
 /// let red = Rgb8::new(255, 0, 0);
-/// assert_eq!(Luminance.convert(&red), Mono8::new(77));
+/// assert_eq!(Luminance(Bt709).convert(&red), Mono8::new(54));
+/// assert_eq!(Luminance(Bt601).convert(&red), Mono8::new(77));
 /// ```
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct Luminance;
+///
+/// A bare `Luminance` does not pick a standard, so it does not compile:
+///
+/// ```compile_fail
+/// # use fovea::pixel::{Rgb8, Mono8};
+/// # use fovea::transform::{ConvertPixel, Luminance};
+/// let grey: Mono8 = Luminance.convert(&Rgb8::new(255, 0, 0));
+/// ```
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct Luminance<S>(pub S);
+
+/// The ITU-R BT.709 luma weights, `0.2126, 0.7152, 0.0722`, for
+/// [`Luminance`].
+///
+/// On linear light they give the luminance for the BT.709 primaries with a
+/// D65 white, which sRGB shares, so this is the standard for linear images
+/// decoded from sRGB.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct Bt709;
+
+/// The ITU-R BT.601 luma weights, `0.299, 0.587, 0.114`, for
+/// [`Luminance`].
+///
+/// On linear light they give the luminance for the NTSC 1953 primaries with
+/// illuminant C. `Luminance(Bt601)` reproduces the numbers of the
+/// parameterless `Luminance` of earlier versions bit for bit.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct Bt601;
+
+/// Sealing module for [`LuminanceStandard`]; it also carries the fixed-point
+/// weights, which are an implementation detail.
+mod luminance_sealed {
+    pub trait Sealed: Copy {
+        /// Integer weights for red, green and blue, summing to `1 << SHIFT`.
+        const FIXED: [u64; 3];
+        /// The scale of [`Self::FIXED`] as a power of two.
+        const SHIFT: u32;
+    }
+}
+
+/// A standard whose weights [`Luminance`] can use: [`Bt709`] or [`Bt601`].
+///
+/// Sealed: it cannot be implemented outside this crate.
+pub trait LuminanceStandard: luminance_sealed::Sealed {
+    /// The red, green and blue weights, as the standard writes them.
+    const WEIGHTS: [f64; 3];
+}
+
+impl luminance_sealed::Sealed for Bt709 {
+    // round(w · 65536): 13932.95, 46871.35 and 4731.70 round to a sum of
+    // exactly 65536, so grey stays grey. At a scale of 256 they would round
+    // to 54 + 183 + 18 = 255.
+    const FIXED: [u64; 3] = [13933, 46871, 4732];
+    const SHIFT: u32 = 16;
+}
+
+impl LuminanceStandard for Bt709 {
+    const WEIGHTS: [f64; 3] = [0.2126, 0.7152, 0.0722];
+}
+
+impl luminance_sealed::Sealed for Bt601 {
+    // The weights `Luminance` used before it took a standard.
+    const FIXED: [u64; 3] = [77, 150, 29];
+    const SHIFT: u32 = 8;
+}
+
+impl LuminanceStandard for Bt601 {
+    const WEIGHTS: [f64; 3] = [0.299, 0.587, 0.114];
+}
 
 /// Broadcast conversion strategy.
 ///
@@ -545,40 +623,54 @@ fn mono64_val(src: &Mono64) -> u64 {
 // Internal helpers – luminance
 // ───────────────────────────────────────────────────────────────────────────────
 
-/// BT.601 integer luminance for u8 channels.  77 + 150 + 29 = 256.
+// The fixed-point weights of a standard sum to `1 << SHIFT`, so each result
+// is a rounded weighted mean and never exceeds the channel's range. The
+// widest intermediate is `(1 << 16) · MAX + (1 << 15)`: for u8 and u16 that
+// fits u32 (65536 · 65535 + 32768 < 2^32), for u32 it needs u64 and for u64
+// u128.
+
+/// Fixed-point luminance for u8 channels.
 #[inline(always)]
-fn lum_u8(r: u8, g: u8, b: u8) -> u8 {
-    ((77u16 * r as u16 + 150u16 * g as u16 + 29u16 * b as u16 + 128) >> 8) as u8
+fn lum_u8<S: LuminanceStandard>(r: u8, g: u8, b: u8) -> u8 {
+    let [wr, wg, wb] = S::FIXED.map(|w| w as u32);
+    ((wr * r as u32 + wg * g as u32 + wb * b as u32 + (1 << (S::SHIFT - 1))) >> S::SHIFT) as u8
 }
 
-/// BT.601 integer luminance for u16 channels.
+/// Fixed-point luminance for u16 channels.
 #[inline(always)]
-fn lum_u16(r: u16, g: u16, b: u16) -> u16 {
-    ((77u32 * r as u32 + 150u32 * g as u32 + 29u32 * b as u32 + 128) >> 8) as u16
+fn lum_u16<S: LuminanceStandard>(r: u16, g: u16, b: u16) -> u16 {
+    let [wr, wg, wb] = S::FIXED.map(|w| w as u32);
+    ((wr * r as u32 + wg * g as u32 + wb * b as u32 + (1 << (S::SHIFT - 1))) >> S::SHIFT) as u16
 }
 
-/// BT.601 integer luminance for u32 channels.
+/// Fixed-point luminance for u32 channels.
 #[inline(always)]
-fn lum_u32(r: u32, g: u32, b: u32) -> u32 {
-    ((77u64 * r as u64 + 150u64 * g as u64 + 29u64 * b as u64 + 128) >> 8) as u32
+fn lum_u32<S: LuminanceStandard>(r: u32, g: u32, b: u32) -> u32 {
+    let [wr, wg, wb] = S::FIXED;
+    ((wr * r as u64 + wg * g as u64 + wb * b as u64 + (1 << (S::SHIFT - 1))) >> S::SHIFT) as u32
 }
 
-/// BT.601 integer luminance for u64 channels.
+/// Fixed-point luminance for u64 channels.
 #[inline(always)]
-fn lum_u64(r: u64, g: u64, b: u64) -> u64 {
-    ((77u128 * r as u128 + 150u128 * g as u128 + 29u128 * b as u128 + 128) >> 8) as u64
+fn lum_u64<S: LuminanceStandard>(r: u64, g: u64, b: u64) -> u64 {
+    let [wr, wg, wb] = S::FIXED.map(|w| w as u128);
+    ((wr * r as u128 + wg * g as u128 + wb * b as u128 + (1 << (S::SHIFT - 1))) >> S::SHIFT) as u64
 }
 
-/// BT.601 floating-point luminance (f32).
+/// Floating-point luminance (f32). Each weight converts to the same `f32` as
+/// its decimal literal would, so `Bt601` reproduces the earlier results bit
+/// for bit.
 #[inline(always)]
-fn lum_f32(r: f32, g: f32, b: f32) -> f32 {
-    0.299 * r + 0.587 * g + 0.114 * b
+fn lum_f32<S: LuminanceStandard>(r: f32, g: f32, b: f32) -> f32 {
+    let [wr, wg, wb] = S::WEIGHTS.map(|w| w as f32);
+    wr * r + wg * g + wb * b
 }
 
-/// BT.601 floating-point luminance (f64).
+/// Floating-point luminance (f64).
 #[inline(always)]
-fn lum_f64(r: f64, g: f64, b: f64) -> f64 {
-    0.299 * r + 0.587 * g + 0.114 * b
+fn lum_f64<S: LuminanceStandard>(r: f64, g: f64, b: f64) -> f64 {
+    let [wr, wg, wb] = S::WEIGHTS;
+    wr * r + wg * g + wb * b
 }
 
 // ───────────────────────────────────────────────────────────────────────────────
@@ -782,10 +874,22 @@ macro_rules! impl_extended_family_conversions {
 /// Generate a `Luminance` impl for a source with `Saturating<T>` fields.
 macro_rules! impl_luminance_sat {
     ($Src:ty => $Dst:ty, $lum:ident, $r:ident, $g:ident, $b:ident) => {
-        impl ConvertPixel<$Src, $Dst> for Luminance {
+        impl<S: LuminanceStandard> ConvertPixel<$Src, $Dst> for Luminance<S> {
             #[inline]
             fn convert(&self, src: &$Src) -> $Dst {
-                <$Dst>::new($lum(src.$r.0, src.$g.0, src.$b.0))
+                <$Dst>::new($lum::<S>(src.$r.0, src.$g.0, src.$b.0))
+            }
+        }
+    };
+}
+
+/// Generate a `Luminance` impl for a source with plain float fields.
+macro_rules! impl_luminance_float {
+    ($Src:ty => $Dst:ty, $lum:ident) => {
+        impl<S: LuminanceStandard> ConvertPixel<$Src, $Dst> for Luminance<S> {
+            #[inline]
+            fn convert(&self, src: &$Src) -> $Dst {
+                <$Dst>::new($lum::<S>(src.r, src.g, src.b))
             }
         }
     };
@@ -922,26 +1026,26 @@ macro_rules! impl_broadcast_monoa {
 /// `f32:` / `f64:` variants for float fields.
 macro_rules! impl_luminance_monoa {
     (sat: $Src:ty => $Dst:ty, $lum:ident, $r:ident, $g:ident, $b:ident, $a:ident) => {
-        impl ConvertPixel<$Src, $Dst> for Luminance {
+        impl<S: LuminanceStandard> ConvertPixel<$Src, $Dst> for Luminance<S> {
             #[inline]
             fn convert(&self, src: &$Src) -> $Dst {
-                <$Dst>::new($lum(src.$r.0, src.$g.0, src.$b.0), src.$a.0)
+                <$Dst>::new($lum::<S>(src.$r.0, src.$g.0, src.$b.0), src.$a.0)
             }
         }
     };
     (f32: $Src:ty => $Dst:ty, $r:ident, $g:ident, $b:ident, $a:ident) => {
-        impl ConvertPixel<$Src, $Dst> for Luminance {
+        impl<S: LuminanceStandard> ConvertPixel<$Src, $Dst> for Luminance<S> {
             #[inline]
             fn convert(&self, src: &$Src) -> $Dst {
-                <$Dst>::new(lum_f32(src.$r, src.$g, src.$b), src.$a)
+                <$Dst>::new(lum_f32::<S>(src.$r, src.$g, src.$b), src.$a)
             }
         }
     };
     (f64: $Src:ty => $Dst:ty, $r:ident, $g:ident, $b:ident, $a:ident) => {
-        impl ConvertPixel<$Src, $Dst> for Luminance {
+        impl<S: LuminanceStandard> ConvertPixel<$Src, $Dst> for Luminance<S> {
             #[inline]
             fn convert(&self, src: &$Src) -> $Dst {
-                <$Dst>::new(lum_f64(src.$r, src.$g, src.$b), src.$a)
+                <$Dst>::new(lum_f64::<S>(src.$r, src.$g, src.$b), src.$a)
             }
         }
     };
@@ -1225,7 +1329,7 @@ impl_extended_family_conversions!(
 );
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Luminance implementations (BT.601)
+// Luminance implementations, generic over the standard
 //
 // For RGBA / BGRA sources the alpha channel is simply ignored.
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1254,17 +1358,17 @@ impl_luminance_sat!(Bgra16 => Mono16, lum_u16, r, g, b);
 impl_luminance_sat!(Bgra32 => Mono32, lum_u32, r, g, b);
 impl_luminance_sat!(Bgra64 => Mono64, lum_u64, r, g, b);
 
-// ── RGB/RGBA/BGR/BGRA → MonoF32 (BT.601 luminance) ─────────────────────────
-impl_convert_expr!(Luminance: RgbF32  => MonoF32, |src| MonoF32::new(lum_f32(src.r, src.g, src.b)));
-impl_convert_expr!(Luminance: RgbaF32 => MonoF32, |src| MonoF32::new(lum_f32(src.r, src.g, src.b)));
-impl_convert_expr!(Luminance: BgrF32  => MonoF32, |src| MonoF32::new(lum_f32(src.r, src.g, src.b)));
-impl_convert_expr!(Luminance: BgraF32 => MonoF32, |src| MonoF32::new(lum_f32(src.r, src.g, src.b)));
+// ── RGB/RGBA/BGR/BGRA → MonoF32 ─────────────────────────
+impl_luminance_float!(RgbF32 => MonoF32, lum_f32);
+impl_luminance_float!(RgbaF32 => MonoF32, lum_f32);
+impl_luminance_float!(BgrF32 => MonoF32, lum_f32);
+impl_luminance_float!(BgraF32 => MonoF32, lum_f32);
 
-// ── RGB/RGBA/BGR/BGRA → MonoF64 (BT.601 luminance) ─────────────────────────
-impl_convert_expr!(Luminance: RgbF64  => MonoF64, |src| MonoF64::new(lum_f64(src.r, src.g, src.b)));
-impl_convert_expr!(Luminance: RgbaF64 => MonoF64, |src| MonoF64::new(lum_f64(src.r, src.g, src.b)));
-impl_convert_expr!(Luminance: BgrF64  => MonoF64, |src| MonoF64::new(lum_f64(src.r, src.g, src.b)));
-impl_convert_expr!(Luminance: BgraF64 => MonoF64, |src| MonoF64::new(lum_f64(src.r, src.g, src.b)));
+// ── RGB/RGBA/BGR/BGRA → MonoF64 ─────────────────────────
+impl_luminance_float!(RgbF64 => MonoF64, lum_f64);
+impl_luminance_float!(RgbaF64 => MonoF64, lum_f64);
+impl_luminance_float!(BgrF64 => MonoF64, lum_f64);
+impl_luminance_float!(BgraF64 => MonoF64, lum_f64);
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Broadcast implementations
@@ -1470,7 +1574,7 @@ impl_broadcast_monoa!(float: MonoAF32  => BgraF32);
 impl_broadcast_monoa!(float: MonoAF64  => BgraF64);
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Luminance — RGBA / BGRA → MonoA  (BT.601 on R,G,B; alpha preserved)
+// Luminance — RGBA / BGRA → MonoA  (alpha preserved)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // ── RGBA → MonoA ────────────────────────────────────────────────────────────
@@ -2997,9 +3101,9 @@ where
 /// ```
 /// # use fovea::image::Image;
 /// # use fovea::pixel::{Rgb16, Mono8, Mono16};
-/// # use fovea::transform::{convert_image, ConvertPixelExt, Luminance, FullRange};
+/// # use fovea::transform::{convert_image, Bt709, ConvertPixelExt, Luminance, FullRange};
 /// let img = Image::fill(4, 4, Rgb16::new(65535, 65535, 65535));
-/// let out: Image<Mono8> = convert_image(&img, Luminance.then::<Mono16, _>(FullRange));
+/// let out: Image<Mono8> = convert_image(&img, Luminance(Bt709).then::<Mono16, _>(FullRange));
 /// ```
 ///
 /// Triple chain (`Rgb8 → Bgr8 → Bgra8 → Bgra16`):
@@ -3761,57 +3865,137 @@ mod tests {
     // ═══════════════════════════════════════════════════════════════════════════
     // Luminance
     // ═══════════════════════════════════════════════════════════════════════════
+    //
+    // The tests below `luminance_rgb8_white` predate the standard parameter
+    // and run under `Bt601`, whose numbers they pin. The `Bt709` tests and
+    // the weight checks come first.
+
+    #[test]
+    fn fixed_weights_sum_to_the_scale_and_round_the_decimals() {
+        fn check<S: LuminanceStandard>() {
+            let scale = 1u64 << S::SHIFT;
+            assert_eq!(S::FIXED.iter().sum::<u64>(), scale);
+            for (fixed, w) in S::FIXED.iter().zip(S::WEIGHTS) {
+                assert_eq!(*fixed, (w * scale as f64).round() as u64);
+            }
+            assert!((S::WEIGHTS.iter().sum::<f64>() - 1.0).abs() < 1e-12);
+        }
+        check::<Bt709>();
+        check::<Bt601>();
+    }
+
+    #[test]
+    fn bt709_primaries() {
+        // round(0.2126·255) = 54, round(0.7152·255) = 182, round(0.0722·255) = 18
+        assert_eq!(
+            Luminance(Bt709).convert(&Rgb8::new(255, 0, 0)),
+            Mono8::new(54)
+        );
+        assert_eq!(
+            Luminance(Bt709).convert(&Rgb8::new(0, 255, 0)),
+            Mono8::new(182)
+        );
+        assert_eq!(
+            Luminance(Bt709).convert(&Rgb8::new(0, 0, 255)),
+            Mono8::new(18)
+        );
+        // `Bgr8::new` takes b, g, r.
+        assert_eq!(
+            Luminance(Bt709).convert(&Bgr8::new(0, 0, 255)),
+            Mono8::new(54)
+        );
+        let y: MonoF64 = Luminance(Bt709).convert(&RgbF64::new(0.0, 1.0, 0.0));
+        assert_eq!(y, MonoF64::new(0.7152));
+        let y: MonoF32 = Luminance(Bt709).convert(&RgbF32::new(1.0, 0.0, 0.0));
+        assert_eq!(y, MonoF32::new(0.2126));
+    }
+
+    #[test]
+    fn bt709_keeps_grey_grey_at_every_depth() {
+        for v in 0..=255u8 {
+            assert_eq!(Luminance(Bt709).convert(&Rgb8::new(v, v, v)), Mono8::new(v));
+        }
+        for v in [0u16, 1, 1000, 32768, 65534, 65535] {
+            assert_eq!(
+                Luminance(Bt709).convert(&Rgb16::new(v, v, v)),
+                Mono16::new(v)
+            );
+        }
+        let p: Mono32 = Luminance(Bt709).convert(&Rgb32::new(u32::MAX, u32::MAX, u32::MAX));
+        assert_eq!(p, Mono32::new(u32::MAX));
+        let p: Mono64 = Luminance(Bt709).convert(&Rgb64::new(u64::MAX, u64::MAX, u64::MAX));
+        assert_eq!(p, Mono64::new(u64::MAX));
+    }
+
+    #[test]
+    fn bt709_keeps_alpha_on_the_way_to_mono_alpha() {
+        let p: MonoA8 = Luminance(Bt709).convert(&Rgba8::new(0, 255, 0, 17));
+        assert_eq!(p, MonoA8::new(182, 17));
+    }
+
+    #[test]
+    fn bt601_floats_match_the_earlier_literal_formula_bit_for_bit() {
+        for (r, g, b) in [(0.1f32, 0.7, 0.3), (1.0, 0.25, 0.0), (0.333, 0.666, 0.999)] {
+            let before = 0.299f32 * r + 0.587 * g + 0.114 * b;
+            let now: MonoF32 = Luminance(Bt601).convert(&RgbF32::new(r, g, b));
+            assert_eq!(now.0.to_bits(), before.to_bits());
+            let (r, g, b) = (r as f64, g as f64, b as f64);
+            let before = 0.299f64 * r + 0.587 * g + 0.114 * b;
+            let now: MonoF64 = Luminance(Bt601).convert(&RgbF64::new(r, g, b));
+            assert_eq!(now.0.to_bits(), before.to_bits());
+        }
+    }
 
     #[test]
     fn luminance_rgb8_white() {
         let white = Rgb8::new(255, 255, 255);
         // (77*255 + 150*255 + 29*255 + 128) >> 8 = (65280 + 128) >> 8 = 255
-        assert_eq!(Luminance.convert(&white), Mono8::new(255));
+        assert_eq!(Luminance(Bt601).convert(&white), Mono8::new(255));
     }
 
     #[test]
     fn luminance_rgb8_black() {
-        assert_eq!(Luminance.convert(&Rgb8::new(0, 0, 0)), Mono8::new(0));
+        assert_eq!(Luminance(Bt601).convert(&Rgb8::new(0, 0, 0)), Mono8::new(0));
     }
 
     #[test]
     fn luminance_rgb8_pure_red() {
         // (77*255 + 150*0 + 29*0 + 128) >> 8 = (19635 + 128) >> 8 = 19763 >> 8 = 77
         let red = Rgb8::new(255, 0, 0);
-        assert_eq!(Luminance.convert(&red), Mono8::new(77));
+        assert_eq!(Luminance(Bt601).convert(&red), Mono8::new(77));
     }
 
     #[test]
     fn luminance_rgb8_pure_green() {
         // (150*255 + 128) >> 8 = (38250 + 128) >> 8 = 38378 >> 8 = 149
         let green = Rgb8::new(0, 255, 0);
-        assert_eq!(Luminance.convert(&green), Mono8::new(149));
+        assert_eq!(Luminance(Bt601).convert(&green), Mono8::new(149));
     }
 
     #[test]
     fn luminance_rgb8_pure_blue() {
         // (29*255 + 128) >> 8 = (7395 + 128) >> 8 = 7523 >> 8 = 29
         let blue = Rgb8::new(0, 0, 255);
-        assert_eq!(Luminance.convert(&blue), Mono8::new(29));
+        assert_eq!(Luminance(Bt601).convert(&blue), Mono8::new(29));
     }
 
     #[test]
     fn luminance_bgr8() {
         // BGR stores b,g,r but the luminance formula uses r,g,b semantics
         let bgr = Bgr8::new(0, 0, 255); // b=0, g=0, r=255
-        assert_eq!(Luminance.convert(&bgr), Mono8::new(77));
+        assert_eq!(Luminance(Bt601).convert(&bgr), Mono8::new(77));
     }
 
     #[test]
     fn luminance_rgb16_white() {
         let white = Rgb16::new(65535, 65535, 65535);
-        assert_eq!(Luminance.convert(&white), Mono16::new(65535));
+        assert_eq!(Luminance(Bt601).convert(&white), Mono16::new(65535));
     }
 
     #[test]
     fn luminance_bgr16() {
         let bgr = Bgr16::new(0, 0, 65535); // b=0, g=0, r=65535
-        let mono: Mono16 = Luminance.convert(&bgr);
+        let mono: Mono16 = Luminance(Bt601).convert(&bgr);
         // (77*65535 + 128) >> 8 = (5046195 + 128) >> 8 = 5046323 >> 8 = 19712
         assert_eq!(mono, Mono16::new(19712));
     }
@@ -3819,18 +4003,18 @@ mod tests {
     #[test]
     fn luminance_rgbf32() {
         let white = RgbF32::new(1.0, 1.0, 1.0);
-        let y: MonoF32 = Luminance.convert(&white);
+        let y: MonoF32 = Luminance(Bt601).convert(&white);
         assert!(approx(y.0, 1.0, 1e-4));
 
         let red = RgbF32::new(1.0, 0.0, 0.0);
-        let y: MonoF32 = Luminance.convert(&red);
+        let y: MonoF32 = Luminance(Bt601).convert(&red);
         assert!(approx(y.0, 0.299, 1e-4));
     }
 
     #[test]
     fn luminance_bgrf32() {
         let bgr = BgrF32::new(0.0, 0.0, 1.0); // b=0, g=0, r=1
-        let y: MonoF32 = Luminance.convert(&bgr);
+        let y: MonoF32 = Luminance(Bt601).convert(&bgr);
         assert!(approx(y.0, 0.299, 1e-4));
     }
 
@@ -3839,28 +4023,28 @@ mod tests {
     #[test]
     fn luminance_rgba8_white() {
         let src = Rgba8::new(255, 255, 255, 128);
-        let mono: Mono8 = Luminance.convert(&src);
+        let mono: Mono8 = Luminance(Bt601).convert(&src);
         assert_eq!(mono, Mono8::new(255));
     }
 
     #[test]
     fn luminance_rgba8_pure_red() {
         let src = Rgba8::new(255, 0, 0, 0);
-        let mono: Mono8 = Luminance.convert(&src);
+        let mono: Mono8 = Luminance(Bt601).convert(&src);
         assert_eq!(mono, Mono8::new(77));
     }
 
     #[test]
     fn luminance_rgba16() {
         let src = Rgba16::new(65535, 65535, 65535, 0);
-        let mono: Mono16 = Luminance.convert(&src);
+        let mono: Mono16 = Luminance(Bt601).convert(&src);
         assert_eq!(mono, Mono16::new(65535));
     }
 
     #[test]
     fn luminance_rgbaf32() {
         let src = RgbaF32::new(1.0, 0.0, 0.0, 0.5);
-        let y: MonoF32 = Luminance.convert(&src);
+        let y: MonoF32 = Luminance(Bt601).convert(&src);
         assert!(approx(y.0, 0.299, 1e-4));
     }
 
@@ -3868,21 +4052,21 @@ mod tests {
     fn luminance_bgra8() {
         // b=0, g=0, r=255, a=42 → luminance based on r,g,b only
         let src = Bgra8::new(0, 0, 255, 42);
-        let mono: Mono8 = Luminance.convert(&src);
+        let mono: Mono8 = Luminance(Bt601).convert(&src);
         assert_eq!(mono, Mono8::new(77));
     }
 
     #[test]
     fn luminance_bgra16() {
         let src = Bgra16::new(0, 0, 65535, 1000);
-        let mono: Mono16 = Luminance.convert(&src);
+        let mono: Mono16 = Luminance(Bt601).convert(&src);
         assert_eq!(mono, Mono16::new(19712));
     }
 
     #[test]
     fn luminance_bgraf32() {
         let src = BgraF32::new(0.0, 0.0, 1.0, 0.5);
-        let y: MonoF32 = Luminance.convert(&src);
+        let y: MonoF32 = Luminance(Bt601).convert(&src);
         assert!(approx(y.0, 0.299, 1e-4));
     }
 
@@ -4001,7 +4185,7 @@ mod tests {
     fn convert_image_into_rgb8_to_mono8_luminance() {
         let img = Image::fill(2, 2, Rgb8::new(255, 255, 255));
         let mut out = Image::<Mono8>::zero(2, 2);
-        convert_image_into(&img, &mut out, Luminance);
+        convert_image_into(&img, &mut out, Luminance(Bt601));
         for y in 0..2 {
             for x in 0..2 {
                 assert_eq!(out.pixel_at(x, y), Mono8::new(255));
@@ -4118,7 +4302,7 @@ mod tests {
 
         {
             let mut roi_out = target.roi_mut(Rectangle::new((1, 0), (2, 2))).unwrap();
-            convert_image_into(&src, &mut roi_out, Luminance);
+            convert_image_into(&src, &mut roi_out, Luminance(Bt601));
         }
 
         // White → lum = 255
@@ -4147,10 +4331,10 @@ mod tests {
     fn compose_luminance_then_fullrange() {
         // Rgb8 → Mono8 via Luminance, then Mono8 → Mono16 via FullRange
         let src = Rgb8::new(200, 100, 50);
-        let gray: Mono8 = Luminance.convert(&src);
+        let gray: Mono8 = Luminance(Bt601).convert(&src);
         let wide: Mono16 = FullRange.convert(&gray);
         // Verify it's the same as doing the math manually
-        let expected_y = lum_u8(200, 100, 50);
+        let expected_y = lum_u8::<Bt601>(200, 100, 50);
         let expected_16 = fr_u8_to_u16(expected_y);
         assert_eq!(wide, Mono16::new(expected_16));
     }
@@ -4794,7 +4978,7 @@ mod tests {
     fn then_luminance_fullrange_rgb16_to_mono8() {
         // Rgb16 → Mono16 → Mono8
         let src = Rgb16::new(65535, 65535, 65535);
-        let result: Mono8 = Luminance.then::<Mono16, _>(FullRange).convert(&src);
+        let result: Mono8 = Luminance(Bt601).then::<Mono16, _>(FullRange).convert(&src);
         assert_eq!(result, Mono8::new(255));
     }
 
@@ -4802,8 +4986,8 @@ mod tests {
     fn then_luminance_fullrange_rgb8_to_mono16() {
         // Rgb8 → Mono8 → Mono16
         let src = Rgb8::new(200, 100, 50);
-        let result: Mono16 = Luminance.then::<Mono8, _>(FullRange).convert(&src);
-        let expected_y = lum_u8(200, 100, 50);
+        let result: Mono16 = Luminance(Bt601).then::<Mono8, _>(FullRange).convert(&src);
+        let expected_y = lum_u8::<Bt601>(200, 100, 50);
         assert_eq!(result, Mono16::new(fr_u8_to_u16(expected_y)));
     }
 
@@ -4811,7 +4995,7 @@ mod tests {
     fn then_luminance_fullrange_rgb8_to_f32() {
         // Rgb8 → Mono8 → MonoF32
         let src = Rgb8::new(255, 255, 255);
-        let result: MonoF32 = Luminance.then::<Mono8, _>(FullRange).convert(&src);
+        let result: MonoF32 = Luminance(Bt601).then::<Mono8, _>(FullRange).convert(&src);
         assert!(approx(result.0, 1.0, 1e-3));
     }
 
@@ -4819,7 +5003,7 @@ mod tests {
     fn then_luminance_fullrange_bgr16_to_mono8() {
         // Bgr16 → Mono16 → Mono8
         let src = Bgr16::new(0, 0, 0);
-        let result: Mono8 = Luminance.then::<Mono16, _>(FullRange).convert(&src);
+        let result: Mono8 = Luminance(Bt601).then::<Mono16, _>(FullRange).convert(&src);
         assert_eq!(result, Mono8::new(0));
     }
 
@@ -4827,8 +5011,8 @@ mod tests {
     fn then_luminance_fullrange_rgba8_to_mono16() {
         // Rgba8 → Mono8 → Mono16  (alpha ignored by Luminance)
         let src = Rgba8::new(200, 100, 50, 255);
-        let result: Mono16 = Luminance.then::<Mono8, _>(FullRange).convert(&src);
-        let expected_y = lum_u8(200, 100, 50);
+        let result: Mono16 = Luminance(Bt601).then::<Mono8, _>(FullRange).convert(&src);
+        let expected_y = lum_u8::<Bt601>(200, 100, 50);
         assert_eq!(result, Mono16::new(fr_u8_to_u16(expected_y)));
     }
 
@@ -4985,7 +5169,7 @@ mod tests {
     fn then_convert_image_cross_depth_luminance() {
         // Rgb16 → Mono8 in one pass
         let img = Image::fill(2, 2, Rgb16::new(65535, 65535, 65535));
-        let out: Image<Mono8> = convert_image(&img, Luminance.then::<Mono16, _>(FullRange));
+        let out: Image<Mono8> = convert_image(&img, Luminance(Bt601).then::<Mono16, _>(FullRange));
         for y in 0..2 {
             for x in 0..2 {
                 assert_eq!(out.pixel_at(x, y), Mono8::new(255));
@@ -5045,7 +5229,7 @@ mod tests {
     fn then_with_pixelmap_luminance_then_custom() {
         // Rgb8 → Mono8 via Luminance, then Mono8 → f32 via a PixelMap closure
         let src = Rgb8::new(255, 255, 255);
-        let result: f32 = Luminance
+        let result: f32 = Luminance(Bt601)
             .then::<Mono8, _>(PixelMap(|m: &Mono8| m.as_bytes()[0] as f32 / 255.0))
             .convert(&src);
         assert!(approx(result, 1.0, 1e-3));
@@ -6295,53 +6479,54 @@ mod tests {
 
     #[test]
     fn luminance_rgb32_white() {
-        let p: Mono32 = Luminance.convert(&Rgb32::new(u32::MAX, u32::MAX, u32::MAX));
+        let p: Mono32 = Luminance(Bt601).convert(&Rgb32::new(u32::MAX, u32::MAX, u32::MAX));
         // Should be close to u32::MAX (slight rounding from BT.601 coefficients)
         assert!(p == Mono32::new(u32::MAX) || (u32::MAX - mono32_val(&p)) < 256);
     }
 
     #[test]
     fn luminance_rgb64_white() {
-        let p: Mono64 = Luminance.convert(&Rgb64::new(u64::MAX, u64::MAX, u64::MAX));
+        let p: Mono64 = Luminance(Bt601).convert(&Rgb64::new(u64::MAX, u64::MAX, u64::MAX));
         assert!(p == Mono64::new(u64::MAX) || (u64::MAX - mono64_val(&p)) < 256);
     }
 
     #[test]
     fn luminance_rgbf64() {
-        let p: MonoF64 = Luminance.convert(&RgbF64::new(1.0, 1.0, 1.0));
+        let p: MonoF64 = Luminance(Bt601).convert(&RgbF64::new(1.0, 1.0, 1.0));
         assert!((p.0 - 1.0).abs() < 1e-10);
     }
 
     #[test]
     fn luminance_bgrf64() {
-        let p: MonoF64 = Luminance.convert(&BgrF64::new(0.0, 0.0, 1.0));
+        let p: MonoF64 = Luminance(Bt601).convert(&BgrF64::new(0.0, 0.0, 1.0));
         // Luminance of pure red (r field) ≈ 0.299
         assert!((p.0 - 0.299).abs() < 1e-10);
     }
 
     #[test]
     fn luminance_rgba64_ignores_alpha() {
-        let a: Mono64 = Luminance.convert(&Rgba64::new(u64::MAX, u64::MAX, u64::MAX, 0));
-        let b: Mono64 = Luminance.convert(&Rgba64::new(u64::MAX, u64::MAX, u64::MAX, u64::MAX));
+        let a: Mono64 = Luminance(Bt601).convert(&Rgba64::new(u64::MAX, u64::MAX, u64::MAX, 0));
+        let b: Mono64 =
+            Luminance(Bt601).convert(&Rgba64::new(u64::MAX, u64::MAX, u64::MAX, u64::MAX));
         assert_eq!(a, b);
     }
 
     #[test]
     fn luminance_bgra64() {
-        let p: Mono64 = Luminance.convert(&Bgra64::new(0, 0, u64::MAX, 0));
+        let p: Mono64 = Luminance(Bt601).convert(&Bgra64::new(0, 0, u64::MAX, 0));
         // Pure red ≈ 0.299 * u64::MAX
         assert!(mono64_val(&p) > 0);
     }
 
     #[test]
     fn luminance_rgbaf64() {
-        let p: MonoF64 = Luminance.convert(&RgbaF64::new(1.0, 0.0, 0.0, 0.5));
+        let p: MonoF64 = Luminance(Bt601).convert(&RgbaF64::new(1.0, 0.0, 0.0, 0.5));
         assert!((p.0 - 0.299).abs() < 1e-10);
     }
 
     #[test]
     fn luminance_bgraf64() {
-        let p: MonoF64 = Luminance.convert(&BgraF64::new(0.0, 0.0, 1.0, 1.0));
+        let p: MonoF64 = Luminance(Bt601).convert(&BgraF64::new(0.0, 0.0, 1.0, 1.0));
         assert!((p.0 - 0.299).abs() < 1e-10);
     }
 
@@ -6613,7 +6798,7 @@ mod tests {
 
     #[test]
     fn then_luminance_fullrange_rgb64_to_mono8() {
-        let method = Luminance.then::<Mono64, _>(FullRange);
+        let method = Luminance(Bt601).then::<Mono64, _>(FullRange);
         let p: Mono8 = method.convert(&Rgb64::new(u64::MAX, u64::MAX, u64::MAX));
         assert_eq!(p, Mono8::new(255));
     }
@@ -7092,21 +7277,21 @@ mod tests {
 
     #[test]
     fn luminance_rgba8_to_monoa8_white() {
-        let p: MonoA8 = Luminance.convert(&Rgba8::new(255, 255, 255, 128));
+        let p: MonoA8 = Luminance(Bt601).convert(&Rgba8::new(255, 255, 255, 128));
         assert_eq!(p.v, Saturating(255u8));
         assert_eq!(p.a, Saturating(128u8));
     }
 
     #[test]
     fn luminance_rgba8_to_monoa8_black() {
-        let p: MonoA8 = Luminance.convert(&Rgba8::new(0, 0, 0, 200));
+        let p: MonoA8 = Luminance(Bt601).convert(&Rgba8::new(0, 0, 0, 200));
         assert_eq!(p.v, Saturating(0u8));
         assert_eq!(p.a, Saturating(200u8));
     }
 
     #[test]
     fn luminance_rgba8_to_monoa8_pure_red() {
-        let p: MonoA8 = Luminance.convert(&Rgba8::new(255, 0, 0, 255));
+        let p: MonoA8 = Luminance(Bt601).convert(&Rgba8::new(255, 0, 0, 255));
         // BT.601: (77*255 + 128) >> 8 = 77
         assert_eq!(p.v.0, 77);
         assert_eq!(p.a.0, 255);
@@ -7114,41 +7299,41 @@ mod tests {
 
     #[test]
     fn luminance_rgba8_to_monoa8_preserves_alpha() {
-        let p: MonoA8 = Luminance.convert(&Rgba8::new(100, 100, 100, 42));
+        let p: MonoA8 = Luminance(Bt601).convert(&Rgba8::new(100, 100, 100, 42));
         assert_eq!(p.a.0, 42);
     }
 
     #[test]
     fn luminance_rgba16_to_monoa16() {
-        let p: MonoA16 = Luminance.convert(&Rgba16::new(65535, 65535, 65535, 1000));
+        let p: MonoA16 = Luminance(Bt601).convert(&Rgba16::new(65535, 65535, 65535, 1000));
         assert_eq!(p.v.0, 65535);
         assert_eq!(p.a.0, 1000);
     }
 
     #[test]
     fn luminance_rgba32_to_monoa32() {
-        let p: MonoA32 = Luminance.convert(&Rgba32::new(u32::MAX, u32::MAX, u32::MAX, 42));
+        let p: MonoA32 = Luminance(Bt601).convert(&Rgba32::new(u32::MAX, u32::MAX, u32::MAX, 42));
         assert_eq!(p.v.0, u32::MAX);
         assert_eq!(p.a.0, 42);
     }
 
     #[test]
     fn luminance_rgba64_to_monoa64() {
-        let p: MonoA64 = Luminance.convert(&Rgba64::new(u64::MAX, u64::MAX, u64::MAX, 99));
+        let p: MonoA64 = Luminance(Bt601).convert(&Rgba64::new(u64::MAX, u64::MAX, u64::MAX, 99));
         assert_eq!(p.v.0, u64::MAX);
         assert_eq!(p.a.0, 99);
     }
 
     #[test]
     fn luminance_rgbaf32_to_monoaf32() {
-        let p: MonoAF32 = Luminance.convert(&RgbaF32::new(1.0, 1.0, 1.0, 0.5));
+        let p: MonoAF32 = Luminance(Bt601).convert(&RgbaF32::new(1.0, 1.0, 1.0, 0.5));
         assert!((p.v - 1.0).abs() < 1e-4);
         assert!((p.a - 0.5).abs() < 1e-6);
     }
 
     #[test]
     fn luminance_rgbaf64_to_monoaf64() {
-        let p: MonoAF64 = Luminance.convert(&RgbaF64::new(1.0, 1.0, 1.0, 0.25));
+        let p: MonoAF64 = Luminance(Bt601).convert(&RgbaF64::new(1.0, 1.0, 1.0, 0.25));
         assert!((p.v - 1.0).abs() < 1e-9);
         assert!((p.a - 0.25).abs() < 1e-9);
     }
@@ -7157,7 +7342,7 @@ mod tests {
 
     #[test]
     fn luminance_bgra8_to_monoa8() {
-        let p: MonoA8 = Luminance.convert(&Bgra8::new(0, 0, 255, 128));
+        let p: MonoA8 = Luminance(Bt601).convert(&Bgra8::new(0, 0, 255, 128));
         // BT.601: pure red (r=255) → 77
         assert_eq!(p.v.0, 77);
         assert_eq!(p.a.0, 128);
@@ -7165,42 +7350,42 @@ mod tests {
 
     #[test]
     fn luminance_bgra8_to_monoa8_white() {
-        let p: MonoA8 = Luminance.convert(&Bgra8::new(255, 255, 255, 42));
+        let p: MonoA8 = Luminance(Bt601).convert(&Bgra8::new(255, 255, 255, 42));
         assert_eq!(p.v.0, 255);
         assert_eq!(p.a.0, 42);
     }
 
     #[test]
     fn luminance_bgra16_to_monoa16() {
-        let p: MonoA16 = Luminance.convert(&Bgra16::new(65535, 65535, 65535, 1000));
+        let p: MonoA16 = Luminance(Bt601).convert(&Bgra16::new(65535, 65535, 65535, 1000));
         assert_eq!(p.v.0, 65535);
         assert_eq!(p.a.0, 1000);
     }
 
     #[test]
     fn luminance_bgra32_to_monoa32() {
-        let p: MonoA32 = Luminance.convert(&Bgra32::new(u32::MAX, u32::MAX, u32::MAX, 42));
+        let p: MonoA32 = Luminance(Bt601).convert(&Bgra32::new(u32::MAX, u32::MAX, u32::MAX, 42));
         assert_eq!(p.v.0, u32::MAX);
         assert_eq!(p.a.0, 42);
     }
 
     #[test]
     fn luminance_bgra64_to_monoa64() {
-        let p: MonoA64 = Luminance.convert(&Bgra64::new(u64::MAX, u64::MAX, u64::MAX, 99));
+        let p: MonoA64 = Luminance(Bt601).convert(&Bgra64::new(u64::MAX, u64::MAX, u64::MAX, 99));
         assert_eq!(p.v.0, u64::MAX);
         assert_eq!(p.a.0, 99);
     }
 
     #[test]
     fn luminance_bgraf32_to_monoaf32() {
-        let p: MonoAF32 = Luminance.convert(&BgraF32::new(1.0, 1.0, 1.0, 0.5));
+        let p: MonoAF32 = Luminance(Bt601).convert(&BgraF32::new(1.0, 1.0, 1.0, 0.5));
         assert!((p.v - 1.0).abs() < 1e-4);
         assert!((p.a - 0.5).abs() < 1e-6);
     }
 
     #[test]
     fn luminance_bgraf64_to_monoaf64() {
-        let p: MonoAF64 = Luminance.convert(&BgraF64::new(1.0, 1.0, 1.0, 0.25));
+        let p: MonoAF64 = Luminance(Bt601).convert(&BgraF64::new(1.0, 1.0, 1.0, 0.25));
         assert!((p.v - 1.0).abs() < 1e-9);
         assert!((p.a - 0.25).abs() < 1e-9);
     }
@@ -7213,7 +7398,7 @@ mod tests {
     fn luminance_broadcast_roundtrip_gray_preserves_alpha() {
         // A gray RGBA pixel should roundtrip through MonoA losslessly.
         let orig = Rgba8::new(100, 100, 100, 42);
-        let mono: MonoA8 = Luminance.convert(&orig);
+        let mono: MonoA8 = Luminance(Bt601).convert(&orig);
         let back: Rgba8 = Broadcast.convert(&mono);
         // Gray input => v == 100, alpha preserved
         assert_eq!(mono.v.0, 100);
@@ -7240,7 +7425,7 @@ mod tests {
 
     #[test]
     fn then_luminance_fullrange_rgba8_to_monoa16() {
-        let method = Luminance.then::<MonoA8, _>(FullRange);
+        let method = Luminance(Bt601).then::<MonoA8, _>(FullRange);
         let p: MonoA16 = method.convert(&Rgba8::new(255, 255, 255, 128));
         assert_eq!(p.v.0, 65535);
         // alpha: 128 FullRange→ 128 * 65535 / 255 = ~32896
@@ -7292,7 +7477,7 @@ mod tests {
     #[test]
     fn convert_image_rgba8_to_monoa8_luminance() {
         let img = Image::fill(2, 2, Rgba8::new(255, 255, 255, 128));
-        let out: Image<MonoA8> = convert_image(&img, Luminance);
+        let out: Image<MonoA8> = convert_image(&img, Luminance(Bt601));
         assert_eq!(out.pixel_at(0, 0), MonoA8::new(255, 128));
     }
 
@@ -7588,7 +7773,7 @@ mod tests {
         // Indexed8 → Rgb8 (Depalettize) → Mono8 (Luminance)
         let mut palette = [Rgb8::new(0, 0, 0); 256];
         palette[0] = Rgb8::new(255, 255, 255);
-        let method = Depalettize::new(palette).then::<Rgb8, _>(Luminance);
+        let method = Depalettize::new(palette).then::<Rgb8, _>(Luminance(Bt601));
         let result: Mono8 = method.convert(&Indexed8(0));
         assert_eq!(result, Mono8::new(255));
     }
@@ -8554,46 +8739,46 @@ mod tests {
     #[test]
     fn luminance_rgbf32_to_monof32() {
         let white = RgbF32::new(1.0, 1.0, 1.0);
-        let y: MonoF32 = Luminance.convert(&white);
+        let y: MonoF32 = Luminance(Bt601).convert(&white);
         assert!(approx(y.0, 1.0, 1e-4));
 
         let red = RgbF32::new(1.0, 0.0, 0.0);
-        let y: MonoF32 = Luminance.convert(&red);
+        let y: MonoF32 = Luminance(Bt601).convert(&red);
         assert!(approx(y.0, 0.299, 1e-4));
     }
 
     #[test]
     fn luminance_rgbaf32_to_monof32() {
         let src = RgbaF32::new(1.0, 0.0, 0.0, 0.5);
-        let y: MonoF32 = Luminance.convert(&src);
+        let y: MonoF32 = Luminance(Bt601).convert(&src);
         assert!(approx(y.0, 0.299, 1e-4));
     }
 
     #[test]
     fn luminance_bgrf32_to_monof32() {
         let bgr = BgrF32::new(0.0, 0.0, 1.0); // b=0, g=0, r=1
-        let y: MonoF32 = Luminance.convert(&bgr);
+        let y: MonoF32 = Luminance(Bt601).convert(&bgr);
         assert!(approx(y.0, 0.299, 1e-4));
     }
 
     #[test]
     fn luminance_bgraf32_to_monof32() {
         let src = BgraF32::new(0.0, 0.0, 1.0, 0.5);
-        let y: MonoF32 = Luminance.convert(&src);
+        let y: MonoF32 = Luminance(Bt601).convert(&src);
         assert!(approx(y.0, 0.299, 1e-4));
     }
 
     #[test]
     fn luminance_rgbf64_to_monof64() {
         let white = RgbF64::new(1.0, 1.0, 1.0);
-        let y: MonoF64 = Luminance.convert(&white);
+        let y: MonoF64 = Luminance(Bt601).convert(&white);
         assert!((y.0 - 1.0).abs() < 1e-6);
     }
 
     #[test]
     fn luminance_bgraf64_to_monof64() {
         let src = BgraF64::new(1.0, 1.0, 1.0, 0.5);
-        let y: MonoF64 = Luminance.convert(&src);
+        let y: MonoF64 = Luminance(Bt601).convert(&src);
         assert!((y.0 - 1.0).abs() < 1e-6);
     }
 
@@ -8868,27 +9053,27 @@ mod tests {
     fn luminance_rgbaf64_to_monof64() {
         // Pure white → 1.0
         let src = RgbaF64::new(1.0, 1.0, 1.0, 1.0);
-        let dst: MonoF64 = Luminance.convert(&src);
+        let dst: MonoF64 = Luminance(Bt601).convert(&src);
         assert!(approx_f64(dst.0, 1.0, 1e-10));
 
         // Pure black → 0.0
         let src = RgbaF64::new(0.0, 0.0, 0.0, 1.0);
-        let dst: MonoF64 = Luminance.convert(&src);
+        let dst: MonoF64 = Luminance(Bt601).convert(&src);
         assert!(approx_f64(dst.0, 0.0, 1e-10));
 
         // Pure red → 0.299 (NTSC coefficient)
         let src = RgbaF64::new(1.0, 0.0, 0.0, 1.0);
-        let dst: MonoF64 = Luminance.convert(&src);
+        let dst: MonoF64 = Luminance(Bt601).convert(&src);
         assert!(approx_f64(dst.0, 0.299, 1e-4));
 
         // Pure green → 0.587
         let src = RgbaF64::new(0.0, 1.0, 0.0, 1.0);
-        let dst: MonoF64 = Luminance.convert(&src);
+        let dst: MonoF64 = Luminance(Bt601).convert(&src);
         assert!(approx_f64(dst.0, 0.587, 1e-4));
 
         // Alpha is ignored by luminance
         let src = RgbaF64::new(1.0, 1.0, 1.0, 0.0);
-        let dst: MonoF64 = Luminance.convert(&src);
+        let dst: MonoF64 = Luminance(Bt601).convert(&src);
         assert!(approx_f64(dst.0, 1.0, 1e-10));
     }
 
@@ -8900,7 +9085,7 @@ mod tests {
             g: 1.0,
             b: 1.0,
         };
-        let dst: MonoF64 = Luminance.convert(&src);
+        let dst: MonoF64 = Luminance(Bt601).convert(&src);
         assert!(approx_f64(dst.0, 1.0, 1e-10));
 
         // Pure black → 0.0
@@ -8909,7 +9094,7 @@ mod tests {
             g: 0.0,
             b: 0.0,
         };
-        let dst: MonoF64 = Luminance.convert(&src);
+        let dst: MonoF64 = Luminance(Bt601).convert(&src);
         assert!(approx_f64(dst.0, 0.0, 1e-10));
 
         // Pure red → 0.299
@@ -8918,7 +9103,7 @@ mod tests {
             g: 0.0,
             b: 0.0,
         };
-        let dst: MonoF64 = Luminance.convert(&src);
+        let dst: MonoF64 = Luminance(Bt601).convert(&src);
         assert!(approx_f64(dst.0, 0.299, 1e-4));
 
         // Pure blue → 0.114
@@ -8927,7 +9112,7 @@ mod tests {
             g: 0.0,
             b: 1.0,
         };
-        let dst: MonoF64 = Luminance.convert(&src);
+        let dst: MonoF64 = Luminance(Bt601).convert(&src);
         assert!(approx_f64(dst.0, 0.114, 1e-4));
     }
 
@@ -9399,7 +9584,7 @@ mod tests {
     fn then_luminance_binary_threshold_rgb8_to_mono8() {
         // Compose a grayscale conversion with a binary threshold — the
         // classic "threshold a color image on its luminance" pipeline.
-        let method = Luminance.then::<Mono8, _>(BinaryThreshold {
+        let method = Luminance(Bt601).then::<Mono8, _>(BinaryThreshold {
             thresh: Mono8::new(100),
         });
         // White → luminance 255 → above threshold → 255.
@@ -9413,7 +9598,7 @@ mod tests {
         // Rgb8 → Mono8 (luminance) → bool (BinaryMask). This is the
         // canonical way to drop a color image into morphology / blob
         // analysis without committing to a per-channel rule.
-        let method = Luminance.then::<Mono8, _>(BinaryMask {
+        let method = Luminance(Bt601).then::<Mono8, _>(BinaryMask {
             thresh: Mono8::new(100),
         });
         assert!(method.convert(&Rgb8::new(255, 255, 255)));
