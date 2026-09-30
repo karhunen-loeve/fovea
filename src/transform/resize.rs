@@ -5,10 +5,23 @@
 //! | Method | Pixel constraint | Use when |
 //! |---|---|---|
 //! | [`NearestNeighbor`] | `Copy` + `Into` target pixel | Speed matters or the source is gamma-encoded |
-//! | [`Bilinear`] | [`LinearSpace`](crate::pixel::LinearSpace) | Correct photographic or camera resize |
+//! | an [`InterpolationKernel`]: [`Bilinear`], [`CatmullRom`], [`KeysBicubic`], [`Lanczos2`](type@Lanczos2), [`Lanczos3`](type@Lanczos3) | [`LinearSpace`](crate::pixel::LinearSpace) | Enlarging, or shrinking by less than about two |
+//! | [`Antialiased`] around a kernel | [`LinearSpace`](crate::pixel::LinearSpace) | Shrinking by more than about two |
 //!
-//! **Important:** `Bilinear` will not compile for `Srgb8` or any other gamma-encoded pixel type.
-//! Bilinear interpolation blends neighboring samples; doing that in a non-linear encoding
+//! A kernel on its own interpolates at a fixed width. Shrinking with it reads
+//! only the few source pixels nearest to each target pixel, and detail finer
+//! than the target grid comes back as a false coarser pattern (aliasing).
+//! `Antialiased(kernel)` widens the kernel by the shrink factor, so each
+//! target pixel averages everything it stands for; when enlarging it is the
+//! bare kernel.
+//!
+//! **Geometry.** Pixel centres map onto pixel centres through the extent of
+//! the image: target pixel `x` samples the source at
+//! `(x + 0.5) · in / out − 0.5`, as OpenCV and Pillow do. Source pixels
+//! beyond the edge repeat the edge pixel.
+//!
+//! **Important:** the kernels will not compile for `Srgb8` or any other gamma-encoded pixel type.
+//! Interpolation blends neighboring samples; doing that in a non-linear encoding
 //! produces subtly wrong results. Linearize first with
 //! [`convert_image`](crate::transform::convert_image) + [`SrgbGamma`](crate::transform::SrgbGamma),
 //! resize, then re-encode if needed.
@@ -40,7 +53,11 @@
 
 use crate::Size;
 use crate::image::{Image, ImageView, ImageViewMut};
-use crate::pixel::{FromLinear, LinearPixel, LinearSpace, ZeroablePixel, blend};
+use crate::pixel::{FromLinear, LinearPixel, LinearSpace, ZeroablePixel};
+
+use super::interpolate::{Antialiased, AxisWeights, InterpolationKernel};
+#[cfg(doc)]
+use super::interpolate::{Bilinear, CatmullRom, KeysBicubic, Lanczos2, Lanczos3};
 
 /// Trait for different resizing methods.
 ///
@@ -61,6 +78,9 @@ pub trait ResizeMethod<I: ImageView, O: ImageViewMut> {
 /// The NearestNeighbor struct implements the ResizeMethod trait using the nearest neighbor algorithm.
 /// This method is fast and simple, but may produce blocky artifacts when enlarging images.
 /// It is the resizing method with the least restrictions on pixel types.
+///
+/// Target pixel `x` copies the source pixel whose extent contains
+/// `(x + 0.5) · in / out`, the same half-pixel geometry as the kernels.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct NearestNeighbor;
 impl<I, O> ResizeMethod<I, O> for NearestNeighbor
@@ -74,30 +94,35 @@ where
     }
 }
 
-/// Bilinear resizing method
-///
-/// The Bilinear struct implements the ResizeMethod trait using the bilinear interpolation algorithm.
-/// This method provides smoother results than nearest neighbor, especially when enlarging images.
-/// However, it requires that the pixel types support addition and multiplication operations
-/// **and** that the pixel values live in a linear space where interpolation is meaningful.
-///
-/// Types that represent gamma-encoded data (e.g. [`Srgb8`](crate::pixel::Srgb8),
-/// [`Srgba8`](crate::pixel::Srgba8)) intentionally do *not* implement
-/// [`LinearSpace`](crate::pixel::LinearSpace) and will be rejected at compile time.
-/// Convert to linear light first (e.g. via
-/// [`SrgbGamma`](crate::transform::SrgbGamma)) before resizing.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct Bilinear;
-impl<I, O, Q> ResizeMethod<I, O> for Bilinear
+/// Every interpolation kernel is a resize method: it interpolates at a fixed
+/// width, which is right for enlarging and for shrinking by less than about
+/// two. [`Antialiased`] is the method for stronger shrinking.
+impl<K, I, O, Q> ResizeMethod<I, O> for K
 where
+    K: InterpolationKernel,
     I: ImageView,
     O: ImageViewMut,
     I::Pixel: LinearPixel<Accumulator = Q> + LinearSpace,
-    Q: LinearPixel<Accumulator = Q> + LinearSpace,
+    Q: LinearPixel<Accumulator = Q>,
     O::Pixel: FromLinear<Q>,
 {
     fn resize_into(&self, img: &I, out: &mut O) {
-        resize_bilinear_into(img, out);
+        resize_separable_into(self, img, out, false);
+    }
+}
+
+/// Shrinking widens the kernel by the factor; enlarging uses it as it is.
+impl<K, I, O, Q> ResizeMethod<I, O> for Antialiased<K>
+where
+    K: InterpolationKernel,
+    I: ImageView,
+    O: ImageViewMut,
+    I::Pixel: LinearPixel<Accumulator = Q> + LinearSpace,
+    Q: LinearPixel<Accumulator = Q>,
+    O::Pixel: FromLinear<Q>,
+{
+    fn resize_into(&self, img: &I, out: &mut O) {
+        resize_separable_into(&self.0, img, out, true);
     }
 }
 
@@ -172,11 +197,18 @@ where
 
 /// Resizes `img` to `new_size`, allocating and returning a new output image.
 ///
-/// Use [`NearestNeighbor`] for any pixel type when speed matters; use [`Bilinear`]
-/// for photos and camera frames — it requires `I::Pixel: LinearSpace` to prevent
-/// subtly incorrect results from gamma-encoded data.
+/// Use [`NearestNeighbor`] for any pixel type when speed matters; use an
+/// interpolation kernel such as [`Bilinear`] or [`Lanczos3`](type@Lanczos3) for photos and
+/// camera frames, and wrap it in [`Antialiased`] when shrinking by more than
+/// about two. The kernels require `I::Pixel: LinearSpace` to prevent subtly
+/// incorrect results from gamma-encoded data.
 ///
 /// To resize into an existing buffer, use [`resize_into`] instead.
+///
+/// # Panics
+///
+/// Panics if `img` is empty and `new_size` is not: there is no sample to
+/// resize from.
 ///
 /// # Example
 /// ```
@@ -207,75 +239,74 @@ where
     O: ImageViewMut,
     I::Pixel: Into<O::Pixel> + Copy,
 {
-    let in_size = img.size();
-    let out_size = out.size();
-    let scale_x = if out_size.width <= 1 || in_size.width <= 1 {
-        0.0
-    } else {
-        (in_size.width - 1) as f32 / (out_size.width - 1) as f32
+    let (src, dst) = (img.size(), out.size());
+    if dst.width == 0 || dst.height == 0 {
+        return;
+    }
+    assert_source_not_empty(src, dst);
+    // The source pixel whose extent [k, k + 1) contains (x + 0.5) · in / out.
+    let pick = |x: usize, in_len: usize, out_len: usize| {
+        (((x as f64 + 0.5) * in_len as f64 / out_len as f64) as usize).min(in_len - 1)
     };
-    let scale_y = if out_size.height <= 1 || in_size.height <= 1 {
-        0.0
-    } else {
-        (in_size.height - 1) as f32 / (out_size.height - 1) as f32
-    };
-
-    for y in 0..out_size.height {
-        for x in 0..out_size.width {
-            let src_x = (x as f32 * scale_x) as usize;
-            let src_y = (y as f32 * scale_y) as usize;
-            let pixel = img.pixel_at(src_x, src_y);
-            *out.pixel_at_mut(x, y) = pixel.into();
+    for y in 0..dst.height {
+        let src_y = pick(y, src.height, dst.height);
+        for x in 0..dst.width {
+            let src_x = pick(x, src.width, dst.width);
+            *out.pixel_at_mut(x, y) = img.pixel_at(src_x, src_y).into();
         }
     }
 }
 
-fn resize_bilinear_into<I, O, Q>(img: &I, out: &mut O)
+fn assert_source_not_empty(src: Size, dst: Size) {
+    assert!(
+        src.width > 0 && src.height > 0,
+        "resize: the source is {}x{}, so there is no sample to fill the {}x{} target from",
+        src.width,
+        src.height,
+        dst.width,
+        dst.height
+    );
+}
+
+/// The separable kernel engine: a horizontal pass into accumulator rows at
+/// the target width, then a vertical pass into the target.
+fn resize_separable_into<K, I, O, Q>(kernel: &K, img: &I, out: &mut O, widen: bool)
 where
+    K: InterpolationKernel,
     I: ImageView,
     O: ImageViewMut,
-    I::Pixel: LinearPixel<Accumulator = Q> + LinearSpace,
-    Q: LinearPixel<Accumulator = Q> + LinearSpace,
+    I::Pixel: LinearPixel<Accumulator = Q>,
+    Q: LinearPixel<Accumulator = Q>,
     O::Pixel: FromLinear<Q>,
 {
-    // Implement bilinear resizing logic here
-    let in_size = img.size();
-    let out_size = out.size();
-    let scale_x = if out_size.width <= 1 || in_size.width <= 1 {
-        0.0
-    } else {
-        (in_size.width - 1) as f32 / (out_size.width - 1) as f32
-    };
-    let scale_y = if out_size.height <= 1 || in_size.height <= 1 {
-        0.0
-    } else {
-        (in_size.height - 1) as f32 / (out_size.height - 1) as f32
-    };
+    let (src, dst) = (img.size(), out.size());
+    if dst.width == 0 || dst.height == 0 {
+        return;
+    }
+    assert_source_not_empty(src, dst);
+    let columns = AxisWeights::resize(kernel, src.width, dst.width, widen);
+    let rows = AxisWeights::resize(kernel, src.height, dst.height, widen);
 
-    for y in 0..out_size.height {
-        for x in 0..out_size.width {
-            let src_x = x as f32 * scale_x;
-            let src_y = y as f32 * scale_y;
+    let mut wide: Vec<Q> = Vec::with_capacity(dst.width * src.height);
+    for y in 0..src.height {
+        for x in 0..dst.width {
+            let (index, weight) = columns.taps(x);
+            let mut acc = img.pixel_at(index[0], y).scale(weight[0]);
+            for (&k, &w) in index[1..].iter().zip(&weight[1..]) {
+                acc = img.pixel_at(k, y).scale_add(w, acc);
+            }
+            wide.push(acc);
+        }
+    }
 
-            let x0 = src_x.floor() as usize;
-            let x1 = (x0 + 1).min(in_size.width - 1);
-            let y0 = src_y.floor() as usize;
-            let y1 = (y0 + 1).min(in_size.height - 1);
-
-            let dx = src_x - x0 as f32;
-            let dy = src_y - y0 as f32;
-
-            let p00 = img.pixel_at(x0, y0);
-            let p10 = img.pixel_at(x1, y0);
-            let p01 = img.pixel_at(x0, y1);
-            let p11 = img.pixel_at(x1, y1);
-
-            let p0 = blend(&p00, &p10, dx);
-            let p1 = blend(&p01, &p11, dx);
-            let p = blend(&p0, &p1, dy);
-
-            let r = out.pixel_at_mut(x, y);
-            *r = O::Pixel::from_linear(p);
+    for y in 0..dst.height {
+        let (index, weight) = rows.taps(y);
+        for x in 0..dst.width {
+            let mut acc = wide[index[0] * dst.width + x].scale(weight[0]);
+            for (&k, &w) in index[1..].iter().zip(&weight[1..]) {
+                acc = wide[k * dst.width + x].scale_add(w, acc);
+            }
+            *out.pixel_at_mut(x, y) = O::Pixel::from_linear(acc);
         }
     }
 }
@@ -419,7 +450,8 @@ mod tests {
         // 0 1 2
         // 10 11 12
         // 20 21 22
-        // Resized image (2x2) using nearest neighbor:
+        // Resized image (2x2) using nearest neighbor: target x copies the
+        // source pixel containing (x + 0.5) * 1.5, which is 0 and 2:
         // 0 2
         // 20 22
         assert_eq!(resized.get(0, 0).unwrap(), Mono8::new(0));
@@ -500,19 +532,20 @@ mod tests {
         // 0 1
         // 10 11
 
-        // Resized image (3x3) using nearest neighbor:
-        // 0 0 1
-        // 0 0 1
-        // 10 10 11
+        // Resized image (3x3) using nearest neighbor: target x copies the
+        // source pixel containing (x + 0.5) * 2 / 3, which is 0, 1, 1:
+        // 0 1 1
+        // 10 11 11
+        // 10 11 11
 
         assert_eq!(resized.get(0, 0).unwrap(), MonoF32::new(0.0));
-        assert_eq!(resized.get(1, 0).unwrap(), MonoF32::new(0.0));
+        assert_eq!(resized.get(1, 0).unwrap(), MonoF32::new(1.0));
         assert_eq!(resized.get(2, 0).unwrap(), MonoF32::new(1.0));
-        assert_eq!(resized.get(0, 1).unwrap(), MonoF32::new(0.0));
-        assert_eq!(resized.get(1, 1).unwrap(), MonoF32::new(0.0));
-        assert_eq!(resized.get(2, 1).unwrap(), MonoF32::new(1.0));
+        assert_eq!(resized.get(0, 1).unwrap(), MonoF32::new(10.0));
+        assert_eq!(resized.get(1, 1).unwrap(), MonoF32::new(11.0));
+        assert_eq!(resized.get(2, 1).unwrap(), MonoF32::new(11.0));
         assert_eq!(resized.get(0, 2).unwrap(), MonoF32::new(10.0));
-        assert_eq!(resized.get(1, 2).unwrap(), MonoF32::new(10.0));
+        assert_eq!(resized.get(1, 2).unwrap(), MonoF32::new(11.0));
         assert_eq!(resized.get(2, 2).unwrap(), MonoF32::new(11.0));
 
         let img_u8: Image<u8> = Image::generate(2, 2, |x, y| (y * 10 + x) as u8);
@@ -527,13 +560,13 @@ mod tests {
         );
 
         assert_eq!(resized_u8.get(0, 0).unwrap(), 0);
-        assert_eq!(resized_u8.get(1, 0).unwrap(), 0);
+        assert_eq!(resized_u8.get(1, 0).unwrap(), 1);
         assert_eq!(resized_u8.get(2, 0).unwrap(), 1);
-        assert_eq!(resized_u8.get(0, 1).unwrap(), 0);
-        assert_eq!(resized_u8.get(1, 1).unwrap(), 0);
-        assert_eq!(resized_u8.get(2, 1).unwrap(), 1);
+        assert_eq!(resized_u8.get(0, 1).unwrap(), 10);
+        assert_eq!(resized_u8.get(1, 1).unwrap(), 11);
+        assert_eq!(resized_u8.get(2, 1).unwrap(), 11);
         assert_eq!(resized_u8.get(0, 2).unwrap(), 10);
-        assert_eq!(resized_u8.get(1, 2).unwrap(), 10);
+        assert_eq!(resized_u8.get(1, 2).unwrap(), 11);
         assert_eq!(resized_u8.get(2, 2).unwrap(), 11);
 
         let img: Image<Rgb8> = Image::generate(2, 2, |x, y| {
@@ -550,13 +583,13 @@ mod tests {
         );
 
         assert_eq!(resized.get(0, 0).unwrap(), Rgb8::new(0, 0, 0));
-        assert_eq!(resized.get(1, 0).unwrap(), Rgb8::new(0, 0, 0));
+        assert_eq!(resized.get(1, 0).unwrap(), Rgb8::new(1, 1, 1));
         assert_eq!(resized.get(2, 0).unwrap(), Rgb8::new(1, 1, 1));
-        assert_eq!(resized.get(0, 1).unwrap(), Rgb8::new(0, 0, 0));
-        assert_eq!(resized.get(1, 1).unwrap(), Rgb8::new(0, 0, 0));
-        assert_eq!(resized.get(2, 1).unwrap(), Rgb8::new(1, 1, 1));
+        assert_eq!(resized.get(0, 1).unwrap(), Rgb8::new(10, 10, 10));
+        assert_eq!(resized.get(1, 1).unwrap(), Rgb8::new(11, 11, 11));
+        assert_eq!(resized.get(2, 1).unwrap(), Rgb8::new(11, 11, 11));
         assert_eq!(resized.get(0, 2).unwrap(), Rgb8::new(10, 10, 10));
-        assert_eq!(resized.get(1, 2).unwrap(), Rgb8::new(10, 10, 10));
+        assert_eq!(resized.get(1, 2).unwrap(), Rgb8::new(11, 11, 11));
         assert_eq!(resized.get(2, 2).unwrap(), Rgb8::new(11, 11, 11));
 
         let img: Image<RgbF32> = Image::generate(2, 2, |x, y| {
@@ -576,13 +609,13 @@ mod tests {
         );
 
         assert_eq!(resized.get(0, 0).unwrap(), RgbF32::new(0.0, 0.0, 0.0));
-        assert_eq!(resized.get(1, 0).unwrap(), RgbF32::new(0.0, 0.0, 0.0));
+        assert_eq!(resized.get(1, 0).unwrap(), RgbF32::new(1.0, 1.0, 1.0));
         assert_eq!(resized.get(2, 0).unwrap(), RgbF32::new(1.0, 1.0, 1.0));
-        assert_eq!(resized.get(0, 1).unwrap(), RgbF32::new(0.0, 0.0, 0.0));
-        assert_eq!(resized.get(1, 1).unwrap(), RgbF32::new(0.0, 0.0, 0.0));
-        assert_eq!(resized.get(2, 1).unwrap(), RgbF32::new(1.0, 1.0, 1.0));
+        assert_eq!(resized.get(0, 1).unwrap(), RgbF32::new(10.0, 10.0, 10.0));
+        assert_eq!(resized.get(1, 1).unwrap(), RgbF32::new(11.0, 11.0, 11.0));
+        assert_eq!(resized.get(2, 1).unwrap(), RgbF32::new(11.0, 11.0, 11.0));
         assert_eq!(resized.get(0, 2).unwrap(), RgbF32::new(10.0, 10.0, 10.0));
-        assert_eq!(resized.get(1, 2).unwrap(), RgbF32::new(10.0, 10.0, 10.0));
+        assert_eq!(resized.get(1, 2).unwrap(), RgbF32::new(11.0, 11.0, 11.0));
         assert_eq!(resized.get(2, 2).unwrap(), RgbF32::new(11.0, 11.0, 11.0));
     }
 
@@ -590,12 +623,14 @@ mod tests {
     fn test_downsize_bilinear() {
         // Input image:
         // 0 1 2
-        // 10 11 120
+        // 10 11 12
         // 20 21 22
 
-        // Resized image (2x2) using bilinear interpolation:
-        // 0 2
-        // 20 22
+        // Resized image (2x2) using bilinear interpolation: the target
+        // centres sit at (x + 0.5) * 1.5 - 0.5 = 0.25 and 1.75 on each axis,
+        // so the values are 10 * y + x at those positions:
+        // 2.75 4.25
+        // 17.75 19.25
 
         let img: Image<Mono8> = Image::generate(3, 3, |x, y| Mono8::new((y * 10 + x) as u8));
 
@@ -603,10 +638,10 @@ mod tests {
 
         resize_into(&img, &mut resized, Bilinear);
 
-        assert_eq!(resized.get(0, 0).unwrap(), Mono8::new(0));
-        assert_eq!(resized.get(1, 0).unwrap(), Mono8::new(2));
-        assert_eq!(resized.get(0, 1).unwrap(), Mono8::new(20));
-        assert_eq!(resized.get(1, 1).unwrap(), Mono8::new(22));
+        assert_eq!(resized.get(0, 0).unwrap(), Mono8::new(3));
+        assert_eq!(resized.get(1, 0).unwrap(), Mono8::new(4));
+        assert_eq!(resized.get(0, 1).unwrap(), Mono8::new(18));
+        assert_eq!(resized.get(1, 1).unwrap(), Mono8::new(19));
 
         let img: Image<MonoF32> = Image::generate(3, 3, |x, y| MonoF32::new((y * 10 + x) as f32));
 
@@ -619,10 +654,10 @@ mod tests {
             Bilinear,
         );
 
-        assert_eq!(resized.get(0, 0).unwrap(), MonoF32::new(0.0));
-        assert_eq!(resized.get(1, 0).unwrap(), MonoF32::new(2.0));
-        assert_eq!(resized.get(0, 1).unwrap(), MonoF32::new(20.0));
-        assert_eq!(resized.get(1, 1).unwrap(), MonoF32::new(22.0));
+        assert_eq!(resized.get(0, 0).unwrap(), MonoF32::new(2.75));
+        assert_eq!(resized.get(1, 0).unwrap(), MonoF32::new(4.25));
+        assert_eq!(resized.get(0, 1).unwrap(), MonoF32::new(17.75));
+        assert_eq!(resized.get(1, 1).unwrap(), MonoF32::new(19.25));
     }
 
     #[test]
@@ -687,14 +722,11 @@ mod tests {
             Bilinear,
         );
 
-        assert_eq!(resized.get(0, 0).unwrap(), Rgb8::new(0, 0, 0));
-        assert_eq!(resized.get(1, 0).unwrap(), Rgb8::new(2, 2, 2));
-        assert_eq!(resized.get(0, 1).unwrap(), Rgb8::new(20, 20, 20));
-        assert_eq!(resized.get(1, 1).unwrap(), Rgb8::new(22, 22, 22));
-        assert_eq!(resized.get(0, 0).unwrap(), Rgb8::new(0, 0, 0));
-        assert_eq!(resized.get(1, 0).unwrap(), Rgb8::new(2, 2, 2));
-        assert_eq!(resized.get(0, 1).unwrap(), Rgb8::new(20, 20, 20));
-        assert_eq!(resized.get(1, 1).unwrap(), Rgb8::new(22, 22, 22));
+        // 2.75, 4.25, 17.75 and 19.25, rounded (see test_downsize_bilinear).
+        assert_eq!(resized.get(0, 0).unwrap(), Rgb8::new(3, 3, 3));
+        assert_eq!(resized.get(1, 0).unwrap(), Rgb8::new(4, 4, 4));
+        assert_eq!(resized.get(0, 1).unwrap(), Rgb8::new(18, 18, 18));
+        assert_eq!(resized.get(1, 1).unwrap(), Rgb8::new(19, 19, 19));
     }
 
     #[test]
@@ -744,9 +776,10 @@ mod tests {
         }
 
         // The ROI region should contain the resized result
-        assert_eq!(target.get(1, 1).unwrap(), Mono8::new(0)); // src (0,0)
-        assert_eq!(target.get(2, 1).unwrap(), Mono8::new(3)); // src (3,0)
-        assert_eq!(target.get(1, 2).unwrap(), Mono8::new(30)); // src (0,3)
+        // Target x copies the source pixel containing (x + 0.5) * 2: 1 and 3.
+        assert_eq!(target.get(1, 1).unwrap(), Mono8::new(11)); // src (1,1)
+        assert_eq!(target.get(2, 1).unwrap(), Mono8::new(13)); // src (3,1)
+        assert_eq!(target.get(1, 2).unwrap(), Mono8::new(31)); // src (1,3)
         assert_eq!(target.get(2, 2).unwrap(), Mono8::new(33)); // src (3,3)
 
         // Outside the ROI should be untouched
@@ -796,10 +829,10 @@ mod tests {
             resize_into(&roi_in, &mut roi_out, NearestNeighbor);
         }
 
-        // Resized from 4x4 to 2x2 nearest neighbor picks corners
-        assert_eq!(target.get(0, 0).unwrap(), Rgb8::new(22, 22, 22));
-        assert_eq!(target.get(1, 0).unwrap(), Rgb8::new(25, 25, 25));
-        assert_eq!(target.get(0, 1).unwrap(), Rgb8::new(52, 52, 52));
+        // Resized from 4x4 to 2x2 nearest neighbor picks ROI pixels 1 and 3
+        assert_eq!(target.get(0, 0).unwrap(), Rgb8::new(33, 33, 33));
+        assert_eq!(target.get(1, 0).unwrap(), Rgb8::new(35, 35, 35));
+        assert_eq!(target.get(0, 1).unwrap(), Rgb8::new(53, 53, 53));
         assert_eq!(target.get(1, 1).unwrap(), Rgb8::new(55, 55, 55));
 
         // Rest should be zero
@@ -807,7 +840,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // 1x1 resize tests — covers the `width <= 1 || height <= 1` branches
+    // 1x1 resize tests
     // -----------------------------------------------------------------------
 
     #[test]
@@ -849,8 +882,8 @@ mod tests {
             },
             NearestNeighbor,
         );
-        // scale_x and scale_y are 0.0, so src_x=0, src_y=0
-        assert_eq!(resized.get(0, 0).unwrap(), 0);
+        // The single target pixel's centre is the source's centre, pixel (1, 1).
+        assert_eq!(resized.get(0, 0).unwrap(), 4);
     }
 
     #[test]
@@ -864,7 +897,8 @@ mod tests {
             },
             Bilinear,
         );
-        assert_eq!(resized.get(0, 0).unwrap(), MonoF32::new(0.0));
+        // Centre onto centre: the source's middle pixel, exactly.
+        assert_eq!(resized.get(0, 0).unwrap(), MonoF32::new(4.0));
     }
 
     #[test]

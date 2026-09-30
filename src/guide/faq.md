@@ -33,13 +33,13 @@ assert_eq!(img.row(1), &[4, 5, 6, 7]);
 
 ## Where do I start if I just want to load a PNG and resize it?
 
-Use `fovea-io` to decode the file, match the returned per-codec image enum once, then run typed fovea operations. For bilinear resize on sRGB images, decode to linear pixels first.
+Use `fovea-io` to decode the file, match the returned per-codec image enum once, then run typed fovea operations. For resize on sRGB images, decode to linear pixels first. Shrinking a photo by more than about two needs the kernel wrapped in `Antialiased`, or fine detail turns into false patterns.
 
 ```rust,ignore
 use fovea::Size;
 use fovea::image::Image;
 use fovea::pixel::{RgbF32, Srgb8};
-use fovea::transform::{Bilinear, SrgbGamma, convert_image, resize};
+use fovea::transform::{Antialiased, Lanczos3, SrgbGamma, convert_image, resize};
 use fovea_io::png::{self, PngImage, PngEncodeOptions};
 
 let bytes = std::fs::read("input.png")?;
@@ -51,7 +51,7 @@ let srgb: Image<Srgb8> = match decoded.image {
 };
 
 let linear: Image<RgbF32> = convert_image(&srgb, SrgbGamma);
-let resized: Image<RgbF32> = resize(&linear, Size::new(800, 600), Bilinear);
+let resized: Image<RgbF32> = resize(&linear, Size::new(800, 600), Antialiased(Lanczos3));
 let output: Image<Srgb8> = convert_image(&resized, SrgbGamma);
 
 let encoded = png::encode(&output, &PngEncodeOptions::default())?;

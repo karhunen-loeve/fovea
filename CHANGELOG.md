@@ -56,6 +56,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `FromParts`, which builds a complex image from a real and an imaginary one
   through `combine_images`. `ComplexMultiply` names the complex product of
   two complex images.
+- **Interpolation kernels, `transform::InterpolationKernel`.** A kernel is a
+  one-dimensional weight function with a compile-time `RADIUS`, applied
+  separably. Shipped: `Bilinear` (now also a kernel), `CatmullRom` (Keys'
+  cubic with `a = −0.5`, Pillow's bicubic), `KeysBicubic` with a chosen `a`
+  (`keys_bicubic!(-0.75)` is OpenCV's bicubic; any finite `a` is valid),
+  and `Lanczos<A>` with `Lanczos2` and `Lanczos3`, both a type and a value.
+  There is deliberately no bare `Bicubic`, because libraries disagree on its
+  coefficient. The trait is open: a kernel of your own works with resize and
+  sampling.
+- **Bicubic and Lanczos resize.** Every kernel is a `ResizeMethod`:
+  `resize(&img, size, Lanczos3)`. A bare kernel interpolates at a fixed
+  width. `Antialiased(kernel)` widens it by the shrink factor, so shrinking
+  by more than about two averages the source instead of aliasing fine
+  detail into false patterns; when enlarging it equals the bare kernel.
+- **Point sampling, `analyze::sampling::sample`.** The value at a sub-pixel
+  position, `sample(&img, CoordinateF64::new(x, y), kernel, &border)`, as the
+  pixel type's accumulator so the fraction survives. The border policy has
+  no default: `Skip` returns `None` when the kernel's taps leave the image,
+  the other policies always answer. Positions follow the pixel-centre
+  convention, `(0.0, 0.0)` being the centre of pixel `(0, 0)`. Kernels up to
+  `MAX_SAMPLE_RADIUS` (8) taps a side; a wider one fails to build.
 
 ### Changed
 
@@ -94,6 +115,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   becomes `Luminance(Bt601)` to keep every result bit for bit, or
   `Luminance(Bt709)` for physical luminance, which changes the numbers
   (pure red in `Rgb8` goes from 77 to 54, pure green from 149 to 182).
+- **Breaking, in results:** `resize` maps pixel centres onto pixel centres
+  through the extent of the image, `src = (x + 0.5) · in / out − 0.5`, as
+  OpenCV and Pillow do, for `Bilinear` and `NearestNeighbor` as for the new
+  kernels. Before, both mapped the corner pixels onto each other,
+  `src = x · (in − 1) / (out − 1)`, which put a resized image up to half a
+  source pixel off the crate's own pixel-centre geometry. Signatures are
+  unchanged; resized pixel values move. A 3×3 image resized to 1×1 now
+  yields its centre pixel rather than its top-left one. `Bilinear` runs on
+  the shared separable engine: in a benchmark on 2026-09-29, enlarging an
+  RGB image was about twice as fast, and shrinking a grey one about a fifth
+  slower. **Migration:** none in code; tests that pin resized values need
+  new expectations.
 - `HysteresisThresholds::try_new` no longer requires `C: Debug`. The bound
   existed only to print the two thresholds into the message, and the error
   now records no value for this generic pair.
