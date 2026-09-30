@@ -77,6 +77,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the other policies always answer. Positions follow the pixel-centre
   convention, `(0.0, 0.0)` being the centre of pixel `(0, 0)`. Kernels up to
   `MAX_SAMPLE_RADIUS` (8) taps a side; a wider one fails to build.
+- **Units and positions of the plane, `fovea::geometry`.** `Point<U>`,
+  `Vector<U>` and `Length<U>` carry their unit of length in the type:
+  `Pixels`, or a metre with a prefix, `Meter<P>`, with `Millimeter`,
+  `Micrometer` and a bare `Meter`. Mixing units does not compile, the sum
+  of two points does not compile (their difference is a `Vector`), and a
+  prefix changes through an explicit `convert`, which multiplies or
+  divides by an exact power of ten. `Point`, `Length` and the unit markers
+  are also at the crate root, and `From` bridges `CoordinateF64` and
+  `Point<Pixels>` in both directions.
+- **Calibrations as mappings of the plane.** `UniformScale` (square
+  pixels), `AxisScale` (a factor per axis, for line-scan cameras and binned
+  sensors), `Similarity` (a camera at an angle) and `Affine`, each from one
+  unit to another, with an optional translation and reflections allowed:
+  `axis_scale!(0.02, -0.02)` maps an image's y-down frame to a y-up machine
+  frame. Each stores its inverse, computed and checked at construction.
+  The class decides what a mapping converts: every `PlaneMap` converts
+  points, every `AffineMap` also displacements and their lengths
+  (`length_of`), and only a `ConformalMap`, the uniform scale and the
+  similarity, converts a length without a direction, so a radius cannot
+  pass through an axis scale. `uniform_scale!` and `axis_scale!` are
+  literals checked at compile time.
+- `error::Requirement::FiniteNonZero`, for a factor or a determinant that
+  must not be zero.
 
 ### Changed
 

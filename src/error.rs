@@ -376,6 +376,9 @@ pub enum Requirement {
     FinitePositive,
     /// Finite and not below zero.
     FiniteNonNegative,
+    /// Finite and not zero. A subnormal value counts as zero, because its
+    /// reciprocal overflows.
+    FiniteNonZero,
     /// An odd integer (which excludes zero).
     Odd,
     /// An integer not below the bound.
@@ -415,6 +418,7 @@ impl Requirement {
             Requirement::Finite => "must be finite",
             Requirement::FinitePositive => "must be finite and strictly positive",
             Requirement::FiniteNonNegative => "must be finite and non-negative",
+            Requirement::FiniteNonZero => "must be finite and non-zero",
             Requirement::Odd => "must be odd",
             Requirement::AtLeast(_) => "must be at least",
             Requirement::AtMost(_) => "must be at most",
@@ -433,6 +437,7 @@ impl PartialEq for Requirement {
             (Finite, Finite)
             | (FinitePositive, FinitePositive)
             | (FiniteNonNegative, FiniteNonNegative)
+            | (FiniteNonZero, FiniteNonZero)
             | (Odd, Odd)
             | (Ordered, Ordered)
             | (StrictlyOrdered, StrictlyOrdered) => true,

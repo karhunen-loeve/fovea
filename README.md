@@ -147,6 +147,7 @@ Important distinction: `Rgb8` and `Srgb8` may both store three `u8` channels, bu
 | `analyze` | `histogram`, `connected_components`, `extract_contours`, `image_statistics`, `ssim` | Image analysis that produces data about an image: histograms, components, contours and shape descriptors, whole-image statistics and moments, quality metrics, peak interpolation. |
 | `features` | `detect::detect_corners`, `detect::fast`, `refine_corners`, `Corner` | Corner detection — the structure-tensor and segment-test families — sub-pixel refinement, and the keypoint types they produce. |
 | `draw` | `draw_rect`, `draw_circle`, `Drawable` | Annotation burn-in: lines, rectangles, circles, polylines and crosshairs, clipped, with hard single-pixel strokes. |
+| `geometry` | `Point`, `Millimeter`, `UniformScale`, `AffineMap` | Units, positions and mappings of the plane: pixels to millimetres, with the mapping's class deciding what converts. |
 | `border` | `Clamp`, `Mirror`, `Skip` | Boundary behavior for neighborhood operations. |
 | `guide` | `guide::faq`, `guide::pixel_types` | Task-oriented docs.rs pages for common questions. |
 

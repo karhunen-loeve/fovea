@@ -114,6 +114,17 @@ pub mod features;
 /// and `Drawable` is the extension point for custom markers.
 pub mod draw;
 
+/// Units, positions and mappings of the plane: pixels to millimetres.
+///
+/// Start with [`Point`](geometry::Point) and a unit such as
+/// [`Millimeter`](geometry::Millimeter), and with a calibration such as
+/// [`UniformScale`](geometry::UniformScale) or
+/// [`AxisScale`](geometry::AxisScale). The class of a mapping decides which
+/// objects it converts: points under every mapping, vectors under the
+/// [`AffineMap`](geometry::AffineMap)s, lengths only under the
+/// [`ConformalMap`](geometry::ConformalMap)s.
+pub mod geometry;
+
 #[cfg(doc)]
 pub mod guide;
 
@@ -123,3 +134,4 @@ pub use common::{
     PixelDistance, Rectangle, Sigma, SignedCoordinate, Size, Stride, Tolerance,
 };
 pub use error::Error;
+pub use geometry::{Length, Meter, Micrometer, Millimeter, Pixels, Point};
