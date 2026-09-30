@@ -15,6 +15,7 @@
 //! - [`guide::pixel_conversions`] — conversion strategies, common paths, and `.then()` combinator
 //! - [`guide::camera_buffers`] — raw bytes, camera SDK buffers, and byte layout
 //! - [`guide::large_images`] — slices, rows, tiles, sliding windows, and parallel runtimes
+//! - [`guide::numerics`]: which bits are stable, how accuracy is documented, and tie rules
 
 extern crate self as fovea;
 

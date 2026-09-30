@@ -382,9 +382,11 @@ impl HasScale for ScaleKeypoint {
 /// pixels in. The `(y, x)` tie-break makes "the top 50 corners" a
 /// reproducible set, which is what makes it testable.
 ///
-/// Comparisons use [`f32::total_cmp`] / [`f64::total_cmp`], so a NaN
-/// response or position from a misbehaving detector still yields a
-/// consistent total order rather than a sort that silently loses elements.
+/// A NaN never wins. A keypoint whose response is NaN, as a misbehaving
+/// detector can produce, ranks after every keypoint with a number, and among
+/// equal responses a NaN coordinate ranks after every number, whatever the
+/// NaN's sign bit. Numbers are compared with [`f32::total_cmp`] /
+/// [`f64::total_cmp`], so the order is total and a sort loses no element.
 ///
 /// # Example
 ///
@@ -406,11 +408,22 @@ pub fn by_response_then_position<K>(a: &K, b: &K) -> Ordering
 where
     K: HasPosition + HasResponse,
 {
-    // Descending in response: `b` first, so the strongest sorts to index 0.
-    b.response().total_cmp(&a.response()).then_with(|| {
-        let (pa, pb) = (a.position(), b.position());
-        pa.y.total_cmp(&pb.y).then_with(|| pa.x.total_cmp(&pb.x))
-    })
+    // NaN is sorted out first: `total_cmp` alone ranks a positive NaN above
+    // every number and a negative one below. Then descending in response,
+    // `b` first, so the strongest sorts to index 0.
+    let (ra, rb) = (a.response(), b.response());
+    ra.is_nan()
+        .cmp(&rb.is_nan())
+        .then_with(|| rb.total_cmp(&ra))
+        .then_with(|| {
+            let (pa, pb) = (a.position(), b.position());
+            ascending_nan_last(pa.y, pb.y).then_with(|| ascending_nan_last(pa.x, pb.x))
+        })
+}
+
+/// Ascending order with NaN after every number, whatever its sign bit.
+fn ascending_nan_last(a: f64, b: f64) -> Ordering {
+    a.is_nan().cmp(&b.is_nan()).then_with(|| a.total_cmp(&b))
 }
 
 /// Sorts keypoints into the canonical order of
@@ -448,7 +461,9 @@ where
 /// Sorts with [`sort_by_response`] and truncates, so the retained
 /// keypoints are left in canonical order and the selection is reproducible
 /// across runs even when responses tie. `n` larger than the input length
-/// keeps everything; `n == 0` empties the vector.
+/// keeps everything; `n == 0` empties the vector. A keypoint whose response
+/// is NaN ranks last, so it survives only when fewer than `n` keypoints
+/// carry a number.
 ///
 /// This is the "keep the top-N" step every detector needs and none should
 /// re-implement — the interesting part is not the truncation but the
@@ -674,19 +689,43 @@ mod tests {
     }
 
     #[test]
-    fn sort_handles_a_nan_response_without_losing_keypoints() {
+    fn sort_ranks_a_nan_response_last_whatever_its_sign() {
         let mut corners = vec![
             Corner::new(CoordinateF64::new(0.0, 0.0), 0.5),
             Corner::new(CoordinateF64::new(1.0, 1.0), f32::NAN),
             Corner::new(CoordinateF64::new(2.0, 2.0), 0.1),
+            Corner::new(CoordinateF64::new(3.0, 3.0), -f32::NAN),
         ];
         sort_by_response(&mut corners);
-        assert_eq!(corners.len(), 3);
-        // total_cmp gives a consistent total order: a positive NaN ranks
-        // above every finite response rather than corrupting the sort.
-        assert!(corners[0].response().is_nan());
-        assert_eq!(corners[1].response(), 0.5);
-        assert_eq!(corners[2].response(), 0.1);
+        // `total_cmp` alone would put the positive NaN first and the
+        // negative one last; neither may win.
+        assert_eq!(corners.len(), 4);
+        assert_eq!(corners[0].response(), 0.5);
+        assert_eq!(corners[1].response(), 0.1);
+        assert!(corners[2].response().is_nan());
+        assert!(corners[3].response().is_nan());
+    }
+
+    #[test]
+    fn retain_top_n_cuts_a_nan_response_first() {
+        let mut corners = vec![
+            Corner::new(CoordinateF64::new(0.0, 0.0), f32::NAN),
+            Corner::new(CoordinateF64::new(1.0, 1.0), 0.2),
+            Corner::new(CoordinateF64::new(2.0, 2.0), 0.1),
+        ];
+        retain_top_n(&mut corners, 2);
+        assert_eq!(corners[0].response(), 0.2);
+        assert_eq!(corners[1].response(), 0.1);
+    }
+
+    #[test]
+    fn equal_responses_rank_a_nan_coordinate_last() {
+        let nan_y = Corner::new(CoordinateF64::new(0.0, -f64::NAN), 0.5);
+        let nan_x = Corner::new(CoordinateF64::new(f64::NAN, 4.0), 0.5);
+        let plain = Corner::new(CoordinateF64::new(9.0, 4.0), 0.5);
+        assert_eq!(by_response_then_position(&plain, &nan_y), Ordering::Less);
+        assert_eq!(by_response_then_position(&nan_y, &plain), Ordering::Greater);
+        assert_eq!(by_response_then_position(&plain, &nan_x), Ordering::Less);
     }
 
     #[test]

@@ -46,6 +46,11 @@ use crate::transform::{BinaryMask, convert_image};
 /// `w0 * w1 * (mu0 - mu1)^2`. Return the `t` that maximises this
 /// quantity.
 ///
+/// If several thresholds reach the same maximum, the lowest of them is
+/// returned. Between two modes with empty bins in between, every `t` in the
+/// gap separates the classes equally well, so the result is the last
+/// occupied bin of the darker mode.
+///
 /// # Examples
 ///
 /// ```
@@ -63,7 +68,8 @@ use crate::transform::{BinaryMask, convert_image};
 /// ).unwrap();
 /// let h: Histogram<NaturalBins, _> = histogram(&img, &NaturalBins).unwrap();
 /// let t = otsu_threshold(&h).unwrap();
-/// assert!((20..220).contains(&(t as u32)));
+/// // Every t from 20 to 219 splits the two groups; the lowest wins.
+/// assert_eq!(t, 20);
 /// ```
 pub fn otsu_threshold<V: Copy>(hist: &Histogram<NaturalBins, V>) -> Option<u8>
 where
@@ -221,6 +227,17 @@ mod tests {
             (64..192).contains(&(t as u32)),
             "expected t strictly between the two modes; got {t}",
         );
+    }
+
+    #[test]
+    fn otsu_threshold_returns_the_lowest_of_tied_thresholds() {
+        // Two occupied bins, 50 and 180: every t in 50..180 gives the same
+        // between-class variance, and the scan keeps the first.
+        let mut bins = vec![0u64; 256];
+        bins[50] = 7;
+        bins[180] = 3;
+        let h = hist_from_bins_u8(bins);
+        assert_eq!(otsu_threshold(&h), Some(50));
     }
 
     #[test]

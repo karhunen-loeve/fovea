@@ -80,6 +80,11 @@ use crate::pixel::LabelPixel;
 ///   background (`false`).
 /// - Every foreground pixel carries a label in
 ///   `1 ..= label_count` (dense \u2014 no gaps).
+/// - Components are numbered in raster order of their first pixel: label 1
+///   is the component of the first foreground pixel in raster order (rows
+///   top to bottom, each row left to right), label 2 the next component to
+///   appear, and so on. The order is part of the API and does not depend on
+///   how the pass merges components internally.
 ///
 /// `Debug` and `Clone` are implemented manually (since `Image<L>` does
 /// not implement `Debug`); `Eq`, `Hash`, and `PartialEq` are

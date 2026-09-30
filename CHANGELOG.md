@@ -202,8 +202,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   literal. **Migration:** `with_anchor(data, Coordinate::new(0, 2))`
   becomes `with_anchor::<0, 2>(data)`; `with_anchors(h, 0, v, 2)` becomes
   `with_anchors::<0, 2>(h, v)`.
+- **In results:** when several vertices are equally far from the first,
+  `approximate_polygon` splits the outline at the earliest of them, where
+  it took the last. The result changes only on such an exact tie, for
+  instance on a shape symmetric about its first vertex. The earlier
+  candidate is the rule every other tie in the crate follows.
+- **In results:** `by_response_then_position`, and with it
+  `sort_by_response` and `retain_top_n`, rank a keypoint whose response is
+  NaN after every keypoint with a number. Before, a NaN with the sign bit
+  clear ranked first and survived every top-N cut. Among equal responses a
+  NaN coordinate ranks last as well. Results change only where a NaN
+  occurs.
 
 ### Documentation
+
+- **A guide page on numerics.** `guide::numerics` says that fovea promises
+  no bit pattern across builds (FMA, target, compiler, and later threads
+  and SIMD), and that a caller who needs identical bits validates and keeps
+  one binary; that accuracy is described where it depends on a choice, and
+  no numeric precision is guaranteed; and which rule resolves a tie, with
+  the operations that apply one.
+- `otsu_threshold` states that the lowest of several equally good
+  thresholds wins, and `Labeling` states that components are numbered in
+  raster order of their first pixel. Both were already the behaviour.
 
 - **A guide page on scales of measurement.** `guide::scales_of_measurement`
   explains which operations a value admits, using Stevens' levels (nominal,

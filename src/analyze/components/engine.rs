@@ -512,6 +512,29 @@ mod tests {
     }
 
     #[test]
+    fn labels_follow_the_raster_order_of_first_pixels() {
+        // The U's right arm starts after the dot between the arms and joins
+        // the left arm only on the third row. The labels still follow each
+        // component's first pixel in raster order: the U at (0, 0) is 1, the
+        // dot at (2, 0) is 2, the bar at (0, 4) is 3.
+        let img = img_from_str(
+            "
+            #.#.#
+            #...#
+            #####
+            .....
+            ##...
+            ",
+        );
+        let r = connected_components::<Label32, Connectivity4>(&img).unwrap();
+        assert_eq!(r.label_count, 3);
+        assert_eq!(r.labels.pixel_at(0, 0), Label32::new(1));
+        assert_eq!(r.labels.pixel_at(4, 0), Label32::new(1));
+        assert_eq!(r.labels.pixel_at(2, 0), Label32::new(2));
+        assert_eq!(r.labels.pixel_at(0, 4), Label32::new(3));
+    }
+
+    #[test]
     fn all_background() {
         let img = BinaryImage::fill(8, 8, false);
         let r = connected_components::<Label32, Connectivity4>(&img).unwrap();

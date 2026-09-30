@@ -220,7 +220,8 @@ pub fn convex_hull(points: &[Coordinate]) -> Vec<Coordinate> {
 /// the vertex farthest from the current anchor chord is kept iff its
 /// perpendicular distance exceeds the tolerance. The input is treated as
 /// **closed**; the two initial anchors are the first vertex and the vertex
-/// farthest from it.
+/// farthest from it. When several vertices are equally far from the first,
+/// the earliest of them in `points` is the second anchor.
 ///
 /// A tolerance of `0.0` removes exactly the collinear vertices. The
 /// simplification is **never applied implicitly** by any other operation
@@ -260,12 +261,18 @@ pub fn approximate_polygon(points: &[Coordinate], tolerance: Tolerance) -> Vec<C
     let dist2 = |p: Coordinate| {
         (p.x as f64 - first.x as f64).powi(2) + (p.y as f64 - first.y as f64).powi(2)
     };
-    let farthest = points
-        .iter()
-        .enumerate()
-        .max_by(|(_, p), (_, q)| dist2(**p).total_cmp(&dist2(**q)))
-        .map(|(i, _)| i)
-        .expect("non-empty by the length check above");
+    // Strict `>` keeps the earliest of several equally distant vertices;
+    // `max_by` would return the last one. The distances come from integer
+    // coordinates, so none is NaN.
+    let mut farthest = 0;
+    let mut farthest_d2 = 0.0;
+    for (i, &p) in points.iter().enumerate() {
+        let d2 = dist2(p);
+        if d2 > farthest_d2 {
+            farthest = i;
+            farthest_d2 = d2;
+        }
+    }
 
     let mut out = Vec::new();
     // Simplify the two halves; each call emits its final vertex's
@@ -448,6 +455,19 @@ mod tests {
         );
         let fine = approximate_polygon(&outline, tolerance!(0.5));
         assert!(fine.contains(&c(4, 1)), "bump lost at ε=0.5: {fine:?}");
+    }
+
+    #[test]
+    fn approximate_splits_at_the_first_of_equally_distant_vertices() {
+        // (4, 3) and (3, 4) are both 5 px from the first vertex. The
+        // earlier one anchors the split and survives; the later one lies
+        // 1.4 px from the chord and is removed at ε = 2. Taking the last
+        // of the two would keep (3, 4) instead.
+        let outline = [c(0, 0), c(4, 3), c(3, 4)];
+        assert_eq!(
+            approximate_polygon(&outline, tolerance!(2.0)),
+            vec![c(0, 0), c(4, 3)]
+        );
     }
 
     #[test]
