@@ -100,6 +100,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   literals checked at compile time.
 - `error::Requirement::FiniteNonZero`, for a factor or a determinant that
   must not be zero.
+- **The caliper, `fovea::measure`.** A `Caliper` describes where to
+  measure: a segment or an arc, a width to average across and a sampling
+  step, with no default for either. `profile(&img, &caliper, kernel,
+  &border)` reads the averaged intensities along it from a single-channel
+  image. `Profile::edges(polarity, sigma, min_contrast)` returns every edge
+  of the polarity (`DarkToLight`, `LightToDark`, `Either`) whose contrast
+  reaches `min_contrast!`: the profile is differentiated with a derivative
+  of a Gaussian of the given σ, the contrast of an ideal step is its
+  height, and the position is the centroid of the derivative's lobe, which
+  stays within about 0.001 px of a sub-pixel edge at σ = 1 px where the
+  vertex of a parabola would be pulled up to 0.05 px towards a pixel
+  boundary. `Edges` offers the named selections `first`, `last`,
+  `strongest` and `nearest_to`, and `pairs(first, rule)` forms edge pairs
+  by a rule the caller names, `Neighbors` or `StrongestOfRun`, or one of
+  their own through the `PairRule` trait. A pair's `width` is measured
+  along the path, the arc length on an arc.
+- **Breaking:** `Error::CaliperOutsideImage { sample }`, returned by
+  `profile` under `Skip` when the caliper's footprint leaves the image.
+  `Error` gained a variant, so an exhaustive `match` on it needs an arm.
 
 ### Changed
 

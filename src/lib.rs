@@ -125,6 +125,16 @@ pub mod draw;
 /// [`ConformalMap`](geometry::ConformalMap)s.
 pub mod geometry;
 
+/// Measurement tools: the caliper, which finds edges and edge pairs along a
+/// path to a fraction of a pixel.
+///
+/// Start with [`Caliper`](measure::Caliper) and
+/// [`profile`](measure::profile), then
+/// [`Profile::edges`](measure::Profile::edges) and
+/// [`Edges::pairs`](measure::Edges::pairs). Results are positions and
+/// lengths in pixels, which a calibration from [`geometry`] converts.
+pub mod measure;
+
 #[cfg(doc)]
 pub mod guide;
 

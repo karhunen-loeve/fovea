@@ -207,6 +207,19 @@ pub enum Error {
         image: Size,
     },
 
+    /// A caliper's footprint leaves the image, and the border policy does
+    /// not extend it.
+    ///
+    /// Returned by [`profile`](crate::measure::profile) under
+    /// [`Skip`](crate::border::Skip), where an interpolation tap outside
+    /// the image has no value. Where a part lies is data, so this is an
+    /// error and not a profile with gaps.
+    CaliperOutsideImage {
+        /// The first position along the path, counted in sampling steps
+        /// from its start, at which a tap falls outside the image.
+        sample: usize,
+    },
+
     /// The chosen accumulator type cannot hold the worst-case sum for an
     /// image of this size.
     ///
@@ -616,6 +629,12 @@ impl fmt::Display for Error {
                     window.width, window.height, image.width, image.height
                 )
             }
+            Error::CaliperOutsideImage { sample } => {
+                write!(
+                    f,
+                    "caliper footprint leaves the image at sample {sample} along its path"
+                )
+            }
             Error::AccumulatorOverflow {
                 required_capacity,
                 accumulator_capacity,
@@ -652,6 +671,15 @@ mod tests {
         assert_eq!(
             err.to_string(),
             "size mismatch: expected 640x480, got 320x240"
+        );
+    }
+
+    #[test]
+    fn display_caliper_outside_image() {
+        let err = Error::CaliperOutsideImage { sample: 17 };
+        assert_eq!(
+            err.to_string(),
+            "caliper footprint leaves the image at sample 17 along its path"
         );
     }
 
