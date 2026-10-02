@@ -1,7 +1,9 @@
 //! The mapping traits: what a mapping of the plane can convert.
 
+use super::elements::{Circle, Ellipse, Line, Segment};
 use super::point::{Length, Point, Vector};
 use super::units::LengthUnit;
+use crate::AxialOrientation;
 
 /// A mapping of the plane from one unit of length to another.
 ///
@@ -97,6 +99,88 @@ pub trait AffineMap: PlaneMap {
     /// The inverse mapping, computed in closed form.
     fn inverse(&self) -> Self::Inverse;
 
+    /// The image of the line `l`: the line through the image of its point,
+    /// along the image of its direction.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use fovea::{Line, Millimeter, Pixels, Point};
+    /// use fovea::geometry::{AffineMap, AxisScale, Vector};
+    ///
+    /// let scale: AxisScale<Pixels, Millimeter> = fovea::axis_scale!(0.02, 0.05);
+    /// let diagonal: Line<Pixels> = Line::try_through(Point::new(0.0, 0.0), Point::new(5.0, 2.0))?;
+    /// let mapped = scale.map_line(diagonal);
+    /// // (5, 2) px is (0.1, 0.1) mm: the diagonal of the image is one on the part.
+    /// let d = mapped.direction();
+    /// assert!((d.x - d.y).abs() < 1e-15);
+    /// # Ok::<(), fovea::Error>(())
+    /// ```
+    fn map_line(&self, l: Line<Self::Domain>) -> Line<Self::Codomain> {
+        let v = self.map_vector(l.direction());
+        let n = v.length().get();
+        Line::from_parts(self.map_point(l.point()), Vector::new(v.x / n, v.y / n))
+    }
+
+    /// The image of the segment `s`, from the image of its start to the image
+    /// of its end.
+    fn map_segment(&self, s: Segment<Self::Domain>) -> Segment<Self::Codomain> {
+        Segment::new(self.map_point(s.start), self.map_point(s.end))
+    }
+
+    /// The image of the ellipse `e`, which is an ellipse.
+    ///
+    /// The images of the two semi-axes are conjugate semi-diameters of the
+    /// image, which gives its semi-axes and orientation in closed form. A
+    /// circle is an ellipse with equal semi-axes, so this is also how a
+    /// circle converts under a mapping that is not conformal.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use fovea::{AxialOrientation, Ellipse, Length, Millimeter, Pixels, Point};
+    /// use fovea::geometry::{AffineMap, AxisScale};
+    ///
+    /// // A round hole of radius 100 px under a line-scan camera.
+    /// let scale: AxisScale<Pixels, Millimeter> = fovea::axis_scale!(0.02, 0.05);
+    /// let hole: Ellipse<Pixels> = Ellipse::try_new(
+    ///     Point::new(0.0, 0.0),
+    ///     Length::new(100.0),
+    ///     Length::new(100.0),
+    ///     AxialOrientation::from_radians(0.0)?,
+    /// )?;
+    /// let on_part = scale.map_ellipse(hole);
+    /// assert!((on_part.semi_major().get() - 5.0).abs() < 1e-12);
+    /// assert!((on_part.semi_minor().get() - 2.0).abs() < 1e-12);
+    /// // The major axis runs along y, the feed direction.
+    /// let angle = on_part.orientation().radians();
+    /// assert!((angle - core::f64::consts::FRAC_PI_2).abs() < 1e-12);
+    /// # Ok::<(), fovea::Error>(())
+    /// ```
+    fn map_ellipse(&self, e: Ellipse<Self::Domain>) -> Ellipse<Self::Codomain> {
+        let (sin, cos) = e.orientation().radians().sin_cos();
+        let (a, b) = (e.semi_major().get(), e.semi_minor().get());
+        let u = self.map_vector(Vector::new(a * cos, a * sin));
+        let v = self.map_vector(Vector::new(-b * sin, b * cos));
+        // The image is M·(unit circle) with M = [u v]; its semi-axes are the
+        // singular values of M, the square roots of the eigenvalues of M·Mᵀ.
+        let sxx = u.x * u.x + v.x * v.x;
+        let syy = u.y * u.y + v.y * v.y;
+        let sxy = u.x * u.y + v.x * v.y;
+        let mean = 0.5 * (sxx + syy);
+        let half_gap = 0.5 * (sxx - syy).hypot(2.0 * sxy);
+        let major = (mean + half_gap).sqrt();
+        // The product of the semi-axes is |det M|, which keeps the smaller
+        // one accurate when the image is very elongated.
+        let minor = (u.x * v.y - u.y * v.x).abs() / major;
+        Ellipse::from_parts(
+            self.map_point(e.center()),
+            major,
+            minor.min(major),
+            AxialOrientation::from_half_atan2(2.0 * sxy, sxx - syy),
+        )
+    }
+
     /// Whether the mapping is a reflection composed with a rotation and a
     /// stretch (`det A < 0`).
     ///
@@ -144,5 +228,36 @@ pub trait ConformalMap: AffineMap {
     /// The length in the codomain of a length in the domain.
     fn map_length(&self, l: Length<Self::Domain>) -> Length<Self::Codomain> {
         Length::new(l.get() * self.factor())
+    }
+
+    /// The image of the circle `c`, which is a circle.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use fovea::{Circle, Length, Millimeter, Pixels, Point};
+    /// use fovea::geometry::{ConformalMap, UniformScale};
+    ///
+    /// let scale: UniformScale<Pixels, Millimeter> = fovea::uniform_scale!(0.0125);
+    /// let hole: Circle<Pixels> = Circle::try_new(Point::new(400.0, 240.0), Length::new(160.0))?;
+    /// let on_part = scale.map_circle(hole);
+    /// assert_eq!(on_part.center(), Point::new(5.0, 3.0));
+    /// assert_eq!(on_part.radius().get(), 2.0);
+    /// # Ok::<(), fovea::Error>(())
+    /// ```
+    ///
+    /// Under an axis scale a circle becomes an ellipse, so it does not
+    /// convert as a circle:
+    ///
+    /// ```compile_fail
+    /// use fovea::{Circle, Length, Millimeter, Pixels, Point};
+    /// use fovea::geometry::{AxisScale, ConformalMap};
+    ///
+    /// let scale: AxisScale<Pixels, Millimeter> = fovea::axis_scale!(0.02, 0.05);
+    /// let hole: Circle<Pixels> = Circle::try_new(Point::new(0.0, 0.0), Length::new(1.0)).unwrap();
+    /// let _ = scale.map_circle(hole);
+    /// ```
+    fn map_circle(&self, c: Circle<Self::Domain>) -> Circle<Self::Codomain> {
+        Circle::from_parts(self.map_point(c.center()), self.map_length(c.radius()))
     }
 }

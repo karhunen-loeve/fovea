@@ -20,10 +20,10 @@
 //!
 //! | Mapping | Form | Typical case | Converts |
 //! |---|---|---|---|
-//! | [`UniformScale`] | `a·x + t` | square pixels, camera aligned with the axes | points, vectors, lengths, circles |
-//! | [`AxisScale`] | `diag(a, b)·x + t` | line-scan camera, binned sensor | points, vectors |
-//! | [`Similarity`] | `a·R·x + t` | square pixels, camera at an angle | points, vectors, lengths, circles |
-//! | [`Affine`] | `A·x + t` | oblique view, in the affine approximation | points, vectors |
+//! | [`UniformScale`] | `a·x + t` | square pixels, camera aligned with the axes | points, vectors, lines, ellipses, lengths, circles |
+//! | [`AxisScale`] | `diag(a, b)·x + t` | line-scan camera, binned sensor | points, vectors, lines, ellipses |
+//! | [`Similarity`] | `a·R·x + t` | square pixels, camera at an angle | points, vectors, lines, ellipses, lengths, circles |
+//! | [`Affine`] | `A·x + t` | oblique view, in the affine approximation | points, vectors, lines, ellipses |
 //!
 //! Three traits carry the capabilities. Every mapping is a [`PlaneMap`] and
 //! converts points. The four classes above are [`AffineMap`]s: their metric
@@ -35,6 +35,20 @@
 //! Reflections are allowed: `axis_scale!(0.02, -0.02)` maps an image frame
 //! with `y` pointing down to a machine frame with `y` pointing up, and
 //! [`AffineMap::reverses_orientation`] says so.
+//!
+//! ## Elements
+//!
+//! A [`Line`] (infinite, with a direction), a [`Segment`], a [`Circle`] and
+//! an [`Ellipse`] carry the unit of their points. They are what the fits of
+//! [`measure`](crate::measure) return, and they convert by the same rule:
+//! lines, segments and ellipses under every [`AffineMap`], circles only
+//! under a [`ConformalMap`], because under any other mapping a circle
+//! becomes an ellipse. All four are also at the crate root.
+//!
+//! [`Line`]: crate::geometry::Line
+//! [`Segment`]: crate::geometry::Segment
+//! [`Circle`]: crate::geometry::Circle
+//! [`Ellipse`]: crate::geometry::Ellipse
 //!
 //! ## Measuring in the right space
 //!
@@ -84,11 +98,13 @@
 //! ```
 
 mod affine;
+mod elements;
 mod map;
 mod point;
 mod units;
 
 pub use affine::{Affine, AxisScale, Similarity, UniformScale};
+pub use elements::{Circle, Element, Ellipse, Line, Segment};
 pub use map::{AffineMap, ConformalMap, PlaneMap};
 pub use point::{Length, Point, Vector};
 pub use units::{LengthUnit, Meter, Micro, Micrometer, Milli, Millimeter, Pixels, Prefix, Unit};

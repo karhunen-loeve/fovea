@@ -14,6 +14,9 @@ use crate::image::ImageViewMut;
 /// Both endpoints are signed and may lie outside the image; the visible
 /// portion is drawn and the rest is clipped (see [`Drawable`]).
 ///
+/// Not to be confused with [`geometry::Line`](crate::geometry::Line), the
+/// infinite line with sub-pixel coordinates and a unit that a fit returns.
+///
 /// # Examples
 ///
 /// ```

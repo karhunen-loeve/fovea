@@ -119,6 +119,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking:** `Error::CaliperOutsideImage { sample }`, returned by
   `profile` under `Skip` when the caliper's footprint leaves the image.
   `Error` gained a variant, so an exhaustive `match` on it needs an arm.
+- **Geometric elements, `Line`, `Segment`, `Circle` and `Ellipse`.** In
+  `fovea::geometry` and at the crate root, each in the unit of its points.
+  A `Line` is infinite and has a direction of unit length; a `Segment` is
+  two points; a `Circle` has a finite positive radius; an `Ellipse` has
+  semi-axes with `semi_major >= semi_minor > 0` and the orientation of its
+  major axis as an `AxialOrientation`. Constructors report an invalid value
+  through their `Result`; semi-axes in the wrong order are an error, not a
+  swap. They convert by the class of the mapping: `AffineMap` gained
+  `map_line`, `map_segment` and `map_ellipse`, and `ConformalMap` gained
+  `map_circle`, so a circle does not pass through an axis scale, where it
+  becomes an ellipse. The sealed trait `Element` names an element's unit.
+  `draw::Line` and `draw::Circle` keep their names and meaning: they paint
+  pixels.
+- **Geometric fits, `measure::try_fit`.** `try_fit(&points, estimator,
+  outliers)` fits a line by `TotalLeastSquares`, a circle by `Taubin` or an
+  ellipse by `Fitzgibbon` (the direct least squares method, in Halíř and
+  Flusser's stable form), with the outlier rule written out: `AllPoints`,
+  `Huber` or `Tukey`, whose threshold is a length in the unit of the
+  points (`tukey!(0.5)`, `huber!(0.5)`, or `try_new` for a computed value),
+  so a threshold in pixels does not compile against points in millimetres.
+  Tukey starts from Huber's result. The returned `Fit` carries the element
+  and its residuals as exact geometric distances, the ellipse's included:
+  `rms_residual` over the points that shaped the element, `max_residual`
+  and `peak_to_valley` (the form deviation, furthest point outside plus
+  furthest inside) over all points, so a chip that Tukey rejects still
+  shows where the part is judged; and `used_count` and `outlier_count`. A
+  fitted line points from its first input point towards its last, and
+  `extent()` is the segment its points cover. `Fit::map` converts a fit and
+  its residuals through a `ConformalMap`; under any other calibration the
+  points convert first. Each estimator has `MIN_POINTS` (2, 3, 5).
+- **Breaking:** `Error::TooFewPoints { required, actual }` and
+  `Error::DegeneratePoints`, returned by `try_fit`. `Error` gained two
+  variants, so an exhaustive `match` on it needs two arms.
 
 ### Changed
 

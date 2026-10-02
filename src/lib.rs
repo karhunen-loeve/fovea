@@ -126,13 +126,15 @@ pub mod draw;
 pub mod geometry;
 
 /// Measurement tools: the caliper, which finds edges and edge pairs along a
-/// path to a fraction of a pixel.
+/// path to a fraction of a pixel, and the fits of lines, circles and
+/// ellipses with their residuals.
 ///
 /// Start with [`Caliper`](measure::Caliper) and
 /// [`profile`](measure::profile), then
 /// [`Profile::edges`](measure::Profile::edges) and
-/// [`Edges::pairs`](measure::Edges::pairs). Results are positions and
-/// lengths in pixels, which a calibration from [`geometry`] converts.
+/// [`Edges::pairs`](measure::Edges::pairs); fit the points with
+/// [`try_fit`](measure::try_fit). Results are positions and lengths in
+/// pixels, which a calibration from [`geometry`] converts.
 pub mod measure;
 
 #[cfg(doc)]
@@ -144,4 +146,6 @@ pub use common::{
     PixelDistance, Rectangle, Sigma, SignedCoordinate, Size, Stride, Tolerance,
 };
 pub use error::Error;
-pub use geometry::{Length, Meter, Micrometer, Millimeter, Pixels, Point};
+pub use geometry::{
+    Circle, Ellipse, Length, Line, Meter, Micrometer, Millimeter, Pixels, Point, Segment,
+};

@@ -15,6 +15,9 @@ use crate::image::ImageViewMut;
 /// `center` is signed and may lie outside the image; the visible portion is
 /// drawn and the rest is clipped (see [`Drawable`]).
 ///
+/// Not to be confused with [`geometry::Circle`](crate::geometry::Circle), the
+/// circle with sub-pixel coordinates and a unit that a fit returns.
+///
 /// # Examples
 ///
 /// ```

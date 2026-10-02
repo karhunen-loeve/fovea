@@ -220,6 +220,28 @@ pub enum Error {
         sample: usize,
     },
 
+    /// A fit has fewer points than its estimator needs to determine an
+    /// element: 2 for a line, 3 for a circle, 5 for an ellipse.
+    ///
+    /// Returned by [`try_fit`](crate::measure::try_fit), both when the input
+    /// is too short and when the outlier handling leaves too few points to
+    /// shape the element.
+    TooFewPoints {
+        /// The estimator's minimum.
+        required: usize,
+        /// The number of points there were, or that the outlier handling
+        /// kept.
+        actual: usize,
+    },
+
+    /// The points determine no unique element of the kind being fitted.
+    ///
+    /// Returned by [`try_fit`](crate::measure::try_fit) when the points
+    /// coincide or spread equally in every direction (a line), lie on one
+    /// line (a circle or an ellipse), or admit no ellipse. Where the points
+    /// lie is data, so this is an error and not a panic.
+    DegeneratePoints,
+
     /// The chosen accumulator type cannot hold the worst-case sum for an
     /// image of this size.
     ///
@@ -635,6 +657,18 @@ impl fmt::Display for Error {
                     "caliper footprint leaves the image at sample {sample} along its path"
                 )
             }
+            Error::TooFewPoints { required, actual } => {
+                write!(
+                    f,
+                    "too few points: the fit needs at least {required}, got {actual}"
+                )
+            }
+            Error::DegeneratePoints => {
+                write!(
+                    f,
+                    "degenerate points: they determine no unique element of this kind"
+                )
+            }
             Error::AccumulatorOverflow {
                 required_capacity,
                 accumulator_capacity,
@@ -680,6 +714,22 @@ mod tests {
         assert_eq!(
             err.to_string(),
             "caliper footprint leaves the image at sample 17 along its path"
+        );
+    }
+
+    #[test]
+    fn display_fit_errors() {
+        let err = Error::TooFewPoints {
+            required: 5,
+            actual: 4,
+        };
+        assert_eq!(
+            err.to_string(),
+            "too few points: the fit needs at least 5, got 4"
+        );
+        assert_eq!(
+            Error::DegeneratePoints.to_string(),
+            "degenerate points: they determine no unique element of this kind"
         );
     }
 

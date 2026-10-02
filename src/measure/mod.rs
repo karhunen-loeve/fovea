@@ -1,4 +1,4 @@
-//! Measurement tools: the caliper.
+//! Measurement tools: the caliper and the geometric fits.
 //!
 //! A caliper is a path placed across the edges to be measured, a width to
 //! average over, and a sampling step. [`profile`](crate::measure::profile)
@@ -7,6 +7,16 @@
 //! [`Edges::pairs`](crate::measure::Edges::pairs) forms edge pairs by a rule
 //! the caller names. Picking one edge or one pair is always a named step;
 //! nothing is chosen silently.
+//!
+//! [`try_fit`](crate::measure::try_fit) fits a line, circle or ellipse to
+//! points, from caliper edges, from
+//! [`interpolate_edge_points`](crate::analyze::edge::interpolate_edge_points)
+//! or from a contour, with an estimator and an outlier rule the caller
+//! writes out: `try_fit(&points, Taubin, tukey!(0.5))`. The
+//! [`Fit`](crate::measure::Fit) carries the element and how well it fits,
+//! as exact geometric distances: the RMS residual over the points that
+//! shaped it, and the maximum residual and the form deviation over all
+//! points, so a defect the outlier rule rejected still shows.
 //!
 //! Positions are [`Point<Pixels>`](crate::Point) in the image, and widths
 //! [`Length<Pixels>`](crate::Length). A width converts to world units
@@ -47,8 +57,14 @@
 
 mod caliper;
 mod edges;
+mod estimators;
+mod fit;
 
 pub use caliper::{Caliper, MAX_CALIPER_SAMPLES, Profile, profile};
 pub use edges::{
     Edge, EdgePair, Edges, MinContrast, Neighbors, PairRule, Polarity, StrongestOfRun,
+};
+pub use fit::{
+    AllPoints, Estimator, Fit, Fitzgibbon, Huber, OutlierRule, Taubin, TotalLeastSquares, Tukey,
+    try_fit,
 };
