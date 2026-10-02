@@ -13,6 +13,7 @@
 //! | Resize by copying samples | [`resize`](crate::transform::resize) + [`NearestNeighbor`](crate::transform::NearestNeighbor) | Works for gamma-encoded pixels because no blending occurs. |
 //! | Resize smoothly | [`resize`](crate::transform::resize) + [`Bilinear`](crate::transform::Bilinear) | Requires [`crate::pixel::LinearSpace`]. Linearize sRGB first. |
 //! | Combine two images pixel-wise | [`combine_images`](crate::transform::combine_images) | Inputs must have the same size. |
+//! | Rectify or undistort | [`remap`](crate::transform::remap), [`DestToSourceTable`](crate::transform::DestToSourceTable) | The direction is in the type; the border policy must give every pixel a value. |
 //! | Apply a convolution/filter | [`convolve`](crate::transform::convolve) or named filters | Choose an explicit border policy. |
 //! | Erode/dilate/median | [`map_neighborhood`](crate::transform::map_neighborhood) or morphology helpers | Use masks for active neighborhood positions. |
 //!
@@ -129,6 +130,7 @@ mod interpolate;
 mod map_neighborhood;
 mod morphology;
 mod pyramid;
+mod remap;
 mod resize;
 mod template_match;
 
@@ -182,6 +184,7 @@ pub use morphology::{
     morphological_gradient, opening, opening_into, top_hat,
 };
 pub use pyramid::{Gaussian, PyramidMethod, ScaledGaussian, pyr_down, pyr_up};
+pub use remap::{DestToSourceTable, remap};
 pub use resize::{NearestNeighbor, ResizeMethod, resize, resize_into};
 pub use template_match::{
     MatchMethod, NCC, SAD, SSD, ScorePolarity, match_template, match_template_into,

@@ -1,5 +1,6 @@
 //! The mapping traits: what a mapping of the plane can convert.
 
+use super::compose::Compose;
 use super::elements::{Circle, Ellipse, Line, Segment};
 use super::point::{Length, Point, Vector};
 use super::units::LengthUnit;
@@ -45,6 +46,20 @@ pub trait PlaneMap {
 
     /// The image of `p`, or `None` where the mapping has none.
     fn try_map_point(&self, p: Point<Self::Domain>) -> Option<Point<Self::Codomain>>;
+
+    /// This mapping first, then `next`, as one mapping.
+    ///
+    /// The result is the smallest class of mapping that contains both, and
+    /// only the pairs a use case needs exist: any mapping that ends in
+    /// pixels followed by a [`BrownConrady`](super::BrownConrady) lens
+    /// model, which gives a [`Chain`](super::Chain). `next` must start in
+    /// the unit this mapping ends in.
+    fn then<B>(self, next: B) -> <Self as Compose<B>>::Output
+    where
+        Self: Compose<B> + Sized,
+    {
+        self.compose(next)
+    }
 }
 
 /// A mapping whose metric is the same everywhere: `x ↦ A·x + t`.

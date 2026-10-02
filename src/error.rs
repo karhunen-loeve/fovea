@@ -242,6 +242,19 @@ pub enum Error {
     /// lie is data, so this is an error and not a panic.
     DegeneratePoints,
 
+    /// An iterative inverse did not reach its tolerance.
+    ///
+    /// Returned by
+    /// [`BrownConrady::undistort_point`](crate::geometry::BrownConrady::undistort_point)
+    /// when no ideal point distorts onto the measured one within the
+    /// tolerance, which in practice means the point lies outside the field
+    /// the lens model was calibrated over, where the model folds back on
+    /// itself.
+    DidNotConverge {
+        /// The number of steps taken before giving up.
+        steps: usize,
+    },
+
     /// The chosen accumulator type cannot hold the worst-case sum for an
     /// image of this size.
     ///
@@ -438,6 +451,11 @@ pub enum Requirement {
     Ordered,
     /// A pair with `low < high`.
     StrictlyOrdered,
+    /// Exactly zero: a value the model does not use, accepted only where it
+    /// changes nothing.
+    Zero,
+    /// One of the listed counts.
+    OneOf(&'static [usize]),
 }
 
 impl Requirement {
@@ -461,6 +479,8 @@ impl Requirement {
             Requirement::OpenInterval { .. } => "must lie strictly between",
             Requirement::Ordered => "must satisfy low <= high",
             Requirement::StrictlyOrdered => "must satisfy low < high",
+            Requirement::Zero => "must be zero",
+            Requirement::OneOf(_) => "must be one of",
         }
     }
 }
@@ -475,8 +495,10 @@ impl PartialEq for Requirement {
             | (FiniteNonZero, FiniteNonZero)
             | (Odd, Odd)
             | (Ordered, Ordered)
-            | (StrictlyOrdered, StrictlyOrdered) => true,
+            | (StrictlyOrdered, StrictlyOrdered)
+            | (Zero, Zero) => true,
             (AtLeast(a), AtLeast(b)) | (AtMost(a), AtMost(b)) => a == b,
+            (OneOf(a), OneOf(b)) => a == b,
             (InRange { min: a, max: b }, InRange { min: c, max: d }) => a == c && b == d,
             (OpenInterval { low: a, high: b }, OpenInterval { low: c, high: d }) => {
                 a.to_bits() == c.to_bits() && b.to_bits() == d.to_bits()
@@ -495,6 +517,12 @@ impl fmt::Display for Requirement {
             Requirement::AtLeast(bound) | Requirement::AtMost(bound) => write!(f, " {bound}"),
             Requirement::InRange { min, max } => write!(f, " {min}..={max}"),
             Requirement::OpenInterval { low, high } => write!(f, " {low} and {high}"),
+            Requirement::OneOf(counts) => {
+                for (i, c) in counts.iter().enumerate() {
+                    write!(f, "{}{c}", if i == 0 { " " } else { ", " })?;
+                }
+                Ok(())
+            }
             _ => Ok(()),
         }
     }
@@ -669,6 +697,12 @@ impl fmt::Display for Error {
                     "degenerate points: they determine no unique element of this kind"
                 )
             }
+            Error::DidNotConverge { steps } => {
+                write!(
+                    f,
+                    "did not converge: no solution within the tolerance after {steps} steps"
+                )
+            }
             Error::AccumulatorOverflow {
                 required_capacity,
                 accumulator_capacity,
@@ -731,6 +765,32 @@ mod tests {
             Error::DegeneratePoints.to_string(),
             "degenerate points: they determine no unique element of this kind"
         );
+        assert_eq!(
+            Error::DidNotConverge { steps: 20 }.to_string(),
+            "did not converge: no solution within the tolerance after 20 steps"
+        );
+    }
+
+    #[test]
+    fn display_zero_and_one_of() {
+        let e =
+            ParameterError::new("distortion coefficient", Requirement::Zero, Value::F64(0.5)).at(5);
+        assert_eq!(
+            e.to_string(),
+            "distortion coefficient 5 must be zero, got 0.5"
+        );
+        let e = ParameterError::new(
+            "distortion coefficient count",
+            Requirement::OneOf(&[4, 5, 8]),
+            Value::Usize(6),
+        );
+        assert_eq!(
+            e.to_string(),
+            "distortion coefficient count must be one of 4, 5, 8, got 6"
+        );
+        assert_eq!(Requirement::OneOf(&[4, 5]), Requirement::OneOf(&[4, 5]));
+        assert_ne!(Requirement::OneOf(&[4, 5]), Requirement::OneOf(&[4]));
+        assert_ne!(Requirement::Zero, Requirement::Finite);
     }
 
     #[test]

@@ -24,13 +24,29 @@
 //! | [`AxisScale`] | `diag(a, b)·x + t` | line-scan camera, binned sensor | points, vectors, lines, ellipses |
 //! | [`Similarity`] | `a·R·x + t` | square pixels, camera at an angle | points, vectors, lines, ellipses, lengths, circles |
 //! | [`Affine`] | `A·x + t` | oblique view, in the affine approximation | points, vectors, lines, ellipses |
+//! | [`Homography`] | `H·x`, projective | camera at an angle to a plane | points |
+//! | [`BrownConrady`] | lens distortion | a real lens, from its calibration | points |
 //!
 //! Three traits carry the capabilities. Every mapping is a [`PlaneMap`] and
-//! converts points. The four classes above are [`AffineMap`]s: their metric
+//! converts points. The first four classes are [`AffineMap`]s: their metric
 //! is the same everywhere, so displacements convert on their own, each has a
 //! closed-form inverse, and a circle becomes an ellipse. The uniform scale
 //! and the similarity are also [`ConformalMap`]s, which multiply every
-//! length by one factor, keep angles and keep circles round.
+//! length by one factor, keep angles and keep circles round. Under a
+//! homography or a lens, lengths change across the image, so only points
+//! convert, and a measurement converts its points before it fits.
+//!
+//! ## Remapping
+//!
+//! A mapping from pixels to pixels rectifies or undistorts an image through
+//! [`remap`](crate::transform::remap). The direction is in the type:
+//! [`DestToSource`] reads a mapping from each destination pixel to its
+//! source, which is how a lens model is used; [`SourceToDest`] takes the
+//! mapping the way it is usually thought of and inverts it once.
+//! [`PlaneMap::then`] chains a mapping with a lens model, so undistorting
+//! and rectifying is one remap and one interpolation. For measurement,
+//! correct the measured points with [`BrownConrady::undistort_point`]
+//! instead of resampling the image.
 //!
 //! Reflections are allowed: `axis_scale!(0.02, -0.02)` maps an image frame
 //! with `y` pointing down to a machine frame with `y` pointing up, and
@@ -111,6 +127,12 @@
 //! [`Similarity`]: crate::geometry::Similarity
 //! [`Affine`]: crate::geometry::Affine
 //! [`PlaneMap`]: crate::geometry::PlaneMap
+//! [`PlaneMap::then`]: crate::geometry::PlaneMap::then
+//! [`Homography`]: crate::geometry::Homography
+//! [`BrownConrady`]: crate::geometry::BrownConrady
+//! [`BrownConrady::undistort_point`]: crate::geometry::BrownConrady::undistort_point
+//! [`DestToSource`]: crate::geometry::DestToSource
+//! [`SourceToDest`]: crate::geometry::SourceToDest
 //! [`AffineMap`]: crate::geometry::AffineMap
 //! [`ConformalMap`]: crate::geometry::ConformalMap
 //! [`AffineMap::reverses_orientation`]: crate::geometry::AffineMap::reverses_orientation
@@ -138,14 +160,22 @@
 //! ```
 
 mod affine;
+mod compose;
 mod elements;
+mod homography;
+mod lens;
 mod map;
 mod point;
 mod relations;
 mod units;
 
 pub use affine::{Affine, AxisScale, Similarity, UniformScale};
+pub use compose::{Chain, Compose, DestToSource, Invertible, SourceLookup, SourceToDest};
 pub use elements::{Circle, Element, Ellipse, Line, Segment};
+pub use homography::Homography;
+pub use lens::{
+    BrownConrady, BrownConradyCoefficients, CameraMatrix, FocalLength, Radial, Tangential,
+};
 pub use map::{AffineMap, ConformalMap, PlaneMap};
 pub use point::{Length, Point, Vector};
 pub use units::{LengthUnit, Meter, Micro, Micrometer, Milli, Millimeter, Pixels, Prefix, Unit};

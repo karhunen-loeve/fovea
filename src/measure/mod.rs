@@ -18,6 +18,12 @@
 //! shaped it, and the maximum residual and the form deviation over all
 //! points, so a defect the outlier rule rejected still shows.
 //!
+//! Through a lens that distorts, measure on the camera image as it is and
+//! correct the points with
+//! [`BrownConrady::undistort_point`](crate::geometry::BrownConrady::undistort_point)
+//! before fitting: resampling the image first adds an interpolation error to
+//! every edge.
+//!
 //! Positions are [`Point<Pixels>`](crate::Point) in the image, and widths
 //! [`Length<Pixels>`](crate::Length). A width converts to world units
 //! through a [`ConformalMap`](crate::geometry::ConformalMap); under any

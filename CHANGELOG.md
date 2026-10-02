@@ -165,6 +165,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Segment::distances_to(&line)` returns the smallest and largest
   distance of the segment from a line, so the extent of one fitted edge
   and the line of another give the width of a slot and its taper.
+- **Homography and lens distortion, in `fovea::geometry`.** `Homography`,
+  built from its 3×3 matrix by rows, rejects a singular matrix and stores
+  its inverse; it converts points only, and none on its vanishing line.
+  `CameraMatrix::try_new(FocalLength { x, y }, principal_point)` and
+  `BrownConrady::try_new(camera, BrownConradyCoefficients { radial: Radial
+  { k1, k2, k3 }, tangential: Tangential { p1, p2 } })`, every coefficient
+  by name; `BrownConrady::from_opencv(camera, &coeffs)` takes OpenCV's
+  order `(k1, k2, p1, p2[, k3])` and accepts a longer array only if every
+  further coefficient is zero. As a mapping the lens sends an ideal pixel
+  to where the camera sees it. `undistort_point` corrects a measured point
+  by Newton's method to 10⁻⁹ px, accepts only a point where the model is
+  one-to-one, and reports `Error::DidNotConverge` otherwise; OpenCV's
+  default of five fixed-point steps leaves up to half a pixel in the
+  corner of a strong lens.
+- **Direction types and composition.** `DestToSource(map)` and
+  `SourceToDest::new(map)` say which way a mapping runs; `SourceToDest`
+  accepts an `Invertible` mapping (the affine family and the homography),
+  not a lens model. `PlaneMap::then` chains any mapping that ends in
+  pixels with a lens model into a `Chain`, so undistorting and rectifying
+  is one remap.
+- **`transform::remap`** remaps an image through a direction type with an
+  interpolation kernel and a border policy that gives every pixel a value
+  (`Skip` does not compile), into an image of the given size and the
+  input's pixel type. `DestToSourceTable::new(&lookup, size)` computes the
+  sources once, as `f32` displacements from each destination pixel, and
+  `table.remap(&frame, kernel, &border)` applies it to every frame.
+- `error::Requirement::Zero` and `error::Requirement::OneOf`, for a
+  coefficient the model does not use and for an array length.
+- **Breaking:** `Error::DidNotConverge { steps }`, returned by
+  `undistort_point`. `Error` gained a variant, so an exhaustive `match` on
+  it needs an arm.
 
 ### Changed
 
