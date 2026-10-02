@@ -152,6 +152,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking:** `Error::TooFewPoints { required, actual }` and
   `Error::DegeneratePoints`, returned by `try_fit`. `Error` gained two
   variants, so an exhaustive `match` on it needs two arms.
+- **Geometric relations, as methods on the elements.** `distance(p)` and
+  `closest_point(p)` on `Line`, `Segment`, `Circle` and `Ellipse`, exact
+  for the ellipse. Where the nearest point is not unique, a stated rule
+  picks it: at a circle's centre the point in the `+y` direction, on an
+  ellipse the one on the positive side of its minor axis, which at the
+  centre is the end of the minor axis. `Line::angle_to` returns the signed
+  angle that turns one line's direction onto the other's, in radians in
+  `(−π, π]`, positive from `+x` towards `+y` (clockwise on the screen in
+  an image); `Line::reversed` turns a line round. `Line::intersection`
+  returns where two lines meet, `None` for parallel lines.
+  `Segment::distances_to(&line)` returns the smallest and largest
+  distance of the segment from a line, so the extent of one fitted edge
+  and the line of another give the width of a slot and its taper.
 
 ### Changed
 

@@ -349,17 +349,38 @@ impl<U: LengthUnit> Ellipse<U> {
     /// last representable step finds it without the failure modes of
     /// Newton's method or of solving the quartic.
     pub(crate) fn signed_distance(&self, p: Point<U>) -> f64 {
+        self.foot_and_signed_distance(p).1
+    }
+
+    /// The nearest point to `p` on the ellipse, and the signed distance of
+    /// `p` from it.
+    ///
+    /// Where two points are equally near, the one on the side the minor
+    /// axis's positive direction points to: a coordinate of exactly zero in
+    /// the ellipse's frame counts as positive. At the exact centre that is
+    /// the end of the minor axis, `(0, semi_minor)` in the ellipse's frame,
+    /// also when the semi-axes are equal.
+    pub(crate) fn foot_and_signed_distance(&self, p: Point<U>) -> (Point<U>, f64) {
         let (sin, cos) = self.orientation.radians().sin_cos();
         let d = p - self.center;
         let q0 = cos * d.x + sin * d.y;
         let q1 = cos * d.y - sin * d.x;
         let (e0, e1) = (self.semi_major.get(), self.semi_minor.get());
-        let distance = distance_to_standard_ellipse(e0, e1, q0.abs(), q1.abs());
+        let (y0, y1) = (q0.abs(), q1.abs());
+        let (x0, x1) = if y0 == 0.0 && y1 == 0.0 {
+            (0.0, e1)
+        } else {
+            foot_on_standard_ellipse(e0, e1, y0, y1)
+        };
+        let distance = (x0 - y0).hypot(x1 - y1);
+        let x0 = if q0 < 0.0 { -x0 } else { x0 };
+        let x1 = if q1 < 0.0 { -x1 } else { x1 };
+        let foot = self.center + Vector::new(cos * x0 - sin * x1, sin * x0 + cos * x1);
         let (u, v) = (q0 / e0, q1 / e1);
         if u * u + v * v > 1.0 {
-            distance
+            (foot, distance)
         } else {
-            -distance
+            (foot, -distance)
         }
     }
 }
@@ -378,38 +399,35 @@ fn unit_direction<U: LengthUnit>(v: Vector<U>) -> Option<Vector<U>> {
 /// mantissa's digits plus the exponent range down to the smallest normal.
 const BISECTION_STEPS: usize = (f64::MANTISSA_DIGITS as i32 - f64::MIN_EXP) as usize;
 
-/// The distance from `(y0, y1)` to the ellipse `(x0/e0)² + (x1/e1)² = 1`,
-/// for `e0 >= e1 > 0`, `y0 >= 0` and `y1 >= 0`.
+/// The point of the ellipse `(x0/e0)² + (x1/e1)² = 1` nearest to
+/// `(y0, y1)`, for `e0 >= e1 > 0`, `y0 >= 0` and `y1 >= 0`; it lies in the
+/// same quadrant.
 ///
 /// Eberly, "Distance from a Point to an Ellipse, an Ellipsoid, or a
 /// Hyperellipsoid", Geometric Tools, 2013 (revised 2020), Listing 2.
-fn distance_to_standard_ellipse(e0: f64, e1: f64, y0: f64, y1: f64) -> f64 {
+fn foot_on_standard_ellipse(e0: f64, e1: f64, y0: f64, y1: f64) -> (f64, f64) {
     if y1 > 0.0 {
         if y0 > 0.0 {
             let z0 = y0 / e0;
             let z1 = y1 / e1;
             let g = z0 * z0 + z1 * z1 - 1.0;
             if g == 0.0 {
-                return 0.0;
+                return (y0, y1);
             }
             let r0 = (e0 / e1) * (e0 / e1);
             let s = bisect_root(r0, z0, z1, g);
-            let x0 = r0 * y0 / (s + r0);
-            let x1 = y1 / (s + 1.0);
-            (x0 - y0).hypot(x1 - y1)
+            (r0 * y0 / (s + r0), y1 / (s + 1.0))
         } else {
-            (y1 - e1).abs()
+            (0.0, e1)
         }
     } else {
         let numer0 = e0 * y0;
         let denom0 = e0 * e0 - e1 * e1;
         if numer0 < denom0 {
             let xde0 = numer0 / denom0;
-            let x0 = e0 * xde0;
-            let x1 = e1 * (1.0 - xde0 * xde0).sqrt();
-            (x0 - y0).hypot(x1)
+            (e0 * xde0, e1 * (1.0 - xde0 * xde0).sqrt())
         } else {
-            (y0 - e0).abs()
+            (e0, 0.0)
         }
     }
 }

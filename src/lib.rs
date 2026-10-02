@@ -122,7 +122,11 @@ pub mod draw;
 /// [`AxisScale`](geometry::AxisScale). The class of a mapping decides which
 /// objects it converts: points under every mapping, vectors under the
 /// [`AffineMap`](geometry::AffineMap)s, lengths only under the
-/// [`ConformalMap`](geometry::ConformalMap)s.
+/// [`ConformalMap`](geometry::ConformalMap)s. The elements a fit returns,
+/// [`Line`](geometry::Line), [`Segment`](geometry::Segment),
+/// [`Circle`](geometry::Circle) and [`Ellipse`](geometry::Ellipse), live
+/// here with their relations: distances, nearest points, the angle between
+/// two lines and where they meet.
 pub mod geometry;
 
 /// Measurement tools: the caliper, which finds edges and edge pairs along a

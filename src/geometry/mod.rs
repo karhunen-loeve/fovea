@@ -45,6 +45,46 @@
 //! under a [`ConformalMap`], because under any other mapping a circle
 //! becomes an ellipse. All four are also at the crate root.
 //!
+//! ## Relations
+//!
+//! Each element answers the distance of a point from it and the point of
+//! it nearest to a point (`distance`, `closest_point`), exactly for the
+//! ellipse too. Two lines give the directed angle from one to the other
+//! ([`Line::angle_to`]) and where they meet ([`Line::intersection`]); a
+//! segment gives its nearest and furthest distance from a line
+//! ([`Segment::distances_to`]), which is the width between two fitted
+//! edges. Relations compute in the unit of their operands, so fit and
+//! relate in pixels under a conformal calibration and convert the result,
+//! and convert the points first under any other.
+//!
+//! ```
+//! use fovea::{Millimeter, Pixels, Point};
+//! use fovea::geometry::{ConformalMap, UniformScale};
+//! use fovea::measure::{AllPoints, Taubin, try_fit};
+//!
+//! // Two holes of radius 40 px, their edges found in the image.
+//! let edge = |cx: f64, cy: f64| -> Vec<Point<Pixels>> {
+//!     (0..36)
+//!         .map(|k| {
+//!             let t = (10.0 * k as f64).to_radians();
+//!             Point::new(cx + 40.0 * t.cos(), cy + 40.0 * t.sin())
+//!         })
+//!         .collect()
+//! };
+//! let left = try_fit(&edge(200.0, 300.0), Taubin, AllPoints)?;
+//! let right = try_fit(&edge(680.0, 300.0), Taubin, AllPoints)?;
+//!
+//! // The pitch of the holes, in pixels and on the part.
+//! let pitch = left.element().center().distance(right.element().center());
+//! let scale: UniformScale<Pixels, Millimeter> = fovea::uniform_scale!(0.0125);
+//! assert!((scale.map_length(pitch).get() - 6.0).abs() < 1e-9);
+//! # Ok::<(), fovea::Error>(())
+//! ```
+//!
+//! [`Line::angle_to`]: crate::geometry::Line::angle_to
+//! [`Line::intersection`]: crate::geometry::Line::intersection
+//! [`Segment::distances_to`]: crate::geometry::Segment::distances_to
+//!
 //! [`Line`]: crate::geometry::Line
 //! [`Segment`]: crate::geometry::Segment
 //! [`Circle`]: crate::geometry::Circle
@@ -101,6 +141,7 @@ mod affine;
 mod elements;
 mod map;
 mod point;
+mod relations;
 mod units;
 
 pub use affine::{Affine, AxisScale, Similarity, UniformScale};
