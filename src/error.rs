@@ -255,6 +255,33 @@ pub enum Error {
         steps: usize,
     },
 
+    /// A DFT method does not transform images of this size.
+    ///
+    /// Returned by [`dft`](crate::frequency::dft) and
+    /// [`Spectrum::inverse`](crate::frequency::Spectrum::inverse) under
+    /// [`Radix2`](crate::frequency::Radix2) when a side is not a power of
+    /// two. The size is data, so this is an error; padding to the method's
+    /// [`next_size`](crate::frequency::Radix2::next_size) first, or a
+    /// method that accepts every size, avoids it.
+    UnsupportedDftSize {
+        /// The method's name.
+        method: &'static str,
+        /// The size of the image or of the spectrum's source.
+        size: Size,
+    },
+
+    /// [`pad`](crate::transform::pad) was asked for a target smaller than
+    /// the image along a side.
+    ///
+    /// Padding never crops: an image larger than the target is reported,
+    /// not cut down.
+    PadTargetTooSmall {
+        /// The size of the image.
+        source: Size,
+        /// The rejected target size.
+        target: Size,
+    },
+
     /// The chosen accumulator type cannot hold the worst-case sum for an
     /// image of this size.
     ///
@@ -703,6 +730,20 @@ impl fmt::Display for Error {
                     "did not converge: no solution within the tolerance after {steps} steps"
                 )
             }
+            Error::UnsupportedDftSize { method, size } => {
+                write!(
+                    f,
+                    "unsupported DFT size: {method} does not transform a {}x{} image",
+                    size.width, size.height
+                )
+            }
+            Error::PadTargetTooSmall { source, target } => {
+                write!(
+                    f,
+                    "pad target too small: {}x{} is smaller than the {}x{} image along a side",
+                    target.width, target.height, source.width, source.height
+                )
+            }
             Error::AccumulatorOverflow {
                 required_capacity,
                 accumulator_capacity,
@@ -791,6 +832,26 @@ mod tests {
         assert_eq!(Requirement::OneOf(&[4, 5]), Requirement::OneOf(&[4, 5]));
         assert_ne!(Requirement::OneOf(&[4, 5]), Requirement::OneOf(&[4]));
         assert_ne!(Requirement::Zero, Requirement::Finite);
+    }
+
+    #[test]
+    fn display_dft_and_pad_errors() {
+        let err = Error::UnsupportedDftSize {
+            method: "Radix2",
+            size: Size::new(1920, 1080),
+        };
+        assert_eq!(
+            err.to_string(),
+            "unsupported DFT size: Radix2 does not transform a 1920x1080 image"
+        );
+        let err = Error::PadTargetTooSmall {
+            source: Size::new(640, 480),
+            target: Size::new(512, 512),
+        };
+        assert_eq!(
+            err.to_string(),
+            "pad target too small: 512x512 is smaller than the 640x480 image along a side"
+        );
     }
 
     #[test]

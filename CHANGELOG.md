@@ -197,6 +197,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `undistort_point`. `Error` gained a variant, so an exhaustive `match` on
   it needs an arm.
 
+- **The discrete Fourier transform, `fovea::frequency`.**
+  `dft(&img, method)` returns the `Spectrum<P>` of a `MonoF32` or
+  `MonoF64` image, and `spectrum.inverse(method)` the image again, at the
+  source's size and with no factor to apply. The values are the textbook
+  transform, unscaled and with the negative exponent, as numpy, OpenCV and
+  FFTW compute it by default; only the half that a real image's symmetry
+  leaves independent is stored. A spectrum is not an image, so image
+  operations do not apply to it. The method is always written out:
+  `Radix2` for sides that are powers of two, returning a `Result`;
+  `Bluestein` for any size; `Auto`, which picks `Radix2` or `Bluestein`
+  per side and may pick faster algorithms in later releases. Each method
+  answers which sizes it accepts, `Radix2.accepts(size)` and
+  `Radix2.next_size(size)`. Nothing is padded behind the caller's back:
+  the image is transformed as one period of a periodic signal. An image
+  without pixels has an empty spectrum under every method. The
+  documentation describes the accuracy and promises no bound: every
+  twiddle factor comes from its exact integer index, and `Bluestein`
+  rounds more than `Radix2`.
+- **`transform::pad`**, which enlarges an image and fills the new pixels by
+  a border policy: `pad(&img, Size::new(2048, 1024), &Mirror)` to a target
+  size with the image at the origin, or `pad(&img, Margins { left, right,
+  top, bottom }, &Constant(v))` on each side. A target smaller than the
+  image is an error, never a crop; margins cannot fail, so with them `pad`
+  returns the image itself. `Skip` has nothing to fill with and does not
+  compile here.
+- **Breaking:** `Error::UnsupportedDftSize { method, size }`, returned by
+  `dft` and `Spectrum::inverse` under `Radix2`, and
+  `Error::PadTargetTooSmall { source, target }`, returned by `pad`. `Error`
+  gained two variants, so an exhaustive `match` on it needs two arms.
+
 ### Changed
 
 - **Breaking:** `Error::InvalidParameter` carries a `ParameterError`
@@ -332,6 +362,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   clear ranked first and survived every top-N cut. Among equal responses a
   NaN coordinate ranks last as well. Results change only where a NaN
   occurs.
+
+### Performance
+
+- `transform::transpose` and `transpose_into` move the image in square
+  blocks of 32 × 32 pixels, so the rows read and the rows written both stay
+  in cache. Measured on `Mono8`: 1.37 GiB/s at 256 × 256, 1.23 GiB/s at
+  1024 × 1024 and 524 MiB/s at 4096 × 4096, against 428 MiB/s, 211 MiB/s
+  and 80 MiB/s before. The output is unchanged, pinned by the existing
+  tests.
 
 ### Documentation
 

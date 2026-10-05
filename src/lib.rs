@@ -141,6 +141,16 @@ pub mod geometry;
 /// pixels, which a calibration from [`geometry`] converts.
 pub mod measure;
 
+/// The frequency domain: the discrete Fourier transform of an image and
+/// its spectrum.
+///
+/// Start with [`dft`](frequency::dft) and a method such as
+/// [`Radix2`](frequency::Radix2) or [`Auto`](frequency::Auto); the
+/// [`Spectrum`](frequency::Spectrum) it returns goes back to an image
+/// with [`Spectrum::inverse`](frequency::Spectrum::inverse). A spectrum
+/// is not an image, so image operations do not apply to it.
+pub mod frequency;
+
 #[cfg(doc)]
 pub mod guide;
 

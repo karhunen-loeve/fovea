@@ -129,6 +129,7 @@ mod geometry;
 mod interpolate;
 mod map_neighborhood;
 mod morphology;
+mod pad;
 mod pyramid;
 mod remap;
 mod resize;
@@ -183,6 +184,7 @@ pub use morphology::{
     black_hat, closing, closing_into, dilate, dilate_into, erode, erode_into, median_filter,
     morphological_gradient, opening, opening_into, top_hat,
 };
+pub use pad::{Margins, PadGeometry, pad};
 pub use pyramid::{Gaussian, PyramidMethod, ScaledGaussian, pyr_down, pyr_up};
 pub use remap::{DestToSourceTable, remap};
 pub use resize::{NearestNeighbor, ResizeMethod, resize, resize_into};
