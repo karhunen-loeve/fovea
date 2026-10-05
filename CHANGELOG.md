@@ -203,8 +203,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   source's size and with no factor to apply. The values are the textbook
   transform, unscaled and with the negative exponent, as numpy, OpenCV and
   FFTW compute it by default; only the half that a real image's symmetry
-  leaves independent is stored. A spectrum is not an image, so image
-  operations do not apply to it. The method is always written out:
+  leaves independent is stored, and `dft` makes the bins that a real
+  image's symmetry ties together exact conjugates. A spectrum is not an
+  image, so image operations do not apply to it. The method is always written out:
   `Radix2` for sides that are powers of two, returning a `Result`;
   `Bluestein` for any size; `Auto`, which picks `Radix2` or `Bluestein`
   per side and may pick faster algorithms in later releases. Each method
@@ -215,6 +216,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documentation describes the accuracy and promises no bound: every
   twiddle factor comes from its exact integer index, and `Bluestein`
   rounds more than `Radix2`.
+- **Reading and changing a spectrum by frequency.** `FrequencyIndex`
+  addresses a bin exactly; an index passed in is taken modulo the size,
+  and the spectrum hands indices out in numpy's `fftfreq` range.
+  `Frequency<U>` carries its unit, `Bins` or `CyclesPerPixel`, which
+  convert only through a spectrum, since only it knows the size.
+  `spectrum.at(index)`, `spectrum.frequency_of(index)` and
+  `spectrum.convert(f)` read; `spectrum.apply(|f: Frequency<U>, bin| ...)`
+  changes every bin, the unit named by the closure. `apply` visits each
+  independent frequency once and keeps the symmetry of a real image:
+  what it writes at `f` holds at `−f` as the conjugate, and a bin that is
+  its own mirror keeps only its real part.
+- **Showing a spectrum.** `spectrum.centered()` is the full spectrum as a
+  complex image with the zero frequency in the middle, and
+  `magnitude()`, `power()` (the squared magnitude) and `phase()` are real
+  images in the same layout.
 - **`transform::pad`**, which enlarges an image and fills the new pixels by
   a border policy: `pad(&img, Size::new(2048, 1024), &Mirror)` to a target
   size with the image at the origin, or `pad(&img, Margins { left, right,

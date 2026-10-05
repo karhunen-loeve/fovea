@@ -39,6 +39,11 @@ pub trait Cplx:
     fn conj(self) -> Self;
     /// Both parts divided by `n`, each rounded once.
     fn div_count(self, n: usize) -> Self;
+
+    /// The real part alone, `re + 0i`.
+    fn real_part(self) -> Self {
+        Self::from_f64(self.to_f64().0, 0.0)
+    }
 }
 
 macro_rules! impl_cplx {

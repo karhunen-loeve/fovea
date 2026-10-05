@@ -69,6 +69,8 @@ mod method;
 mod spectrum;
 #[cfg(test)]
 mod testing;
+mod units;
 
 pub use method::{Auto, Bluestein, DftMethod, Radix2, dft};
 pub use spectrum::{Spectrum, SpectrumSource};
+pub use units::{Bins, CyclesPerPixel, Frequency, FrequencyIndex, FrequencyUnit};
