@@ -44,6 +44,13 @@ pub trait Cplx:
     fn real_part(self) -> Self {
         Self::from_f64(self.to_f64().0, 0.0)
     }
+
+    /// Both parts times the real `gain`, each computed in `f64` and
+    /// rounded once.
+    fn scale(self, gain: f64) -> Self {
+        let (re, im) = self.to_f64();
+        Self::from_f64(re * gain, im * gain)
+    }
 }
 
 macro_rules! impl_cplx {
@@ -260,6 +267,22 @@ impl<C: Cplx> Bluestein<C> {
 /// once it exceeds the mantissa, and the angle with them.
 fn chirp_index(j: usize, len: usize) -> usize {
     (j as u128 * j as u128 % (2 * len as u128)) as usize
+}
+
+/// The tables of both axes of one transform size.
+///
+/// Public in a private module, as a sealed trait is: the sealed DFT methods
+/// hand it on, and no caller can name it.
+#[derive(Clone, Debug)]
+pub struct AxisTables<C> {
+    pub(crate) x: Axis<C>,
+    pub(crate) y: Axis<C>,
+}
+
+impl<C> AxisTables<C> {
+    pub(crate) fn new(x: Axis<C>, y: Axis<C>) -> Self {
+        Self { x, y }
+    }
 }
 
 /// How one axis is transformed.

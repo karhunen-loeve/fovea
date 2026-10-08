@@ -1,18 +1,26 @@
 //! The DFT algorithms as values, and the transform's entry point.
 
-use super::engine::{Axis, Bluestein as BluesteinTables, Radix2 as Radix2Tables};
+use super::engine::{Axis, AxisTables, Bluestein as BluesteinTables, Radix2 as Radix2Tables};
 use super::spectrum::{Spectrum, SpectrumSource};
 use crate::image::{Image, RasterImage};
 use crate::{Error, Size};
 
 /// The tables along x and along y.
-type Axes<C> = (Axis<C>, Axis<C>);
+type Axes<C> = AxisTables<C>;
 
 mod sealed {
-    use super::{DftMethod, Spectrum, SpectrumSource};
+    use super::{Axes, DftMethod, Spectrum, SpectrumSource};
     use crate::image::RasterImage;
+    use crate::{Error, Size};
 
     pub trait Method<P: SpectrumSource> {
+        /// The size this method transforms an image of at least `size` at,
+        /// for a computation that may pad with zeros: its next size.
+        fn fit(&self, size: Size) -> Size;
+
+        /// The tables of both axes for a transform of `size`.
+        fn tables(&self, size: Size) -> Result<Axes<P::Bin>, Error>;
+
         fn transform<I: RasterImage<Pixel = P>>(&self, src: &I) -> <Self as DftMethod<P>>::Output
         where
             Self: DftMethod<P>;
@@ -151,12 +159,12 @@ impl Radix2 {
         }
         if size.area() == 0 {
             // No row and no column is transformed.
-            return Ok((
+            return Ok(AxisTables::new(
                 Axis::Radix2(Radix2Tables::new(0)),
                 Axis::Radix2(Radix2Tables::new(0)),
             ));
         }
-        Ok((
+        Ok(AxisTables::new(
             Axis::Radix2(Radix2Tables::new(size.width)),
             Axis::Radix2(Radix2Tables::new(size.height)),
         ))
@@ -169,13 +177,27 @@ impl<P: SpectrumSource> DftMethod<P> for Radix2 {
 }
 
 impl<P: SpectrumSource> sealed::Method<P> for Radix2 {
+    fn fit(&self, size: Size) -> Size {
+        self.next_size(size)
+    }
+
+    fn tables(&self, size: Size) -> Result<Axes<P::Bin>, Error> {
+        self.axes::<P>(size)
+    }
+
     fn transform<I: RasterImage<Pixel = P>>(&self, src: &I) -> <Self as DftMethod<P>>::Output {
-        let (along_x, along_y) = self.axes::<P>(src.size())?;
+        let AxisTables {
+            x: along_x,
+            y: along_y,
+        } = self.axes::<P>(src.size())?;
         Ok(Spectrum::forward(src, &along_x, &along_y))
     }
 
     fn invert(&self, spectrum: &Spectrum<P>) -> <Self as DftMethod<P>>::InverseOutput {
-        let (along_x, along_y) = self.axes::<P>(spectrum.source_size())?;
+        let AxisTables {
+            x: along_x,
+            y: along_y,
+        } = self.axes::<P>(spectrum.source_size())?;
         Ok(spectrum.invert(&along_x, &along_y))
     }
 }
@@ -235,6 +257,17 @@ impl<P: SpectrumSource> DftMethod<P> for Bluestein {
 }
 
 impl<P: SpectrumSource> sealed::Method<P> for Bluestein {
+    fn fit(&self, size: Size) -> Size {
+        size
+    }
+
+    fn tables(&self, size: Size) -> Result<Axes<P::Bin>, Error> {
+        Ok(AxisTables::new(
+            Axis::Bluestein(BluesteinTables::new(size.width)),
+            Axis::Bluestein(BluesteinTables::new(size.height)),
+        ))
+    }
+
     fn transform<I: RasterImage<Pixel = P>>(&self, src: &I) -> <Self as DftMethod<P>>::Output {
         let Size { width, height } = src.size();
         Spectrum::forward(
@@ -306,6 +339,17 @@ impl<P: SpectrumSource> DftMethod<P> for Auto {
 }
 
 impl<P: SpectrumSource> sealed::Method<P> for Auto {
+    fn fit(&self, size: Size) -> Size {
+        size
+    }
+
+    fn tables(&self, size: Size) -> Result<Axes<P::Bin>, Error> {
+        Ok(AxisTables::new(
+            Self::axis::<P>(size.width),
+            Self::axis::<P>(size.height),
+        ))
+    }
+
     fn transform<I: RasterImage<Pixel = P>>(&self, src: &I) -> <Self as DftMethod<P>>::Output {
         let Size { width, height } = src.size();
         Spectrum::forward(src, &Self::axis::<P>(width), &Self::axis::<P>(height))

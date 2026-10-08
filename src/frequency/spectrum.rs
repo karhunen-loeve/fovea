@@ -3,11 +3,11 @@
 use super::engine::{Axis, Cplx, transpose};
 use super::method::DftMethod;
 use super::units::{Frequency, FrequencyIndex, FrequencyUnit, canonical, convert, frequency_in};
-use crate::Size;
 use crate::image::{Image, RasterImage};
 use crate::pixel::{ComplexF32, ComplexF64, MonoF32, MonoF64};
+use crate::{Error, Size};
 
-mod sealed {
+pub(super) mod sealed {
     /// The conversion between a source pixel and the real part of a bin.
     pub trait Source: Copy {
         /// The value, exactly.
@@ -143,6 +143,93 @@ impl<P: SpectrumSource> Spectrum<P> {
     #[must_use]
     pub fn inverse<M: DftMethod<P>>(&self, method: M) -> M::InverseOutput {
         method.invert(self)
+    }
+
+    /// Multiplies every bin by the bin of `other` at the same frequency.
+    ///
+    /// The product of two spectra is the spectrum of the cyclic convolution
+    /// of their images: the second image wraps around the edges of the
+    /// first. Where that wrap is right, for an image that is periodic by
+    /// nature, this is the cheapest convolution there is, since nothing is
+    /// padded; for the result of a convolution with a border policy, use
+    /// [`frequency::convolve`](super::convolve). The product of the spectra
+    /// of two real images is the spectrum of a real image, and its symmetry
+    /// is kept exactly.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::SizeMismatch`] if the two images were not of one size.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use fovea::frequency::{Auto, dft};
+    /// use fovea::image::{Image, ImageView};
+    /// use fovea::pixel::MonoF64;
+    ///
+    /// // A shift by one pixel to the right, cyclic: the kernel is an impulse at x = 1.
+    /// let img = Image::generate(8, 1, |x, _| MonoF64::new(x as f64));
+    /// let shift = Image::generate(8, 1, |x, _| MonoF64::new(if x == 1 { 1.0 } else { 0.0 }));
+    /// let mut spectrum = dft(&img, Auto);
+    /// spectrum.multiply(&dft(&shift, Auto))?;
+    /// let moved = spectrum.inverse(Auto);
+    /// assert!((moved.pixel_at(0, 0).0 - 7.0).abs() < 1e-12);
+    /// assert!((moved.pixel_at(3, 0).0 - 2.0).abs() < 1e-12);
+    /// # Ok::<(), fovea::Error>(())
+    /// ```
+    pub fn multiply(&mut self, other: &Spectrum<P>) -> Result<(), Error> {
+        self.combine(other, |a, b| a * b)
+    }
+
+    /// Multiplies every bin by the conjugate of the bin of `other` at the
+    /// same frequency.
+    ///
+    /// The product with the conjugate is the spectrum of the cyclic
+    /// cross-correlation of the two images, the basis of phase correlation.
+    /// Like [`multiply`](Self::multiply) it keeps the symmetry of a real
+    /// image.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::SizeMismatch`] if the two images were not of one size.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use fovea::frequency::{Auto, FrequencyIndex, dft};
+    /// use fovea::image::Image;
+    /// use fovea::pixel::MonoF64;
+    ///
+    /// let img = Image::generate(6, 4, |x, y| MonoF64::new((x + 3 * y) as f64));
+    /// let mut power = dft(&img, Auto);
+    /// power.multiply_conjugate(&dft(&img, Auto))?;
+    /// // With itself, every bin becomes its squared magnitude, which is real.
+    /// assert_eq!(power.at(FrequencyIndex::new(1, 1)).im, 0.0);
+    /// # Ok::<(), fovea::Error>(())
+    /// ```
+    pub fn multiply_conjugate(&mut self, other: &Spectrum<P>) -> Result<(), Error> {
+        self.combine(other, |a, b| a * b.conj())
+    }
+
+    fn combine(
+        &mut self,
+        other: &Spectrum<P>,
+        op: impl Fn(P::Bin, P::Bin) -> P::Bin,
+    ) -> Result<(), Error> {
+        if self.source_size != other.source_size {
+            return Err(Error::SizeMismatch {
+                expected: self.source_size,
+                actual: other.source_size,
+            });
+        }
+        for (a, &b) in self.bins.iter_mut().zip(&other.bins) {
+            *a = op(*a, b);
+        }
+        // The products of conjugate pairs are conjugate, and those of real
+        // bins real, as computed; symmetrize keeps that true whatever the
+        // rounding.
+        self.symmetrize();
+        Ok(())
     }
 
     /// The bin at `index`, a frequency in bins taken modulo the size.

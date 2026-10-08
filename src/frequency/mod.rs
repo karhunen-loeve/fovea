@@ -64,13 +64,20 @@
 //! assert!((back.pixel_at(16, 7).0 - 1.0).abs() < 1e-4);
 //! ```
 
+mod convolve;
 mod engine;
+mod filters;
 mod method;
 mod spectrum;
 #[cfg(test)]
 mod testing;
 mod units;
 
+pub use convolve::convolve;
+pub use filters::{
+    Band, BandPass, BandStop, Butterworth, Gaussian, HighPass, Ideal, LowPass, Notch, Profile,
+    Radius, TransferFunction,
+};
 pub use method::{Auto, Bluestein, DftMethod, Radix2, dft};
 pub use spectrum::{Spectrum, SpectrumSource};
 pub use units::{Bins, CyclesPerPixel, Frequency, FrequencyIndex, FrequencyUnit};

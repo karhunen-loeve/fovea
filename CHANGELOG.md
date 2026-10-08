@@ -231,6 +231,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   complex image with the zero frequency in the middle, and
   `magnitude()`, `power()` (the squared magnitude) and `phase()` are real
   images in the same layout.
+- **Filters in the frequency domain.** `spectrum.filter(&transfer)`
+  multiplies every bin by the real gain of a transfer function, a value
+  of the open trait `TransferFunction`: `LowPass`, `HighPass`,
+  `BandPass`, `BandStop`, `Notch`, or one of the caller's own. The
+  methods `low_pass`, `high_pass`, `band_pass`, `band_stop` and `notch`
+  build the value and call `filter`. The shapes are `Radius<U>` and
+  `Band<U>`, validated, with `radius!` and `band!` for literals; the
+  profiles are `Ideal`, `Butterworth<N>` with the order as a const
+  parameter, and `Gaussian`. Every smooth profile halves the amplitude at
+  the cutoff, so exchanging one keeps the place of the edge; a band is the
+  difference of two low-passes, so bands add up to the whole spectrum.
+  The documentation shows the ideal profile's ringing, measured: 8.8 %
+  overshoot at a step, against 3.4 % for `Butterworth::<2>`.
+- `Frequency<CyclesPerPixel>::axis()`, the axis a frequency lies on, an
+  `AxialOrientation`, or `None` for the zero frequency.
+- **Products of spectra.** `spectrum.multiply(&other)` and
+  `spectrum.multiply_conjugate(&other)`, the cyclic convolution and
+  cross-correlation of two images, return `Error::SizeMismatch` for
+  spectra of images of different sizes.
+- **`frequency::convolve(&img, &kernel, &border, method)`** computes what
+  `transform::convolve` computes, with the same border policy and output
+  region, through the DFT, for `MonoF32` and `MonoF64` images. The DFT
+  method is written out; `Radix2` pads on to powers of two. Its
+  documentation states the cost of the padding, the crossover against
+  the direct path as measured (the direct path faster up to about
+  15 × 15 on 512 × 512, this one from about 21 × 21), that one NaN spreads
+  to every output pixel, and that its accuracy is relative to the whole
+  image. `transform::convolve` is unchanged.
 - **`transform::pad`**, which enlarges an image and fills the new pixels by
   a border policy: `pad(&img, Size::new(2048, 1024), &Mirror)` to a target
   size with the image at the origin, or `pad(&img, Margins { left, right,

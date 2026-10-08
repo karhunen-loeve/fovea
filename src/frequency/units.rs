@@ -150,11 +150,34 @@ impl FrequencyIndex {
 /// let band_edge: Frequency<CyclesPerPixel> = Frequency::cycles_per_pixel(0.25, 0.0);
 /// assert_eq!(band_edge.fx(), 0.25);
 /// ```
-#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Frequency<U> {
     fx: f64,
     fy: f64,
     unit: PhantomData<U>,
+}
+
+// By hand, so that no trait is asked of the unit marker.
+impl<U> Clone for Frequency<U> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<U> Copy for Frequency<U> {}
+
+impl<U> PartialEq for Frequency<U> {
+    fn eq(&self, other: &Self) -> bool {
+        (self.fx, self.fy) == (other.fx, other.fy)
+    }
+}
+
+impl<U> core::fmt::Debug for Frequency<U> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Frequency")
+            .field("fx", &self.fx)
+            .field("fy", &self.fy)
+            .finish()
+    }
 }
 
 impl Frequency<Bins> {
@@ -236,6 +259,15 @@ pub(crate) fn convert<U: FrequencyUnit, V: FrequencyUnit>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_frequency_copies_compares_and_prints_without_asking_the_unit() {
+        let f = Frequency::bins(1.5, -2.0);
+        let g = f;
+        assert_eq!(f.clone(), g);
+        assert_ne!(f, Frequency::bins(1.5, 2.0));
+        assert_eq!(format!("{f:?}"), "Frequency { fx: 1.5, fy: -2.0 }");
+    }
 
     #[test]
     fn the_canonical_range_follows_numpy() {
