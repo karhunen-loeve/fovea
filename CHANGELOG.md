@@ -222,7 +222,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Frequency<U>` carries its unit, `Bins` or `CyclesPerPixel`, which
   convert only through a spectrum, since only it knows the size.
   `spectrum.at(index)`, `spectrum.frequency_of(index)` and
-  `spectrum.convert(f)` read; `spectrum.apply(|f: Frequency<U>, bin| ...)`
+  `spectrum.convert(f)` read, each returning `None` for the spectrum of an
+  image without pixels, which has no bin; `spectrum.apply(|f: Frequency<U>, bin| ...)`
   changes every bin, the unit named by the closure. `apply` visits each
   independent frequency once and keeps the symmetry of a real image:
   what it writes at `f` holds at `−f` as the conjugate, and a bin that is
@@ -244,6 +245,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   difference of two low-passes, so bands add up to the whole spectrum.
   The documentation shows the ideal profile's ringing, measured: 8.8 %
   overshoot at a step, against 3.4 % for `Butterworth::<2>`.
+- **Breaking:** `Error::EmptySource { target }`, for an image without
+  pixels asked to fill a result that has some; see `pad`, `resize` and
+  `remap`.
 - `Frequency<CyclesPerPixel>::axis()`, the axis a frequency lies on, an
   `AxialOrientation`, or `None` for the zero frequency.
 - **Products of spectra.** `spectrum.multiply(&other)` and
@@ -260,18 +264,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to every output pixel, and that its accuracy is relative to the whole
   image. `transform::convolve` is unchanged.
 - **`transform::pad`**, which enlarges an image and fills the new pixels by
-  a border policy: `pad(&img, Size::new(2048, 1024), &Mirror)` to a target
+  a border policy: `pad(&img, Size::new(2048, 1024), &Mirror)?` to a target
   size with the image at the origin, or `pad(&img, Margins { left, right,
-  top, bottom }, &Constant(v))` on each side. A target smaller than the
-  image is an error, never a crop; margins cannot fail, so with them `pad`
-  returns the image itself. `Skip` has nothing to fill with and does not
-  compile here.
+  top, bottom }, &Constant(v))?` on each side. A target smaller than the
+  image is an error, never a crop. An empty image pads under `Constant`,
+  whose value needs no pixel, and is an `Error::EmptySource` under the
+  policies that copy from the image, as `numpy.pad` does. `Skip` has
+  nothing to fill with and does not compile here.
 - **Breaking:** `Error::UnsupportedDftSize { method, size }`, returned by
   `dft` and `Spectrum::inverse` under `Radix2`, and
   `Error::PadTargetTooSmall { source, target }`, returned by `pad`. `Error`
   gained two variants, so an exhaustive `match` on it needs two arms.
 
 ### Changed
+
+- **Breaking:** `resize`, `resize_into`, `remap` and
+  `DestToSourceTable::remap` return a `Result`. An image without pixels
+  resized or remapped to a target that has some is an
+  `Error::EmptySource`, where it panicked before; `remap` under
+  `Constant` fills such a target with the constant instead. Migration:
+  add `?`, or `.expect(...)` where the source cannot be empty.
 
 - **Breaking:** `Error::InvalidParameter` carries a `ParameterError`
   instead of a `String`. A caller or a test now asks which rule failed

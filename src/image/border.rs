@@ -462,8 +462,20 @@ where
 
 // ─── FullFrameBorder marker (P1-5) ─────────────────────────────────────────────────────────────
 
-mod sealed {
+pub(crate) mod sealed {
+    use super::ImageView;
+
     pub trait FullFrameSealed {}
+
+    /// The value a policy gives where the image has no pixel at all.
+    pub trait FillValue<I: ImageView>
+    where
+        I::Pixel: Copy,
+    {
+        /// `Constant`'s value; `None` for a policy that copies from the
+        /// image.
+        fn value_without_image(&self) -> Option<I::Pixel>;
+    }
 }
 
 /// Marker trait: this border policy produces an output of the **same size**
@@ -493,22 +505,40 @@ mod sealed {
 /// | [`Wrap`] | ✅ |
 /// | [`Constant`] | ✅ |
 /// | [`Skip`] | ❌ (output is smaller) |
-pub trait FullFrameBorder<I: ImageView>: BorderPolicy<I> + sealed::FullFrameSealed
+pub trait FullFrameBorder<I: ImageView>:
+    BorderPolicy<I> + sealed::FullFrameSealed + sealed::FillValue<I>
 where
     I::Pixel: Copy,
 {
 }
 
-impl sealed::FullFrameSealed for Clamp {}
-impl<I: ImageView> FullFrameBorder<I> for Clamp where I::Pixel: Copy {}
+macro_rules! copies_from_the_image {
+    ($($policy:ident),*) => {$(
+        impl sealed::FullFrameSealed for $policy {}
+        impl<I: ImageView> sealed::FillValue<I> for $policy
+        where
+            I::Pixel: Copy,
+        {
+            fn value_without_image(&self) -> Option<I::Pixel> {
+                None
+            }
+        }
+        impl<I: ImageView> FullFrameBorder<I> for $policy where I::Pixel: Copy {}
+    )*};
+}
 
-impl sealed::FullFrameSealed for Mirror {}
-impl<I: ImageView> FullFrameBorder<I> for Mirror where I::Pixel: Copy {}
-
-impl sealed::FullFrameSealed for Wrap {}
-impl<I: ImageView> FullFrameBorder<I> for Wrap where I::Pixel: Copy {}
+copies_from_the_image!(Clamp, Mirror, Wrap);
 
 impl<P> sealed::FullFrameSealed for Constant<P> {}
+impl<P, I> sealed::FillValue<I> for Constant<P>
+where
+    I: ImageView<Pixel = P>,
+    P: Copy,
+{
+    fn value_without_image(&self) -> Option<P> {
+        Some(self.0)
+    }
+}
 impl<P, I> FullFrameBorder<I> for Constant<P>
 where
     I: ImageView<Pixel = P>,

@@ -255,6 +255,22 @@ pub enum Error {
         steps: usize,
     },
 
+    /// An image without pixels was asked to fill a result that has some.
+    ///
+    /// Returned by [`pad`](crate::transform::pad),
+    /// [`resize`](crate::transform::resize),
+    /// [`resize_into`](crate::transform::resize_into),
+    /// [`remap`](crate::transform::remap) and
+    /// [`DestToSourceTable::remap`](crate::transform::DestToSourceTable::remap)
+    /// when the source is empty, its border policy copies from the image
+    /// (`Clamp`, `Mirror`, `Wrap`) or there is none, and the result is not
+    /// empty. Under [`Constant`](crate::border::Constant), which needs no
+    /// pixel, `pad` and `remap` fill the result with its value instead.
+    EmptySource {
+        /// The size of the result that could not be filled.
+        target: Size,
+    },
+
     /// A DFT method does not transform images of this size.
     ///
     /// Returned by [`dft`](crate::frequency::dft) and
@@ -730,6 +746,13 @@ impl fmt::Display for Error {
                     "did not converge: no solution within the tolerance after {steps} steps"
                 )
             }
+            Error::EmptySource { target } => {
+                write!(
+                    f,
+                    "empty source: the image has no pixel to fill the {}x{} result from",
+                    target.width, target.height
+                )
+            }
             Error::UnsupportedDftSize { method, size } => {
                 write!(
                     f,
@@ -832,6 +855,17 @@ mod tests {
         assert_eq!(Requirement::OneOf(&[4, 5]), Requirement::OneOf(&[4, 5]));
         assert_ne!(Requirement::OneOf(&[4, 5]), Requirement::OneOf(&[4]));
         assert_ne!(Requirement::Zero, Requirement::Finite);
+    }
+
+    #[test]
+    fn display_empty_source() {
+        let err = Error::EmptySource {
+            target: Size::new(64, 48),
+        };
+        assert_eq!(
+            err.to_string(),
+            "empty source: the image has no pixel to fill the 64x48 result from"
+        );
     }
 
     #[test]

@@ -51,7 +51,7 @@ let srgb: Image<Srgb8> = match decoded.image {
 };
 
 let linear: Image<RgbF32> = convert_image(&srgb, SrgbGamma);
-let resized: Image<RgbF32> = resize(&linear, Size::new(800, 600), Antialiased(Lanczos3));
+let resized: Image<RgbF32> = resize(&linear, Size::new(800, 600), Antialiased(Lanczos3))?;
 let output: Image<Srgb8> = convert_image(&resized, SrgbGamma);
 
 let encoded = png::encode(&output, &PngEncodeOptions::default())?;
@@ -85,7 +85,7 @@ use fovea::pixel::Srgb8;
 use fovea::transform::{Bilinear, resize};
 
 let srgb = Image::fill(4, 4, Srgb8::new(128, 128, 128));
-let _ = resize(&srgb, Size::new(8, 8), Bilinear);
+let _ = resize(&srgb, Size::new(8, 8), Bilinear)?;
 ```
 
 Use `SrgbGamma` to move between sRGB and linear-light pixels.

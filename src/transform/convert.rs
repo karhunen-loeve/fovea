@@ -5792,7 +5792,7 @@ mod tests {
     fn nearest_neighbor_resize_srgb8() {
         use crate::transform::{NearestNeighbor, resize};
         let img: Image<Srgb8> = Image::fill(4, 4, Srgb8::new(128, 64, 200));
-        let resized: Image<Srgb8> = resize(&img, crate::Size::new(2, 2), NearestNeighbor);
+        let resized: Image<Srgb8> = resize(&img, crate::Size::new(2, 2), NearestNeighbor).unwrap();
         assert_eq!(resized.pixel_at(0, 0), Srgb8::new(128, 64, 200));
     }
 
@@ -5800,7 +5800,7 @@ mod tests {
     fn nearest_neighbor_resize_srgba8() {
         use crate::transform::{NearestNeighbor, resize};
         let img: Image<Srgba8> = Image::fill(4, 4, Srgba8::new(128, 64, 200, 255));
-        let resized: Image<Srgba8> = resize(&img, crate::Size::new(2, 2), NearestNeighbor);
+        let resized: Image<Srgba8> = resize(&img, crate::Size::new(2, 2), NearestNeighbor).unwrap();
         assert_eq!(resized.pixel_at(0, 0), Srgba8::new(128, 64, 200, 255));
     }
 
@@ -7821,7 +7821,7 @@ mod tests {
     fn indexed8_nearest_neighbor_resize() {
         use crate::transform::{NearestNeighbor, resize};
         let img = Image::fill(4, 4, Indexed8(42));
-        let out: Image<Indexed8> = resize(&img, crate::Size::new(2, 2), NearestNeighbor);
+        let out: Image<Indexed8> = resize(&img, crate::Size::new(2, 2), NearestNeighbor).unwrap();
         assert_eq!(out.pixel_at(0, 0), Indexed8(42));
         assert_eq!(out.pixel_at(1, 1), Indexed8(42));
     }
@@ -7835,7 +7835,7 @@ mod tests {
         *img.pixel_at_mut(1, 0) = Indexed8(2);
         *img.pixel_at_mut(0, 1) = Indexed8(3);
         *img.pixel_at_mut(1, 1) = Indexed8(4);
-        let out: Image<Indexed8> = resize(&img, crate::Size::new(4, 4), NearestNeighbor);
+        let out: Image<Indexed8> = resize(&img, crate::Size::new(4, 4), NearestNeighbor).unwrap();
         // scale = (2-1)/(4-1) = 1/3; src_x = floor(dst_x * 1/3)
         // dst_x 0,1,2 → src_x 0; dst_x 3 → src_x 1
         assert_eq!(out.pixel_at(0, 0), Indexed8(1)); // src(0,0)
@@ -7971,7 +7971,7 @@ mod tests {
     fn nearest_neighbor_resize_srgb_mono8() {
         use crate::transform::{NearestNeighbor, resize};
         let img = Image::from_vec(1, 1, vec![SrgbMono8::new(128)]).unwrap();
-        let out: Image<SrgbMono8> = resize(&img, crate::Size::new(2, 2), NearestNeighbor);
+        let out: Image<SrgbMono8> = resize(&img, crate::Size::new(2, 2), NearestNeighbor).unwrap();
         assert_eq!(out.pixel_at(0, 0), SrgbMono8::new(128));
         assert_eq!(out.pixel_at(1, 1), SrgbMono8::new(128));
     }
@@ -8575,7 +8575,7 @@ mod tests {
     fn nearest_neighbor_resize_srgb16() {
         use crate::transform::{NearestNeighbor, resize};
         let img: Image<Srgb16> = Image::fill(4, 4, Srgb16::new(100, 200, 300));
-        let out: Image<Srgb16> = resize(&img, crate::Size::new(2, 2), NearestNeighbor);
+        let out: Image<Srgb16> = resize(&img, crate::Size::new(2, 2), NearestNeighbor).unwrap();
         assert_eq!(out.pixel_at(0, 0), Srgb16::new(100, 200, 300));
     }
 
@@ -8583,7 +8583,7 @@ mod tests {
     fn nearest_neighbor_resize_srgba16() {
         use crate::transform::{NearestNeighbor, resize};
         let img: Image<Srgba16> = Image::fill(4, 4, Srgba16::new(100, 200, 300, 400));
-        let out: Image<Srgba16> = resize(&img, crate::Size::new(2, 2), NearestNeighbor);
+        let out: Image<Srgba16> = resize(&img, crate::Size::new(2, 2), NearestNeighbor).unwrap();
         assert_eq!(out.pixel_at(0, 0), Srgba16::new(100, 200, 300, 400));
     }
 
@@ -8591,7 +8591,7 @@ mod tests {
     fn nearest_neighbor_resize_srgb_mono16() {
         use crate::transform::{NearestNeighbor, resize};
         let img: Image<SrgbMono16> = Image::fill(4, 4, SrgbMono16::new(42000));
-        let out: Image<SrgbMono16> = resize(&img, crate::Size::new(2, 2), NearestNeighbor);
+        let out: Image<SrgbMono16> = resize(&img, crate::Size::new(2, 2), NearestNeighbor).unwrap();
         assert_eq!(out.pixel_at(0, 0), SrgbMono16::new(42000));
     }
 
@@ -8916,7 +8916,7 @@ mod tests {
     fn nearest_neighbor_resize_monof32() {
         use crate::transform::{NearestNeighbor, resize};
         let img: Image<MonoF32> = Image::fill(4, 4, MonoF32::new(0.5));
-        let out: Image<MonoF32> = resize(&img, crate::Size::new(2, 2), NearestNeighbor);
+        let out: Image<MonoF32> = resize(&img, crate::Size::new(2, 2), NearestNeighbor).unwrap();
         assert_eq!(out.pixel_at(0, 0), MonoF32::new(0.5));
     }
 
@@ -8924,7 +8924,7 @@ mod tests {
     fn bilinear_resize_monof32() {
         use crate::transform::{Bilinear, resize};
         let img: Image<MonoF32> = Image::fill(4, 4, MonoF32::new(0.5));
-        let out: Image<MonoF32> = resize(&img, crate::Size::new(2, 2), Bilinear);
+        let out: Image<MonoF32> = resize(&img, crate::Size::new(2, 2), Bilinear).unwrap();
         assert!(approx(out.pixel_at(0, 0).0, 0.5, 1e-3));
     }
 

@@ -7,7 +7,7 @@ use crate::geometry::{Pixels, Point, SourceLookup};
 use crate::image::{Image, ImageView};
 use crate::pixel::{FromLinear, LinearPixel, LinearSpace};
 use crate::transform::InterpolationKernel;
-use crate::{SignedCoordinate, Size};
+use crate::{Error, SignedCoordinate, Size};
 
 /// A position far outside every image, where a border policy gives the value
 /// of "no source".
@@ -28,15 +28,27 @@ where
         .unwrap_or_else(|| border.pixel_at(image, FAR_OUTSIDE))
 }
 
-fn assert_source_not_empty(source: Size, target: Size) {
-    assert!(
-        source.width > 0 && source.height > 0 || target.width == 0 || target.height == 0,
-        "remap: the source is {}x{}, so there is no sample to fill the {}x{} target from",
-        source.width,
-        source.height,
-        target.width,
-        target.height
-    );
+/// The target of `size` filled with the border policy's value when `image`
+/// has no pixels and the target has some: `Some(Ok)` under `Constant`,
+/// `Some(Err)` under a policy that copies from the image, and `None` when
+/// there is a source to sample.
+fn from_empty_source<I, B>(
+    image: &I,
+    border: &B,
+    size: Size,
+) -> Option<Result<Image<I::Pixel>, Error>>
+where
+    I: ImageView,
+    I::Pixel: Copy,
+    B: FullFrameBorder<I>,
+{
+    if image.size().area() > 0 || size.area() == 0 {
+        return None;
+    }
+    Some(match border.value_without_image() {
+        Some(value) => Ok(Image::generate(size.width, size.height, |_, _| value)),
+        None => Err(Error::EmptySource { target: size }),
+    })
 }
 
 /// Remaps `image` into a new image of `size`: each destination pixel takes
@@ -66,10 +78,12 @@ fn assert_source_not_empty(source: Size, target: Size) {
 /// To apply the same mapping to many frames, build a
 /// [`DestToSourceTable`] once.
 ///
-/// # Panics
+/// # Errors
 ///
-/// Panics if `image` is empty and `size` is not: there is no sample to fill
-/// the target from. This mirrors [`resize`](crate::transform::resize).
+/// [`Error::EmptySource`] if `image` has no pixels, `size` has some, and
+/// the border policy copies from the image; under
+/// [`Constant`](crate::border::Constant), which needs no pixel, the target
+/// is filled with its value instead.
 ///
 /// # Example
 ///
@@ -87,7 +101,7 @@ fn assert_source_not_empty(source: Size, target: Size) {
 /// // destination pixel (x, y) reads the source at (y, −x)…
 /// let turn: Similarity<Pixels, Pixels> =
 ///     Similarity::try_linear(1.0, -core::f64::consts::FRAC_PI_2)?;
-/// let out = remap(&img, &DestToSource(turn), Bilinear, &Constant(Mono8::new(0)), Size::new(8, 8));
+/// let out = remap(&img, &DestToSource(turn), Bilinear, &Constant(Mono8::new(0)), Size::new(8, 8))?;
 /// // …which lies inside the source only for x = 0.
 /// assert_eq!(out.pixel_at(0, 3), img.pixel_at(3, 0));
 /// assert_eq!(out.pixel_at(4, 3), Mono8::new(0));
@@ -106,16 +120,15 @@ fn assert_source_not_empty(source: Size, target: Size) {
 ///
 /// let img = Image::fill(8, 8, Mono8::new(1));
 /// let s: UniformScale<Pixels, Pixels> = fovea::uniform_scale!(2.0);
-/// let _ = remap(&img, &DestToSource(s), Bilinear, &Skip, Size::new(4, 4));
+/// let _ = remap(&img, &DestToSource(s), Bilinear, &Skip, Size::new(4, 4))?;
 /// ```
-#[must_use]
 pub fn remap<I, L, K, B, Q>(
     image: &I,
     lookup: &L,
     kernel: K,
     border: &B,
     size: Size,
-) -> Image<I::Pixel>
+) -> Result<Image<I::Pixel>, Error>
 where
     I: ImageView,
     I::Pixel: LinearPixel<Accumulator = Q> + LinearSpace + FromLinear<Q>,
@@ -123,11 +136,13 @@ where
     K: InterpolationKernel,
     B: FullFrameBorder<I>,
 {
-    assert_source_not_empty(image.size(), size);
-    Image::generate(size.width, size.height, |x, y| {
+    if let Some(filled) = from_empty_source(image, border, size) {
+        return filled;
+    }
+    Ok(Image::generate(size.width, size.height, |x, y| {
         let source = lookup.source_of(Point::new(x as f64, y as f64));
         value_at(image, source, kernel, border)
-    })
+    }))
 }
 
 /// Where each destination pixel's source lies, computed once, for remapping
@@ -160,7 +175,7 @@ where
 ///
 /// // …applied to every frame.
 /// let frame = Image::fill(640, 480, Mono8::new(90));
-/// let ideal = undistort.remap(&frame, CatmullRom, &Constant(Mono8::new(0)));
+/// let ideal = undistort.remap(&frame, CatmullRom, &Constant(Mono8::new(0)))?;
 /// assert_eq!(ideal.size(), Size::new(640, 480));
 /// # Ok::<(), fovea::Error>(())
 /// ```
@@ -208,21 +223,29 @@ impl DestToSourceTable {
     /// Remaps `image` through the table into an image of the table's size,
     /// as [`remap`] does with the mapping the table was built from.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics if `image` is empty and the table is not, as [`remap`] does.
-    #[must_use]
-    pub fn remap<I, K, B, Q>(&self, image: &I, kernel: K, border: &B) -> Image<I::Pixel>
+    /// [`Error::EmptySource`] as [`remap`] reports it.
+    pub fn remap<I, K, B, Q>(
+        &self,
+        image: &I,
+        kernel: K,
+        border: &B,
+    ) -> Result<Image<I::Pixel>, Error>
     where
         I: ImageView,
         I::Pixel: LinearPixel<Accumulator = Q> + LinearSpace + FromLinear<Q>,
         K: InterpolationKernel,
         B: FullFrameBorder<I>,
     {
-        assert_source_not_empty(image.size(), self.size);
-        Image::generate(self.size.width, self.size.height, |x, y| {
-            value_at(image, self.source_of(x, y), kernel, border)
-        })
+        if let Some(filled) = from_empty_source(image, border, self.size) {
+            return filled;
+        }
+        Ok(Image::generate(
+            self.size.width,
+            self.size.height,
+            |x, y| value_at(image, self.source_of(x, y), kernel, border),
+        ))
     }
 }
 
@@ -253,7 +276,7 @@ mod tests {
     fn the_identity_copies_the_image_exactly() {
         let img = field();
         let id: UniformScale<Pixels, Pixels> = crate::uniform_scale!(1.0);
-        let out = remap(&img, &DestToSource(id), CatmullRom, &Clamp, img.size());
+        let out = remap(&img, &DestToSource(id), CatmullRom, &Clamp, img.size()).unwrap();
         assert_eq!(out, img);
     }
 
@@ -269,7 +292,8 @@ mod tests {
             Bilinear,
             &Constant(fill),
             img.size(),
-        );
+        )
+        .unwrap();
         for y in 0..12 {
             for x in 0..16 {
                 let (sx, sy) = (x as isize + 3, y as isize - 2);
@@ -290,7 +314,8 @@ mod tests {
             Bilinear,
             &Constant(fill),
             img.size(),
-        );
+        )
+        .unwrap();
         assert_eq!(again, out);
     }
 
@@ -308,12 +333,16 @@ mod tests {
             Bilinear,
             &Constant(fill),
             img.size(),
-        );
+        )
+        .unwrap();
         assert_eq!(out.pixel_at(5, 4), fill);
         let table = DestToSourceTable::new(&DestToSource(h), img.size());
         assert_eq!(table.source_of(5, 4), None);
         assert_eq!(
-            table.remap(&img, Bilinear, &Constant(fill)).pixel_at(5, 4),
+            table
+                .remap(&img, Bilinear, &Constant(fill))
+                .unwrap()
+                .pixel_at(5, 4),
             fill
         );
     }
@@ -338,8 +367,8 @@ mod tests {
     fn the_table_and_the_mapping_remap_alike() {
         let img = field();
         let table = DestToSourceTable::new(&DestToSource(lens()), img.size());
-        let direct = remap(&img, &DestToSource(lens()), CatmullRom, &Clamp, img.size());
-        let tabled = table.remap(&img, CatmullRom, &Clamp);
+        let direct = remap(&img, &DestToSource(lens()), CatmullRom, &Clamp, img.size()).unwrap();
+        let tabled = table.remap(&img, CatmullRom, &Clamp).unwrap();
         for y in 0..12 {
             for x in 0..16 {
                 let (a, b) = (direct.pixel_at(x, y).value(), tabled.pixel_at(x, y).value());
@@ -368,7 +397,7 @@ mod tests {
             let p = l.undistort_point(Point::new(x as f64, y as f64)).unwrap();
             MonoF32::new(pattern(p.x, p.y) as f32)
         });
-        let restored = remap(&camera, &DestToSource(l), CatmullRom, &Clamp, ideal.size());
+        let restored = remap(&camera, &DestToSource(l), CatmullRom, &Clamp, ideal.size()).unwrap();
         for y in 2..10 {
             for x in 2..14 {
                 let (a, b) = (
@@ -385,25 +414,48 @@ mod tests {
     fn an_integer_image_rounds_back_to_its_type() {
         let img = Image::generate(4, 4, |x, _| Mono8::new(10 * x as u8 + 5));
         let half: UniformScale<Pixels, Pixels> = crate::uniform_scale!(0.5);
-        let out = remap(&img, &DestToSource(half), Bilinear, &Clamp, Size::new(4, 4));
+        let out = remap(&img, &DestToSource(half), Bilinear, &Clamp, Size::new(4, 4)).unwrap();
         // Destination x = 1 reads the source at x = 0.5: between 5 and 15.
         assert_eq!(out.pixel_at(1, 0), Mono8::new(10));
         assert_eq!(out.pixel_at(2, 0), Mono8::new(15));
     }
 
     #[test]
-    #[should_panic(expected = "no sample to fill")]
-    fn an_empty_source_cannot_fill_a_target() {
+    fn an_empty_source_fills_a_target_only_with_a_constant() {
         let empty: Image<MonoF32> = Image::zero(0, 0);
         let id: UniformScale<Pixels, Pixels> = crate::uniform_scale!(1.0);
-        let _ = remap(&empty, &DestToSource(id), Bilinear, &Clamp, Size::new(2, 2));
+        let target = Size::new(2, 2);
+        assert_eq!(
+            remap(&empty, &DestToSource(id), Bilinear, &Clamp, target),
+            Err(Error::EmptySource { target })
+        );
+        let filled = remap(
+            &empty,
+            &DestToSource(id),
+            Bilinear,
+            &Constant(MonoF32::new(3.0)),
+            target,
+        )
+        .unwrap();
+        assert_eq!(filled, Image::fill(2, 2, MonoF32::new(3.0)));
+        let table = DestToSourceTable::new(&DestToSource(id), target);
+        assert_eq!(
+            table.remap(&empty, Bilinear, &Clamp),
+            Err(Error::EmptySource { target })
+        );
+        assert_eq!(
+            table
+                .remap(&empty, Bilinear, &Constant(MonoF32::new(3.0)))
+                .unwrap(),
+            filled
+        );
     }
 
     #[test]
     fn an_empty_target_needs_no_source() {
         let empty: Image<MonoF32> = Image::zero(0, 0);
         let id: UniformScale<Pixels, Pixels> = crate::uniform_scale!(1.0);
-        let out = remap(&empty, &DestToSource(id), Bilinear, &Clamp, Size::new(0, 3));
+        let out = remap(&empty, &DestToSource(id), Bilinear, &Clamp, Size::new(0, 3)).unwrap();
         assert_eq!(out.size(), Size::new(0, 3));
     }
 }

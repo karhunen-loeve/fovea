@@ -6,20 +6,12 @@ use crate::image::{Image, ImageView};
 use crate::{Error, SignedCoordinate, Size};
 
 mod sealed {
-    use crate::border::FullFrameBorder;
-    use crate::image::{Image, ImageView};
+    use crate::Size;
 
     pub trait Placement {
-        fn pad_image<I, B>(
-            self,
-            img: &I,
-            border: &B,
-        ) -> <Self as super::PadGeometry>::Output<Image<I::Pixel>>
-        where
-            Self: super::PadGeometry,
-            I: ImageView,
-            I::Pixel: Copy,
-            B: FullFrameBorder<I>;
+        /// The size of the result for an image of `source`, and where the
+        /// image's origin lies in it.
+        fn place(self, source: Size) -> Result<(Size, usize, usize), crate::Error>;
     }
 }
 
@@ -27,14 +19,9 @@ mod sealed {
 /// parameter of `pad`. Sealed.
 ///
 /// A [`Size`] is a target, with the image at the origin and the new pixels
-/// to the right and below. [`Margins`] add pixels on each side. The
-/// associated type says whether a geometry can fail: a target can be
-/// smaller than the image, margins cannot.
-pub trait PadGeometry: sealed::Placement {
-    /// What [`pad`] returns: `Result<T, Error>` for a geometry that can
-    /// fail, `T` for one that cannot.
-    type Output<T>;
-}
+/// to the right and below; a target smaller than the image is an error.
+/// [`Margins`] add pixels on each side.
+pub trait PadGeometry: sealed::Placement {}
 
 /// The pixels [`pad`] adds on each side of an image.
 ///
@@ -48,8 +35,9 @@ pub trait PadGeometry: sealed::Placement {
 /// use fovea::transform::{Margins, pad};
 ///
 /// let img = Image::fill(4, 3, Mono8::new(9));
-/// let framed = pad(&img, Margins { left: 2, right: 2, top: 1, bottom: 1 }, &Wrap);
+/// let framed = pad(&img, Margins { left: 2, right: 2, top: 1, bottom: 1 }, &Wrap)?;
 /// assert_eq!(framed.size(), Size::new(8, 5));
+/// # Ok::<(), fovea::Error>(())
 /// ```
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Margins {
@@ -66,10 +54,7 @@ pub struct Margins {
 /// `img` enlarged by `geometry`, the new pixels filled by `border`.
 ///
 /// The geometry is a target [`Size`], with the image at the origin and the
-/// new pixels to the right and below, or [`Margins`] on each side. A
-/// target smaller than the image along a side is an
-/// [`Error::PadTargetTooSmall`]: padding never crops. Margins cannot fail,
-/// so with them `pad` returns the image itself.
+/// new pixels to the right and below, or [`Margins`] on each side.
 ///
 /// The border policy is the caller's choice of what lies beyond the image:
 /// [`Constant`](crate::border::Constant) fills with a value (zeros for a
@@ -78,11 +63,18 @@ pub struct Margins {
 /// [`Wrap`](crate::border::Wrap) repeats it. [`Skip`](crate::border::Skip)
 /// has nothing to fill with, so it does not compile here.
 ///
+/// # Errors
+///
+/// - [`Error::PadTargetTooSmall`] if a target is smaller than the image
+///   along a side: padding never crops.
+/// - [`Error::EmptySource`] if the image has no pixels, the result has
+///   some, and the border policy copies from the image. `Constant` needs
+///   no pixel and fills such a result with its value.
+///
 /// # Panics
 ///
-/// Panics if the image has no pixels and the result has some, since no
-/// pixel is there to fill from, and if margins make a side overflow
-/// `usize`.
+/// Panics if margins make a side overflow `usize`, a size no image can
+/// have: it is the limit at which allocating any image fails.
 ///
 /// # Example
 ///
@@ -102,9 +94,14 @@ pub struct Margins {
 /// assert!(pad(&img, Size::new(2, 8), &Mirror).is_err());
 ///
 /// // A margin on each side, mirrored about the edge pixel.
-/// let framed = pad(&img, Margins { left: 1, right: 1, top: 0, bottom: 0 }, &Mirror);
+/// let framed = pad(&img, Margins { left: 1, right: 1, top: 0, bottom: 0 }, &Mirror)?;
 /// assert_eq!(framed.size(), Size::new(5, 2));
 /// assert_eq!(framed.pixel_at(0, 0), Mono8::new(1));
+///
+/// // An empty image: a constant fills the result, a mirror has nothing to copy.
+/// let empty = Image::<Mono8>::zero(0, 2);
+/// assert_eq!(pad(&empty, Size::new(2, 2), &Constant(Mono8::new(7)))?.pixel_at(1, 1), Mono8::new(7));
+/// assert!(pad(&empty, Size::new(2, 2), &Mirror).is_err());
 /// # Ok::<(), fovea::Error>(())
 /// ```
 ///
@@ -119,87 +116,58 @@ pub struct Margins {
 ///
 /// let img = Image::fill(3, 2, Mono8::new(1));
 /// // ERROR: `Skip: FullFrameBorder<_>` is not satisfied.
-/// let _ = pad(&img, Size::new(4, 4), &Skip);
+/// let _ = pad(&img, Size::new(4, 4), &Skip)?;
 /// ```
-#[must_use]
-pub fn pad<I, G, B>(img: &I, geometry: G, border: &B) -> G::Output<Image<I::Pixel>>
+pub fn pad<I, G, B>(img: &I, geometry: G, border: &B) -> Result<Image<I::Pixel>, Error>
 where
     I: ImageView,
     I::Pixel: Copy,
     G: PadGeometry,
     B: FullFrameBorder<I>,
 {
-    geometry.pad_image(img, border)
-}
-
-/// The image of `size` holding `img` with its origin at `(left, top)`, the
-/// rest from `border`.
-fn place<I, B>(img: &I, size: Size, left: usize, top: usize, border: &B) -> Image<I::Pixel>
-where
-    I: ImageView,
-    I::Pixel: Copy,
-    B: FullFrameBorder<I>,
-{
-    let source = img.size();
-    assert!(
-        source.area() > 0 || size.area() == 0,
-        "pad: the image is {}x{}, so there is no pixel to fill the {}x{} result from",
-        source.width,
-        source.height,
-        size.width,
-        size.height
-    );
-    Image::generate(size.width, size.height, |x, y| {
+    let (size, left, top) = geometry.place(img.size())?;
+    if img.size().area() == 0 && size.area() > 0 {
+        let value = border
+            .value_without_image()
+            .ok_or(Error::EmptySource { target: size })?;
+        return Ok(Image::generate(size.width, size.height, |_, _| value));
+    }
+    Ok(Image::generate(size.width, size.height, |x, y| {
         border.pixel_at(
             img,
             SignedCoordinate::new(x as isize - left as isize, y as isize - top as isize),
         )
-    })
+    }))
 }
 
-impl PadGeometry for Size {
-    type Output<T> = Result<T, Error>;
-}
+impl PadGeometry for Size {}
 
 impl sealed::Placement for Size {
-    fn pad_image<I, B>(self, img: &I, border: &B) -> Result<Image<I::Pixel>, Error>
-    where
-        I: ImageView,
-        I::Pixel: Copy,
-        B: FullFrameBorder<I>,
-    {
-        let source = img.size();
+    fn place(self, source: Size) -> Result<(Size, usize, usize), Error> {
         if self.width < source.width || self.height < source.height {
             return Err(Error::PadTargetTooSmall {
                 source,
                 target: self,
             });
         }
-        Ok(place(img, self, 0, 0, border))
+        Ok((self, 0, 0))
     }
 }
 
-impl PadGeometry for Margins {
-    type Output<T> = T;
-}
+impl PadGeometry for Margins {}
 
 impl sealed::Placement for Margins {
-    fn pad_image<I, B>(self, img: &I, border: &B) -> Image<I::Pixel>
-    where
-        I: ImageView,
-        I::Pixel: Copy,
-        B: FullFrameBorder<I>,
-    {
+    fn place(self, source: Size) -> Result<(Size, usize, usize), Error> {
         let grow = |side: usize, a: usize, b: usize| {
             side.checked_add(a)
                 .and_then(|s| s.checked_add(b))
                 .expect("pad: a padded side overflows usize")
         };
         let size = Size::new(
-            grow(img.width(), self.left, self.right),
-            grow(img.height(), self.top, self.bottom),
+            grow(source.width, self.left, self.right),
+            grow(source.height, self.top, self.bottom),
         );
-        place(img, size, self.left, self.top, border)
+        Ok((size, self.left, self.top))
     }
 }
 
@@ -261,7 +229,7 @@ mod tests {
     #[test]
     fn the_own_size_and_zero_margins_copy_the_image() {
         assert_eq!(pad(&img(), Size::new(3, 2), &Clamp).unwrap(), img());
-        assert_eq!(pad(&img(), Margins::default(), &Clamp), img());
+        assert_eq!(pad(&img(), Margins::default(), &Clamp).unwrap(), img());
     }
 
     #[test]
@@ -272,7 +240,7 @@ mod tests {
             top: 1,
             bottom: 2,
         };
-        let out = pad(&img(), m, &Wrap);
+        let out = pad(&img(), m, &Wrap).unwrap();
         assert_eq!(out.size(), Size::new(6, 5));
         assert_eq!(
             values(&out),
@@ -302,16 +270,36 @@ mod tests {
             Size::new(0, 6)
         );
         assert_eq!(
-            pad(&empty, Margins::default(), &Clamp).size(),
+            pad(&empty, Margins::default(), &Clamp).unwrap().size(),
             Size::new(0, 4)
         );
     }
 
     #[test]
-    #[should_panic(expected = "no pixel to fill")]
-    fn an_empty_image_cannot_fill_pixels() {
+    fn an_empty_image_fills_pixels_only_with_a_constant() {
         let empty = Image::<Mono8>::zero(0, 4);
-        let _ = pad(&empty, Size::new(2, 4), &Constant(Mono8::new(0)));
+        let filled = pad(&empty, Size::new(2, 4), &Constant(Mono8::new(5))).unwrap();
+        assert_eq!(values(&filled), [[5, 5], [5, 5], [5, 5], [5, 5]]);
+        let m = Margins {
+            left: 1,
+            right: 0,
+            top: 0,
+            bottom: 0,
+        };
+        assert_eq!(
+            pad(&empty, m, &Constant(Mono8::new(5))).unwrap().size(),
+            Size::new(1, 4)
+        );
+        for result in [
+            pad(&empty, Size::new(2, 4), &Clamp),
+            pad(&empty, Size::new(2, 4), &Mirror),
+            pad(&empty, m, &Wrap),
+        ] {
+            assert!(
+                matches!(result, Err(Error::EmptySource { .. })),
+                "{result:?}"
+            );
+        }
     }
 
     #[test]
@@ -323,6 +311,6 @@ mod tests {
             top: 0,
             bottom: 0,
         };
-        let _ = pad(&img(), m, &Clamp);
+        let _ = pad(&img(), m, &Clamp).unwrap();
     }
 }

@@ -8,7 +8,7 @@ use fovea::{
 use std::hint::black_box;
 
 fn resize_nearest<T: ZeroablePixel>(img: &Image<T>, size: Size) -> Image<T> {
-    resize(img, size, NearestNeighbor)
+    resize(img, size, NearestNeighbor).expect("bench images have pixels")
 }
 
 fn resize_bilinear<T>(img: &Image<T>, size: Size) -> Image<T>
@@ -17,7 +17,7 @@ where
     T::Accumulator: LinearPixel<Accumulator = T::Accumulator> + LinearSpace,
     T: FromLinear<T::Accumulator>,
 {
-    resize(img, size, Bilinear)
+    resize(img, size, Bilinear).expect("bench images have pixels")
 }
 
 fn criterion_benchmark(c: &mut Criterion) {

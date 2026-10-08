@@ -56,13 +56,14 @@ use fovea::transform::{Bilinear, NearestNeighbor, SrgbGamma, convert_image, resi
 let srgb = Image::fill(8, 6, Srgb8::new(128, 64, 32));
 
 // Nearest-neighbor copies samples, so it works directly on sRGB.
-let quick: Image<Srgb8> = resize(&srgb, Size::new(4, 3), NearestNeighbor);
+let quick: Image<Srgb8> = resize(&srgb, Size::new(4, 3), NearestNeighbor)?;
 assert_eq!(quick.size(), Size::new(4, 3));
 
 // Bilinear interpolation blends samples, so use linear pixels.
 let linear: Image<RgbF32> = convert_image(&srgb, SrgbGamma);
-let smooth: Image<RgbF32> = resize(&linear, Size::new(4, 3), Bilinear);
+let smooth: Image<RgbF32> = resize(&linear, Size::new(4, 3), Bilinear)?;
 assert_eq!(smooth.size(), Size::new(4, 3));
+# Ok::<(), fovea::Error>(())
 ```
 
 This is the main mental model: if an algorithm needs a property, that property appears in the type bounds.

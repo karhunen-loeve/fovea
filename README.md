@@ -33,13 +33,14 @@ let srgb = Image::generate(4, 3, |x, y| {
 });
 
 // ✓ This compiles: nearest-neighbor copies samples without blending them.
-let preview: Image<Srgb8> = resize(&srgb, Size::new(8, 6), NearestNeighbor);
+let preview: Image<Srgb8> = resize(&srgb, Size::new(8, 6), NearestNeighbor)?;
 assert_eq!(preview.size(), Size::new(8, 6));
 
 // ✓ This compiles: explicit sRGB decode before interpolation.
 let linear: Image<RgbF32> = convert_image(&srgb, SrgbGamma);
-let resized: Image<RgbF32> = resize(&linear, Size::new(8, 6), Bilinear);
+let resized: Image<RgbF32> = resize(&linear, Size::new(8, 6), Bilinear)?;
 assert_eq!(resized.size(), Size::new(8, 6));
+# Ok::<(), fovea::Error>(())
 ```
 
 The version below does **not** compile, and that is the point:
@@ -53,7 +54,7 @@ use fovea::transform::{Bilinear, resize};
 let srgb = Image::fill(4, 3, Srgb8::new(128, 64, 32));
 
 // ✗ Bilinear interpolation blends samples. Srgb8 is gamma-encoded.
-let _: Image<Srgb8> = resize(&srgb, Size::new(8, 6), Bilinear);
+let _: Image<Srgb8> = resize(&srgb, Size::new(8, 6), Bilinear)?;
 ```
 
 Linearize first with `SrgbGamma`, resize in `RgbF32` or `MonoF32`, then encode back if you need an sRGB output image.
@@ -154,7 +155,7 @@ Important distinction: `Rgb8` and `Srgb8` may both store three `u8` channels, bu
 ## FAQ
 
 **Where do I start if I just want to load a PNG and resize it?**
-Use `fovea-io` to decode, match the returned pixel enum once, convert sRGB images to linear pixels with `SrgbGamma`, call `resize(..., Bilinear)`, then encode.
+Use `fovea-io` to decode, match the returned pixel enum once, convert sRGB images to linear pixels with `SrgbGamma`, call `resize(..., Bilinear)?`, then encode.
 
 **Why does `Bilinear` fail for `Srgb8`?**
 Because bilinear interpolation blends samples, and blending gamma-encoded samples is physically wrong. Use `NearestNeighbor` if you are only copying samples; otherwise linearize first.

@@ -317,11 +317,11 @@ pub type Lanczos2 = Lanczos<2>;
 /// Lanczos with three lobes: six taps per axis, the common choice.
 pub type Lanczos3 = Lanczos<3>;
 
-/// The [`Lanczos2`](type@Lanczos2) kernel as a value, so `resize(&img, size, Lanczos2)` reads
+/// The [`Lanczos2`](type@Lanczos2) kernel as a value, so `resize(&img, size, Lanczos2)?` reads
 /// like the other kernels.
 #[allow(non_upper_case_globals)]
 pub const Lanczos2: Lanczos2 = Lanczos;
-/// The [`Lanczos3`](type@Lanczos3) kernel as a value, so `resize(&img, size, Lanczos3)` reads
+/// The [`Lanczos3`](type@Lanczos3) kernel as a value, so `resize(&img, size, Lanczos3)?` reads
 /// like the other kernels.
 #[allow(non_upper_case_globals)]
 pub const Lanczos3: Lanczos3 = Lanczos;
@@ -354,14 +354,15 @@ pub const Lanczos3: Lanczos3 = Lanczos;
 /// let stripes = Image::generate(60, 1, |x, _| MonoF32::new((x % 2) as f32));
 /// let target = Size::new(20, 1);
 ///
-/// let aliased: Image<MonoF32> = resize(&stripes, target, CatmullRom);
-/// let filtered: Image<MonoF32> = resize(&stripes, target, Antialiased(CatmullRom));
+/// let aliased: Image<MonoF32> = resize(&stripes, target, CatmullRom)?;
+/// let filtered: Image<MonoF32> = resize(&stripes, target, Antialiased(CatmullRom))?;
 ///
 /// let contrast = |img: &Image<MonoF32>| {
 ///     (img.pixel_at(4, 0).value() - img.pixel_at(5, 0).value()).abs()
 /// };
 /// assert!(contrast(&aliased) > 0.9, "stripes at full contrast: a false pattern");
 /// assert!(contrast(&filtered) < 0.05, "grey: the stripes' mean");
+/// # Ok::<(), fovea::Error>(())
 /// ```
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Antialiased<K>(pub K);

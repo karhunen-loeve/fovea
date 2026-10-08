@@ -204,7 +204,7 @@ impl<P: SpectrumSource> Spectrum<P> {
     /// let mut power = dft(&img, Auto);
     /// power.multiply_conjugate(&dft(&img, Auto))?;
     /// // With itself, every bin becomes its squared magnitude, which is real.
-    /// assert_eq!(power.at(FrequencyIndex::new(1, 1)).im, 0.0);
+    /// assert_eq!(power.at(FrequencyIndex::new(1, 1)).map(|b| b.im), Some(0.0));
     /// # Ok::<(), fovea::Error>(())
     /// ```
     pub fn multiply_conjugate(&mut self, other: &Spectrum<P>) -> Result<(), Error> {
@@ -239,9 +239,8 @@ impl<P: SpectrumSource> Spectrum<P> {
     /// bin's frequency, on a W × H image, gives A·W·H/2 at that bin and at
     /// its mirror.
     ///
-    /// # Panics
-    ///
-    /// Panics if the image had no pixels, so the spectrum has no bin.
+    /// `None` for the spectrum of an image without pixels, which has no
+    /// bin; every index is a bin of any other spectrum.
     ///
     /// # Example
     ///
@@ -252,24 +251,25 @@ impl<P: SpectrumSource> Spectrum<P> {
     ///
     /// let spectrum = dft(&Image::fill(6, 4, MonoF32::new(0.5)), Auto);
     /// // The zero frequency holds the sum of all pixels.
-    /// assert_eq!(spectrum.at(FrequencyIndex::new(0, 0)), ComplexF32::new(12.0, 0.0));
+    /// assert_eq!(spectrum.at(FrequencyIndex::new(0, 0)), Some(ComplexF32::new(12.0, 0.0)));
+    ///
+    /// let empty = dft(&Image::<MonoF32>::zero(0, 4), Auto);
+    /// assert_eq!(empty.at(FrequencyIndex::new(0, 0)), None);
     /// ```
     #[must_use]
-    pub fn at(&self, index: FrequencyIndex) -> P::Bin {
-        let (i, conjugate) = self.locate(index);
-        if conjugate {
+    pub fn at(&self, index: FrequencyIndex) -> Option<P::Bin> {
+        let (i, conjugate) = self.locate(index)?;
+        Some(if conjugate {
             self.bins[i].conj()
         } else {
             self.bins[i]
-        }
+        })
     }
 
     /// The frequency of the bin at `index`, in the unit `U`, with the index
     /// taken into the canonical range first.
     ///
-    /// # Panics
-    ///
-    /// Panics if the image had no pixels, so the spectrum has no bin.
+    /// `None` for the spectrum of an image without pixels, which has no bin.
     ///
     /// # Example
     ///
@@ -279,29 +279,30 @@ impl<P: SpectrumSource> Spectrum<P> {
     /// use fovea::pixel::MonoF32;
     ///
     /// let spectrum = dft(&Image::fill(512, 256, MonoF32::new(0.0)), Auto);
-    /// let f: Frequency<CyclesPerPixel> = spectrum.frequency_of(FrequencyIndex::new(1, 1));
+    /// let f: Frequency<CyclesPerPixel> = spectrum
+    ///     .frequency_of(FrequencyIndex::new(1, 1))
+    ///     .expect("the image has pixels");
     /// assert_eq!((f.fx(), f.fy()), (1.0 / 512.0, 1.0 / 256.0));
     ///
     /// // Bin 256 of an even side is its Nyquist bin, which counts as negative.
-    /// let n: Frequency<Bins> = spectrum.frequency_of(FrequencyIndex::new(256, 0));
-    /// assert_eq!(n.fx(), -256.0);
+    /// let n: Option<Frequency<Bins>> = spectrum.frequency_of(FrequencyIndex::new(256, 0));
+    /// assert_eq!(n.map(|n| n.fx()), Some(-256.0));
     /// ```
     #[must_use]
-    pub fn frequency_of<U: FrequencyUnit>(&self, index: FrequencyIndex) -> Frequency<U> {
-        let size = self.frequencies();
-        frequency_in(
+    pub fn frequency_of<U: FrequencyUnit>(&self, index: FrequencyIndex) -> Option<Frequency<U>> {
+        let size = self.frequencies()?;
+        Some(frequency_in(
             canonical(index.kx, size.width),
             canonical(index.ky, size.height),
             size,
-        )
+        ))
     }
 
     /// The frequency `f` in the unit `U`, through the size of this
     /// spectrum's image.
     ///
-    /// # Panics
-    ///
-    /// Panics if the image had no pixels, so a bin has no size.
+    /// `None` for the spectrum of an image without pixels, whose bins have
+    /// no size.
     ///
     /// # Example
     ///
@@ -312,12 +313,15 @@ impl<P: SpectrumSource> Spectrum<P> {
     ///
     /// let spectrum = dft(&Image::fill(512, 256, MonoF32::new(0.0)), Auto);
     /// let quarter = Frequency::cycles_per_pixel(0.25, 0.25);
-    /// let in_bins: Frequency<Bins> = spectrum.convert(quarter);
+    /// let in_bins: Frequency<Bins> = spectrum.convert(quarter).expect("the image has pixels");
     /// assert_eq!((in_bins.fx(), in_bins.fy()), (128.0, 64.0));
     /// ```
     #[must_use]
-    pub fn convert<U: FrequencyUnit, V: FrequencyUnit>(&self, f: Frequency<V>) -> Frequency<U> {
-        convert(f, self.frequencies())
+    pub fn convert<U: FrequencyUnit, V: FrequencyUnit>(
+        &self,
+        f: Frequency<V>,
+    ) -> Option<Frequency<U>> {
+        Some(convert(f, self.frequencies()?))
     }
 
     /// Changes every bin by `filter`, which receives the bin's frequency in
@@ -421,7 +425,7 @@ impl<P: SpectrumSource> Spectrum<P> {
         let Size { width, height } = self.source_size;
         let (cx, cy) = ((width / 2) as isize, (height / 2) as isize);
         Image::generate(width, height, |x, y| {
-            self.at(FrequencyIndex::new(x as isize - cx, y as isize - cy))
+            self.bin(FrequencyIndex::new(x as isize - cx, y as isize - cy))
         })
     }
 
@@ -503,34 +507,37 @@ impl<P: SpectrumSource> Spectrum<P> {
         let (cx, cy) = ((width / 2) as isize, (height / 2) as isize);
         Image::generate(width, height, |x, y| {
             let (re, im) = self
-                .at(FrequencyIndex::new(x as isize - cx, y as isize - cy))
+                .bin(FrequencyIndex::new(x as isize - cx, y as isize - cy))
                 .to_f64();
             P::from_f64(value(re, im))
         })
     }
 
-    /// The size, which has pixels.
-    fn frequencies(&self) -> Size {
+    /// The size, if it has pixels.
+    fn frequencies(&self) -> Option<Size> {
         let size = self.source_size;
-        assert!(
-            size.area() > 0,
-            "the spectrum of an image without pixels has no frequencies"
-        );
-        size
+        (size.area() > 0).then_some(size)
     }
 
     /// Where the bin `index` is stored, and whether the stored value is its
-    /// conjugate.
-    fn locate(&self, index: FrequencyIndex) -> (usize, bool) {
-        let Size { width, height } = self.frequencies();
+    /// conjugate; `None` if there is no bin.
+    fn locate(&self, index: FrequencyIndex) -> Option<(usize, bool)> {
+        let Size { width, height } = self.frequencies()?;
         let half = half_width(width);
         let mx = index.kx.rem_euclid(width as isize) as usize;
         let my = index.ky.rem_euclid(height as isize) as usize;
-        if mx < half {
+        Some(if mx < half {
             (my * half + mx, false)
         } else {
             ((height - my) % height * half + (width - mx), true)
-        }
+        })
+    }
+
+    /// The bin at `index` of a spectrum that has bins, as the image exits
+    /// read it.
+    fn bin(&self, index: FrequencyIndex) -> P::Bin {
+        self.at(index)
+            .expect("called only for positions of a spectrum with pixels")
     }
 
     /// The spectrum of `src`, along x by `along_x` and along y by `along_y`.
@@ -690,6 +697,7 @@ mod tests {
                 .map(|(kx, ky)| {
                     spectrum
                         .at(FrequencyIndex::new(kx as isize, ky as isize))
+                        .unwrap()
                         .to_f64()
                 })
                 .collect();
@@ -704,9 +712,12 @@ mod tests {
         let (_, img) = random(&mut rng, 6, 5);
         let spectrum = dft(&img, Auto);
         for (kx, ky) in [(0isize, 0isize), (2, 1), (-1, 3), (3, -2), (5, 4)] {
-            let base = spectrum.at(FrequencyIndex::new(kx, ky));
+            let base = spectrum.at(FrequencyIndex::new(kx, ky)).unwrap();
             for (dx, dy) in [(6, 0), (-6, 5), (12, -10)] {
-                assert_eq!(spectrum.at(FrequencyIndex::new(kx + dx, ky + dy)), base);
+                assert_eq!(
+                    spectrum.at(FrequencyIndex::new(kx + dx, ky + dy)).unwrap(),
+                    base
+                );
             }
         }
     }
@@ -715,7 +726,7 @@ mod tests {
     fn the_spectrum_hands_out_the_canonical_range() {
         let spectrum = dft(&Image::fill(8, 5, MonoF64::new(1.0)), Auto);
         let bins = |kx, ky| {
-            let f: Frequency<Bins> = spectrum.frequency_of(FrequencyIndex::new(kx, ky));
+            let f: Frequency<Bins> = spectrum.frequency_of(FrequencyIndex::new(kx, ky)).unwrap();
             (f.fx(), f.fy())
         };
         assert_eq!(bins(3, 0), (3.0, 0.0));
@@ -724,7 +735,8 @@ mod tests {
         assert_eq!(bins(0, 2), (0.0, 2.0));
         assert_eq!(bins(0, 3), (0.0, -2.0));
         assert_eq!(bins(0, 7), (0.0, 2.0));
-        let cycles: Frequency<CyclesPerPixel> = spectrum.frequency_of(FrequencyIndex::new(1, 1));
+        let cycles: Frequency<CyclesPerPixel> =
+            spectrum.frequency_of(FrequencyIndex::new(1, 1)).unwrap();
         assert_eq!((cycles.fx(), cycles.fy()), (1.0 / 8.0, 1.0 / 5.0));
     }
 
@@ -732,11 +744,11 @@ mod tests {
     fn units_convert_through_the_size() {
         let spectrum = dft(&Image::fill(512, 256, MonoF32::new(1.0)), Auto);
         let f = Frequency::bins(37.0, -5.0);
-        let c: Frequency<CyclesPerPixel> = spectrum.convert(f);
+        let c: Frequency<CyclesPerPixel> = spectrum.convert(f).unwrap();
         assert_eq!((c.fx(), c.fy()), (37.0 / 512.0, -5.0 / 256.0));
-        let back: Frequency<Bins> = spectrum.convert(c);
+        let back: Frequency<Bins> = spectrum.convert(c).unwrap();
         assert_eq!(back, f);
-        let same: Frequency<Bins> = spectrum.convert(f);
+        let same: Frequency<Bins> = spectrum.convert(f).unwrap();
         assert_eq!(same, f);
     }
 
@@ -777,8 +789,11 @@ mod tests {
                 for kx in 0..w as isize {
                     let i = FrequencyIndex::new(kx, ky);
                     let (mx, my) = mirror(i, w, h);
-                    let here = spectrum.at(i);
-                    assert_eq!(spectrum.at(FrequencyIndex::new(mx, my)), here.conjugate());
+                    let here = spectrum.at(i).unwrap();
+                    assert_eq!(
+                        spectrum.at(FrequencyIndex::new(mx, my)).unwrap(),
+                        here.conjugate()
+                    );
                     if (mx, my) == (canonical(kx, w), canonical(ky, h)) {
                         assert_eq!(here.im, 0.0, "{w}x{h}: ({kx}, {ky}) is its own mirror");
                     }
@@ -809,8 +824,11 @@ mod tests {
                 for kx in 0..w as isize {
                     let i = FrequencyIndex::new(kx, ky);
                     let (mx, my) = mirror(i, w, h);
-                    let here = spectrum.at(i);
-                    assert_eq!(spectrum.at(FrequencyIndex::new(mx, my)), here.conjugate());
+                    let here = spectrum.at(i).unwrap();
+                    assert_eq!(
+                        spectrum.at(FrequencyIndex::new(mx, my)).unwrap(),
+                        here.conjugate()
+                    );
                     if (mx, my) == (canonical(kx, w), canonical(ky, h)) {
                         assert_eq!(here.im, 0.0, "{w}x{h}: ({kx}, {ky})");
                     }
@@ -850,7 +868,7 @@ mod tests {
             *bin = *bin * ComplexF32::new(angle.cos(), angle.sin());
         });
         // The Nyquist column could not hold the ramp's imaginary part.
-        let nyquist = spectrum.at(FrequencyIndex::new(-4, 0));
+        let nyquist = spectrum.at(FrequencyIndex::new(-4, 0)).unwrap();
         assert_eq!(nyquist.im, 0.0);
         let shifted = spectrum.inverse(Radix2).unwrap();
         assert!((0..8).all(|y| (0..8).all(|x| shifted.pixel_at(x, y).0.is_finite())));
@@ -909,16 +927,13 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "without pixels has no frequencies")]
-    fn an_empty_spectrum_has_no_bin() {
+    fn an_empty_spectrum_has_no_bin_and_no_unit() {
         let spectrum = dft(&Image::<MonoF32>::zero(0, 3), Auto);
-        let _ = spectrum.at(FrequencyIndex::new(0, 0));
-    }
-
-    #[test]
-    #[should_panic(expected = "without pixels has no frequencies")]
-    fn an_empty_spectrum_has_no_unit_to_convert_by() {
+        assert_eq!(spectrum.at(FrequencyIndex::new(0, 0)), None);
+        let none: Option<Frequency<Bins>> = spectrum.frequency_of(FrequencyIndex::new(1, 0));
+        assert!(none.is_none());
         let spectrum = dft(&Image::<MonoF64>::zero(4, 0), Auto);
-        let _: Frequency<Bins> = spectrum.convert(Frequency::cycles_per_pixel(0.1, 0.1));
+        let none: Option<Frequency<Bins>> = spectrum.convert(Frequency::cycles_per_pixel(0.1, 0.1));
+        assert!(none.is_none());
     }
 }

@@ -1054,8 +1054,9 @@ mod tests {
         // Vertical stripes: their frequencies lie on the horizontal axis.
         let img = Image::generate(32, 32, |x, _| MonoF64::new((x % 4) as f64));
         let spectrum = dft(&img, Auto);
-        let f: Frequency<CyclesPerPixel> = spectrum.frequency_of(FrequencyIndex::new(8, 0));
-        assert!(spectrum.at(FrequencyIndex::new(8, 0)).magnitude() > 100.0);
+        let f: Frequency<CyclesPerPixel> =
+            spectrum.frequency_of(FrequencyIndex::new(8, 0)).unwrap();
+        assert!(spectrum.at(FrequencyIndex::new(8, 0)).unwrap().magnitude() > 100.0);
         assert!(
             f.axis()
                 .unwrap()
@@ -1125,9 +1126,9 @@ mod tests {
         for ky in -6..6 {
             for kx in -8..8 {
                 let i = FrequencyIndex::new(kx, ky);
-                let g = lp.gain(original.frequency_of(i));
-                let want = original.at(i);
-                let got = filtered.at(i);
+                let g = lp.gain(original.frequency_of(i).unwrap());
+                let want = original.at(i).unwrap();
+                let got = filtered.at(i).unwrap();
                 assert!(
                     (got.re - want.re * g).abs() < 1e-15 && (got.im - want.im * g).abs() < 1e-15
                 );
