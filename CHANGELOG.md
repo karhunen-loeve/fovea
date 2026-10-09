@@ -476,12 +476,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and 80 MiB/s before. The output is unchanged, pinned by the existing
   tests.
 - `StructureTensor::from_gradients` runs its three same-size blurs through
-  one `SeparableScratch`, and a Gaussian pyramid passes one scratch and one
-  blurred buffer to every level. On a 64 × 48 `MonoF32` pair the tensor
-  allocates 10 times per call instead of 21, and each pyramid level after
-  the first allocates only its own pixels, once instead of 7 times;
-  `tests/allocation.rs` asserts both. The results are bit for bit the
-  same, pinned against the allocating blur. No wall-clock claim is made.
+  one `SeparableScratch`, `ssim` and `ssim_map` their five, and a Gaussian
+  pyramid passes one scratch and one blurred buffer to every level. On a
+  64 × 48 `MonoF32` pair the tensor allocates 10 times per call instead of
+  21; on a 64 × 48 `Mono8` pair `ssim_map` allocates 12 times instead of
+  34; each pyramid level after the first allocates only its own pixels,
+  once instead of 7 times. `tests/allocation.rs` asserts all three. The
+  results are bit for bit the same. No wall-clock claim is made.
 
 ### Documentation
 

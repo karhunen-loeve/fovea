@@ -11,7 +11,7 @@ use crate::image::{
     gaussian_kernel_size,
 };
 use crate::pixel::{ChannelwiseMath, MonoF64, SingleChannel};
-use crate::transform::convolve_separable;
+use crate::transform::SeparableScratch;
 use crate::{Error, Sigma, Size, sigma};
 
 use crate::analyze::statistics::StatisticsChannel;
@@ -429,18 +429,28 @@ where
     // these is already the `(w − 2r) × (h − 2r)` valid block with no border to
     // discard. Each plane is dropped as soon as its moment exists, which caps
     // the live set below the naive eight.
+    //
+    // The five blurs are the same size, so they share one working set: the
+    // first sizes it, the other four allocate only their outputs.
     let kernel = gaussian_kernel_1d(params.sigma, SsimParams::TRUNCATE);
-    let mean_a: Image<MonoF64> = convolve_separable(&plane_a, &kernel, &Skip);
-    let mean_b: Image<MonoF64> = convolve_separable(&plane_b, &kernel, &Skip);
-    let moment_ab: Image<MonoF64> = convolve_separable(&plane_ab, &kernel, &Skip);
+    let valid = Size::new(a.width() + 1 - kernel.len(), a.height() + 1 - kernel.len());
+    let mut scratch = SeparableScratch::new();
+    let mut blur = |plane: &Image<MonoF64>| {
+        let mut moment = Image::<MonoF64>::zero(valid.width, valid.height);
+        scratch.convolve_separable_into(plane, &kernel, &Skip, &mut moment);
+        moment
+    };
+    let mean_a = blur(&plane_a);
+    let mean_b = blur(&plane_b);
+    let moment_ab = blur(&plane_ab);
     drop(plane_ab);
 
     square_in_place(&mut plane_a);
-    let moment_aa: Image<MonoF64> = convolve_separable(&plane_a, &kernel, &Skip);
+    let moment_aa = blur(&plane_a);
     drop(plane_a);
 
     square_in_place(&mut plane_b);
-    let moment_bb: Image<MonoF64> = convolve_separable(&plane_b, &kernel, &Skip);
+    let moment_bb = blur(&plane_b);
     drop(plane_b);
 
     // ── Combine ──────────────────────────────────────────────────────────
