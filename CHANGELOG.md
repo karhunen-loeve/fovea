@@ -404,7 +404,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `otsu_binary_mask`, `ssim` and `ssim_map`. The channel-wise maximum of two
   `Label32` images, the difference of two `Indexed8` images and a histogram
   or Otsu threshold of palette indices compiled before and are compile
-  errors now. `ImagePlanes` and `ChannelLut` still need only
+  errors now. `BrightnessContrast` requires `ChannelwiseMath` on top of
+  `LinearPixel`, because its brightness is added to every channel: on
+  `ComplexF32` and `ComplexF64` it landed in both the real and the
+  imaginary part (`3 + 4i` plus 10 gave `13 + 14i`), and those two are now
+  rejected; every other pixel of the crate that it accepted before it
+  still accepts. `ImagePlanes` and `ChannelLut` still need only
   `HomogeneousPixel`: splitting into planes and an arbitrary per-channel
   lookup are meaningful on identifiers too. **Migration:** a custom pixel
   type used with any of these operations adds `ChannelwiseMath` to its

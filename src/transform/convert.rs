@@ -2435,6 +2435,23 @@ where
 /// not an interpolation — bind to the minimum layer that admits the
 /// operation.
 ///
+/// It also requires [`ChannelwiseMath`], because the brightness is added
+/// to every channel as if each were a quantity of its own. That is false
+/// for a complex pixel, whose two channels are one amplitude: adding 10 to
+/// both parts of `3 + 4i` gives `13 + 14i`, a result that depends on where
+/// the real axis lies. Complex images are therefore rejected, as by the
+/// other channel-wise operations:
+///
+/// ```compile_fail
+/// use fovea::image::Image;
+/// use fovea::pixel::ComplexF32;
+/// use fovea::transform::{BrightnessContrast, convert_image};
+///
+/// let spectrum = Image::fill(4, 4, ComplexF32::new(3.0, 4.0));
+/// let _: Image<ComplexF32> =
+///     convert_image(&spectrum, BrightnessContrast { brightness: 10.0, contrast: 1.0 });
+/// ```
+///
 /// # Example
 /// ```
 /// # use fovea::image::{Image, ImageView};
@@ -2472,7 +2489,7 @@ pub struct BrightnessContrast<S = f32> {
 
 impl<P, S> ConvertPixel<P, P> for BrightnessContrast<S>
 where
-    P: crate::pixel::LinearPixel<S>,
+    P: crate::pixel::LinearPixel<S> + ChannelwiseMath,
     P: crate::pixel::FromLinear<<P as crate::pixel::LinearPixel<S>>::Accumulator>,
     S: Copy,
 {
