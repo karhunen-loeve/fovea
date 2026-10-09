@@ -33,6 +33,7 @@
 //! | [`Circle`] | [`draw_circle`] | Midpoint circle (outline or filled) |
 //! | [`Polyline`] | [`draw_polyline`] | Sequential Bresenham segments |
 //! | [`Crosshair`] | [`draw_crosshair`] | Two perpendicular axis-aligned lines |
+//! | [`Text`] | [`draw_text`] | Glyph cells of a [`BitmapFont`] |
 //!
 //! ## Signed coordinates, silent clipping
 //!
@@ -55,8 +56,34 @@
 //! to exactly `color`, untouched pixels keep their value. There is no
 //! anti-aliasing and no alpha blending — deliberate for annotation burn-in,
 //! where hard edges survive JPEG compression without smearing and the only
-//! requirement on the pixel type is `Copy`. Thick strokes, anti-aliased
-//! variants, and text rendering are out of scope for now.
+//! requirement on the pixel type is `Copy`. Thick strokes and anti-aliased
+//! variants are out of scope for now.
+//!
+//! ## Text
+//!
+//! A measurement belongs next to the geometry it came from, burned into the
+//! same record. [`Text`] draws a string in a monospaced [`BitmapFont`]:
+//! [`FONT_6X13`] for short labels and [`FONT_10X20`] for labels that must
+//! read at a glance, both the public-domain X11 misc-fixed fonts, covering
+//! printable ASCII and the printable half of ISO 8859-1, so `12.5 µm`,
+//! `45.0°`, `±0.02` and `Ø 4.02 mm` render as written. An integer scale
+//! enlarges them, `\n` breaks lines, and
+//! [`BitmapFont::text_size`] measures a text before it is placed. A font of
+//! your own comes from [`BitmapFont::try_new`].
+//!
+//! ```
+//! use fovea::draw::{FONT_6X13, draw_circle, draw_text};
+//! use fovea::image::Image;
+//! use fovea::pixel::Mono8;
+//!
+//! let mut record: Image<Mono8> = Image::zero(160, 60);
+//! draw_circle(&mut record, (30, 30), 20, Mono8::new(255), false);
+//! // The label to the right of the circle, centred on its height.
+//! let label = "Ø 40.1 px\n±0.3";
+//! let size = FONT_6X13.text_size(label, 1);
+//! let corner = (56, 30 - size.height as isize / 2);
+//! draw_text(&mut record, label, corner, Mono8::new(255), None, 1, &FONT_6X13);
+//! ```
 //!
 //! ## Extension by addition
 //!
@@ -75,18 +102,29 @@
 //! [`draw_circle`]: crate::draw::draw_circle
 //! [`draw_polyline`]: crate::draw::draw_polyline
 //! [`draw_crosshair`]: crate::draw::draw_crosshair
+//! [`Text`]: crate::draw::Text
+//! [`draw_text`]: crate::draw::draw_text
+//! [`BitmapFont`]: crate::draw::BitmapFont
+//! [`BitmapFont::text_size`]: crate::draw::BitmapFont::text_size
+//! [`BitmapFont::try_new`]: crate::draw::BitmapFont::try_new
+//! [`FONT_6X13`]: crate::draw::FONT_6X13
+//! [`FONT_10X20`]: crate::draw::FONT_10X20
 
 mod circle;
+mod font;
 mod line;
 mod marker;
 mod polyline;
 mod rect;
+mod text;
 
 pub use circle::{Circle, draw_circle};
+pub use font::{BitmapFont, FONT_6X13, FONT_10X20};
 pub use line::{Line, draw_line};
 pub use marker::{Crosshair, draw_crosshair};
 pub use polyline::{Polyline, draw_polyline};
 pub use rect::{Rect, draw_rect};
+pub use text::{Text, draw_text};
 
 use crate::image::ImageViewMut;
 

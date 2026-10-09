@@ -112,6 +112,8 @@ pub mod features;
 /// [`draw::Circle`], [`draw::Polyline`], [`draw::Crosshair`]) and the
 /// [`draw::Drawable`] trait carry the same operations as storable values,
 /// and `Drawable` is the extension point for custom markers.
+/// [`draw::draw_text`] labels them in a [`draw::BitmapFont`], measured
+/// beforehand with [`draw::BitmapFont::text_size`].
 pub mod draw;
 
 /// Units, positions and mappings of the plane: pixels to millimetres.

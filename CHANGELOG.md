@@ -313,6 +313,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Requirement::MultipleOf(n)`, the rule a byte stride that does not hold
   whole pixels breaks. `Requirement` is `#[non_exhaustive]`, so this is
   not breaking.
+- **Text, `draw::Text` and `draw::draw_text`.** A label burned into the
+  image next to the geometry it describes: `draw_text(&mut img, "12.5 µm",
+  (8, 8), color, background, scale, &FONT_6X13)`. The text is borrowed,
+  so drawing allocates nothing; `\n` starts a new line; an integer
+  `scale` enlarges each glyph pixel to a block, and a scale of 0 draws
+  nothing; `background: Some(bg)` paints whole cells so the text reads on
+  any image. Like every shape it clips silently, and its cost follows the
+  visible part whatever the scale or position. A character the font does
+  not cover is drawn as its `?`.
+- **Bitmap fonts, `draw::BitmapFont`, `FONT_6X13` and `FONT_10X20`.** The
+  two built-in fonts are the public-domain X11 misc-fixed fonts in cells of
+  6 × 13 and 10 × 20 pixels, covering printable ASCII and the printable
+  half of ISO 8859-1, so `µ`, `°`, `±`, `Ø` and umlauts render as written.
+  `font.text_size(text, scale)` returns the size a text covers before it
+  is drawn, which is what placing a label beside a shape needs.
+  `BitmapFont::try_new(cell, chars, pixels)` builds a font of your own and
+  reports a zero cell, characters out of order or a table that does not
+  fit as an error.
 
 ### Changed
 
