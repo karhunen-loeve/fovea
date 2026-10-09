@@ -436,6 +436,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   clear ranked first and survived every top-N cut. Among equal responses a
   NaN coordinate ranks last as well. Results change only where a NaN
   occurs.
+- **In results:** `NCC` subtracts from each channel its own mean, where it
+  subtracted one mean over all channels, and so computes the score of
+  OpenCV's `TM_CCOEFF_NORMED`. A brightness change that differs between
+  channels, such as a colour cast, no longer lowers the score: a grey
+  template against the same part under a red cast of +30 scored 0.33 and
+  scores 1.0. Single-channel images score as before, bit for bit. The
+  price is that a colour difference that is the same across the whole
+  patch cannot be seen, so a colour variant of a part scores like the
+  part; `SSD` and `SAD` compare the colour itself. The documentation of
+  `NCC` now says that it is zero-mean and what it ignores.
 
 ### Performance
 

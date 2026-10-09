@@ -5,7 +5,7 @@
 //!
 //! * [`SAD`] — Sum of Absolute Differences
 //! * [`SSD`] — Sum of Squared Differences
-//! * [`NCC`] — Normalized Cross-Correlation
+//! * [`NCC`] — zero-mean Normalized Cross-Correlation
 //!
 //! All three produce an `f32` score map whose dimensions are
 //! `(image_w − template_w + 1, image_h − template_h + 1)`.
@@ -85,7 +85,9 @@ use crate::common::Extremum;
 use crate::error::Error;
 use crate::image::sequential::Image;
 use crate::image::{ImageView, ImageViewMut, RasterImage, RasterImageMut};
-use crate::pixel::{ChannelwiseMath, HomogeneousPixel, LinearChannel, MonoF32, ZeroablePixel};
+use crate::pixel::{
+    Array, ChannelwiseMath, HomogeneousPixel, LinearChannel, MonoF32, ZeroablePixel,
+};
 
 // ─── ScorePolarity and MatchMethod traits ────────────────────────────────────
 
@@ -527,15 +529,19 @@ where
 
 // ─── NccAccum ────────────────────────────────────────────────────────────────
 
+/// One `f64` per channel of `P`, held inline: `[f64; 3]` for `Rgb8`.
+type ChannelSums<P> =
+    <<P as HomogeneousPixel>::Channels as Array<<P as HomogeneousPixel>::Channel>>::Map<f64>;
+
 /// Running accumulator for Normalized Cross-Correlation.
 ///
-/// Tracks three sums across all channels per output position:
-/// - `sum_i`: Σ I(c) over all template positions and channels
-/// - `sum_i_sq`: Σ I(c)²
-/// - `cross`: Σ I(c)·T(c)
+/// Tracks three sums per output position:
+/// - `sum_i`: Σ I(c) over all template positions, one sum per channel
+/// - `sum_i_sq`: Σ I(c)² over all template positions and channels
+/// - `cross`: Σ I(c)·T(c) over all template positions and channels
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct NccAccum {
-    sum_i: f64,
+pub(crate) struct NccAccum<S> {
+    sum_i: S,
     sum_i_sq: f64,
     cross: f64,
 }
@@ -545,14 +551,15 @@ pub(crate) struct NccAccum {
 /// `FoldOp<P, P>` for Normalized Cross-Correlation.
 ///
 /// Precomputed template statistics are stored in the struct:
-/// - `template_sum`: Σ T(c)
-/// - `template_sum_sq`: Σ T(c)²
+/// - `template_mean`: the mean of T(c) over the template, one per channel
+/// - `template_var`: Σ (T(c) − mean)² / n, each channel about its own mean
+/// - `m`: pixel count of the template
 /// - `n`: total element count (pixels × channels)
-pub(crate) struct NccFold<P> {
-    template_sum: f64,
-    template_sum_sq: f64,
+pub(crate) struct NccFold<P: HomogeneousPixel> {
+    template_mean: ChannelSums<P>,
+    template_var: f64,
+    m: f64,
     n: f64,
-    _marker: PhantomData<P>,
 }
 
 impl<P> FoldOp<P, P> for NccFold<P>
@@ -561,38 +568,45 @@ where
     P::Channel: LinearChannel<f32>,
     <P::Channel as LinearChannel<f32>>::Accumulator: Into<f64>,
 {
-    type Accumulator = NccAccum;
+    type Accumulator = NccAccum<ChannelSums<P>>;
     type Output = MonoF32;
 
     #[inline(always)]
-    fn init(&self) -> NccAccum {
+    fn init(&self) -> Self::Accumulator {
         NccAccum {
-            sum_i: 0.0,
+            sum_i: Array::from_fn(|_| 0.0),
             sum_i_sq: 0.0,
             cross: 0.0,
         }
     }
 
     #[inline(always)]
-    fn accumulate(&self, acc: &mut NccAccum, item: FoldItem<P, P>) {
-        for c in 0..P::CHANNEL_COUNT {
+    fn accumulate(&self, acc: &mut Self::Accumulator, item: FoldItem<P, P>) {
+        for (c, sum) in acc.sum_i.as_mut().iter_mut().enumerate() {
             let i_val: f64 = item.pixel.channel(c).to_accumulator().into();
             let t_val: f64 = item.weight.channel(c).to_accumulator().into();
-            acc.sum_i += i_val;
+            *sum += i_val;
             acc.sum_i_sq = i_val.mul_add(i_val, acc.sum_i_sq);
             acc.cross = i_val.mul_add(t_val, acc.cross);
         }
     }
 
     #[inline(always)]
-    fn finalize(&mut self, acc: NccAccum) -> MonoF32 {
+    fn finalize(&mut self, acc: Self::Accumulator) -> MonoF32 {
         let n = self.n;
-        let mean_i = acc.sum_i / n;
-        let mean_t = self.template_sum / n;
-        let var_i = acc.sum_i_sq / n - mean_i * mean_i;
-        let var_t = self.template_sum_sq / n - mean_t * mean_t;
-        let cov = acc.cross / n - mean_i * mean_t;
-        let denom = (var_i * var_t).sqrt();
+        let channels = P::CHANNEL_COUNT as f64;
+        // Each channel about its own mean: the n-th part of Σ_c m·mean_c²
+        // is Σ_c mean_c² / channels, and likewise for the cross term.
+        let mut mean_i_sq = 0.0;
+        let mut mean_cross = 0.0;
+        for (sum, mean_t) in acc.sum_i.as_ref().iter().zip(self.template_mean.as_ref()) {
+            let mean_i = sum / self.m;
+            mean_i_sq += mean_i * mean_i;
+            mean_cross += mean_i * mean_t;
+        }
+        let var_i = acc.sum_i_sq / n - mean_i_sq / channels;
+        let cov = acc.cross / n - mean_cross / channels;
+        let denom = (var_i * self.template_var).sqrt();
         if denom < 1e-12 {
             MonoF32(0.0)
         } else {
@@ -603,22 +617,40 @@ where
 
 // ─── NCC strategy ────────────────────────────────────────────────────────────
 
-/// Normalized Cross-Correlation (NCC) template matching.
+/// Zero-mean Normalized Cross-Correlation (NCC) template matching.
 ///
 /// For each position `(x, y)` where the template fits inside the image,
-/// computes the Pearson correlation coefficient between the image patch
-/// and the template:
+/// computes the correlation coefficient between the image patch and the
+/// template after subtracting from each channel its own mean:
 ///
-/// `NCC(x, y) = cov(I, T) / (σ_I · σ_T)`
+/// `NCC(x, y) = Σ_c Σ_(dx, dy) I'·T' / √(Σ_c Σ_(dx, dy) I'² · Σ_c Σ_(dx, dy) T'²)`
 ///
-/// where the statistics are computed over all channels of all pixels in
-/// the patch.
+/// where `I' = I(x+dx, y+dy, c) − mean_c(I)` and
+/// `T' = T(dx, dy, c) − mean_c(T)`, each mean taken over the patch or the
+/// template for channel `c` alone, and the sums run over all channels. This is the
+/// score OpenCV computes as `TM_CCOEFF_NORMED`, with the same means per
+/// channel.
 ///
-/// - A score of `1.0` means perfect positive correlation (identical up to
-///   affine scaling).
+/// - A score of `1.0` means perfect positive correlation.
 /// - A score of `-1.0` means perfect negative correlation.
-/// - A score of `0.0` means no linear correlation, or that one of the
-///   patches has zero variance (constant region).
+/// - A score of `0.0` means no linear correlation, or that the patch or
+///   the template has no variance (a constant region). OpenCV scores a
+///   constant template `1.0` everywhere instead.
+///
+/// # Changes in illumination
+///
+/// Subtracting the means makes the score blind to a change in
+/// brightness, and the normalization makes it blind to a change in
+/// contrast: a patch `a · T + b` with `a > 0` scores `1.0` against `T`.
+/// Because each channel has its own mean, a brightness change that
+/// differs between channels, such as a colour cast, is removed as well.
+/// A contrast change that differs between channels is not, since the
+/// normalization runs over all channels together.
+///
+/// The price of the per-channel means is that a colour difference that is
+/// the same across the whole patch cannot be seen: a part and a colour
+/// variant of it with the same structure score alike. [`SSD`] and [`SAD`]
+/// compare the colour itself.
 ///
 /// # Pixel requirements
 ///
@@ -640,6 +672,11 @@ where
 /// assert_eq!(result.width(), 2);
 /// assert_eq!(result.height(), 1);
 /// // Perfect positive correlation at position (0,0)
+/// assert!((result.pixel_at(0, 0).0 - 1.0).abs() < 1e-6);
+///
+/// // The same structure at twice the contrast and brighter scores the same
+/// let changed = Image::from_vec(2, 1, vec![120u8, 140]).unwrap();
+/// let result = match_template(&changed, &template, NCC).unwrap();
 /// assert!((result.pixel_at(0, 0).0 - 1.0).abs() < 1e-6);
 /// ```
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -676,21 +713,28 @@ where
             expected_h
         );
 
-        // Precompute template statistics.
+        // Precompute template statistics, one mean per channel.
         let channels = <I::Pixel as HomogeneousPixel>::CHANNEL_COUNT;
-        let mut template_sum = 0.0f64;
+        let mut template_sum: ChannelSums<I::Pixel> = Array::from_fn(|_| 0.0);
         let mut template_sum_sq = 0.0f64;
         for y in 0..th {
             for x in 0..tw {
                 let p = template.pixel_at(x, y);
-                for c in 0..channels {
+                for (c, sum) in template_sum.as_mut().iter_mut().enumerate() {
                     let v: f64 = p.channel(c).to_accumulator().into();
-                    template_sum += v;
+                    *sum += v;
                     template_sum_sq = v.mul_add(v, template_sum_sq);
                 }
             }
         }
+        let m = (tw * th) as f64;
         let n = (tw * th * channels) as f64;
+        let template_mean: ChannelSums<I::Pixel> = Array::from_fn(|c| template_sum.as_ref()[c] / m);
+        let mut mean_t_sq = 0.0;
+        for mean in template_mean.as_ref() {
+            mean_t_sq += mean * mean;
+        }
+        let template_var = template_sum_sq / n - mean_t_sq / channels as f64;
 
         fold_neighborhood_into(
             image,
@@ -698,11 +742,11 @@ where
             Coordinate::new(0, 0),
             &Skip,
             output,
-            NccFold {
-                template_sum,
-                template_sum_sq,
+            NccFold::<I::Pixel> {
+                template_mean,
+                template_var,
+                m,
                 n,
-                _marker: PhantomData,
             },
         );
         Ok(())
@@ -1192,6 +1236,65 @@ mod tests {
         };
         let image = Image::from_vec(2, 1, vec![p1, p2]).unwrap();
         let template = Image::from_vec(2, 1, vec![p1, p2]).unwrap();
+        let result = match_template(&image, &template, NCC).unwrap();
+        assert!((result.pixel_at(0, 0).0 - 1.0).abs() < 1e-6);
+    }
+
+    /// The best position under `scores`, the first one on a tie.
+    fn best_position(scores: &Image<MonoF32>, extremum: Extremum) -> Coordinate {
+        let mut best = Coordinate::new(0, 0);
+        for y in 0..scores.height() {
+            for x in 0..scores.width() {
+                let (score, held) = (scores.pixel_at(x, y).0, scores.pixel_at(best.x, best.y).0);
+                let better = match extremum {
+                    Extremum::Maximum => score > held,
+                    Extremum::Minimum => score < held,
+                };
+                if better {
+                    best = Coordinate::new(x, y);
+                }
+            }
+        }
+        best
+    }
+
+    #[test]
+    fn ncc_finds_the_template_under_changed_brightness_and_contrast() {
+        // The template is cut from a pattern at (2, 3); the image is the
+        // same pattern at twice the contrast and 30 brighter. NCC scores
+        // 1.0 there and lower everywhere else. SSD, which compares the
+        // values themselves, ranks another position first.
+        let pattern = |x: usize, y: usize| ((x * x * 3 + y * y * 5 + x * y * 7) % 47 + 10) as u8;
+        let image = Image::generate(8, 8, |x, y| Mono8::new(2 * pattern(x, y) + 30));
+        let template = Image::generate(3, 3, |x, y| Mono8::new(pattern(x + 2, y + 3)));
+
+        let ncc = match_template(&image, &template, NCC).unwrap();
+        assert!((ncc.pixel_at(2, 3).0 - 1.0).abs() < 1e-6);
+        assert_eq!(best_position(&ncc, NCC::EXTREMUM), Coordinate::new(2, 3));
+        // The runner-up, computed independently, is well below.
+        assert!(ncc.pixel_at(3, 3).0 < 0.7);
+
+        let ssd = match_template(&image, &template, SSD).unwrap();
+        assert_ne!(best_position(&ssd, SSD::EXTREMUM), Coordinate::new(2, 3));
+    }
+
+    #[test]
+    fn ncc_takes_one_mean_per_channel() {
+        // A grey template against the same part under a red cast of +30.
+        // Each channel about its own mean, the cast disappears and the
+        // score is 1.0; one mean over all channels would score 1/3.
+        let grey = |v: u8| Rgb8 {
+            r: Saturating(v),
+            g: Saturating(v),
+            b: Saturating(v),
+        };
+        let red_cast = |v: u8| Rgb8 {
+            r: Saturating(v + 30),
+            g: Saturating(v),
+            b: Saturating(v),
+        };
+        let template = Image::from_vec(2, 1, vec![grey(10), grey(20)]).unwrap();
+        let image = Image::from_vec(2, 1, vec![red_cast(10), red_cast(20)]).unwrap();
         let result = match_template(&image, &template, NCC).unwrap();
         assert!((result.pixel_at(0, 0).0 - 1.0).abs() < 1e-6);
     }
