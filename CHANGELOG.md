@@ -293,6 +293,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `dft` and `Spectrum::inverse` under `Radix2`, and
   `Error::PadTargetTooSmall { source, target }`, returned by `pad`. `Error`
   gained two variants, so an exhaustive `match` on it needs two arms.
+- **Borrowing a buffer with padded rows, `ImageRef::from_strided` and
+  `ImageRefMut::from_strided`.** `from_strided(width, height, row_stride,
+  data)` views a buffer whose rows sit further apart than the image is
+  wide, as cameras, array libraries and GPU buffers deliver them, without a
+  copy and without first viewing the buffer wider than the image. The last
+  row may end without its padding. A stride smaller than the width is an
+  `Error::InvalidParameter`, a buffer that ends before the last pixel an
+  `Error::LengthMismatch` with the length the view needs. The mutable twin
+  writes into a buffer another system owns and leaves the padding alone;
+  both are safe code.
+- **`image::RowStride<P>`**, the distance between rows in pixels of `P`.
+  `RowStride::bytes(n)?` converts a count in bytes, as OpenCV's `step`,
+  numpy's `strides` and Android's `rowStride` give it, and is an
+  `Error::InvalidParameter` when `n` does not hold whole pixels;
+  `RowStride::pixels(n)` takes one in pixels. The stride carries its pixel
+  type, so a stride converted for `Mono8` does not compile with a buffer of
+  `Mono16`.
+- `Requirement::MultipleOf(n)`, the rule a byte stride that does not hold
+  whole pixels breaks. `Requirement` is `#[non_exhaustive]`, so this is
+  not breaking.
 
 ### Changed
 
@@ -477,6 +497,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   systematic requires. Its section on vector quantities says how
   `ComplexF32` and `ComplexF64` map onto them, and the quick choice table of
   `guide::pixel_types` lists them.
+
+- **The camera-buffer guide names the stride.** *Padded rows* in
+  `guide::camera_buffers` takes a plane with `ImageRef::from_strided` and
+  `RowStride::bytes` in one call, where it viewed the buffer at its stride
+  as if that were the width and cropped the padding away. The paragraphs
+  that explained that route and its borrow trap are gone with it.
 
 ## [0.5.1] — 2026-09-22
 

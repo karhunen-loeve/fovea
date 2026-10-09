@@ -48,10 +48,14 @@ pub enum Error {
     ///
     /// Returned by [`Image::from_vec`](crate::image::sequential::Image::from_vec),
     /// [`ImageRef::new`](crate::image::sequential::ImageRef::new), and similar
-    /// constructors where `data.len() != width * height`.
+    /// constructors where `data.len() != width * height`, and by
+    /// [`ImageRef::from_strided`](crate::image::sequential::ImageRef::from_strided)
+    /// and its mutable twin where `data` is shorter than the view needs.
     LengthMismatch {
         /// The number of elements required (`width * height`, or
-        /// `width * height * pixel_size` for byte constructors).
+        /// `width * height * pixel_size` for byte constructors). For a
+        /// strided view, the least length it needs,
+        /// `(height - 1) * row_stride + width`.
         expected: usize,
         /// The number of elements actually provided.
         actual: usize,
@@ -499,6 +503,9 @@ pub enum Requirement {
     Zero,
     /// One of the listed counts.
     OneOf(&'static [usize]),
+    /// A whole multiple of the bound, such as a byte count that must hold
+    /// whole pixels.
+    MultipleOf(usize),
 }
 
 impl Requirement {
@@ -524,6 +531,7 @@ impl Requirement {
             Requirement::StrictlyOrdered => "must satisfy low < high",
             Requirement::Zero => "must be zero",
             Requirement::OneOf(_) => "must be one of",
+            Requirement::MultipleOf(_) => "must be a multiple of",
         }
     }
 }
@@ -540,7 +548,9 @@ impl PartialEq for Requirement {
             | (Ordered, Ordered)
             | (StrictlyOrdered, StrictlyOrdered)
             | (Zero, Zero) => true,
-            (AtLeast(a), AtLeast(b)) | (AtMost(a), AtMost(b)) => a == b,
+            (AtLeast(a), AtLeast(b)) | (AtMost(a), AtMost(b)) | (MultipleOf(a), MultipleOf(b)) => {
+                a == b
+            }
             (OneOf(a), OneOf(b)) => a == b,
             (InRange { min: a, max: b }, InRange { min: c, max: d }) => a == c && b == d,
             (OpenInterval { low: a, high: b }, OpenInterval { low: c, high: d }) => {
@@ -557,7 +567,9 @@ impl fmt::Display for Requirement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.text())?;
         match *self {
-            Requirement::AtLeast(bound) | Requirement::AtMost(bound) => write!(f, " {bound}"),
+            Requirement::AtLeast(bound)
+            | Requirement::AtMost(bound)
+            | Requirement::MultipleOf(bound) => write!(f, " {bound}"),
             Requirement::InRange { min, max } => write!(f, " {min}..={max}"),
             Requirement::OpenInterval { low, high } => write!(f, " {low} and {high}"),
             Requirement::OneOf(counts) => {
@@ -1042,6 +1054,10 @@ mod tests {
                 "palette length must be at most 256, got 257",
             ),
             (
+                ParameterError::new("row stride", Requirement::MultipleOf(2), Value::Usize(15)),
+                "row stride must be a multiple of 2, got 15",
+            ),
+            (
                 ParameterError::new(
                     "arc length",
                     Requirement::InRange { min: 9, max: 16 },
@@ -1116,6 +1132,8 @@ mod tests {
     fn requirement_equality_compares_bounds() {
         assert_eq!(Requirement::AtLeast(3), Requirement::AtLeast(3));
         assert_ne!(Requirement::AtLeast(3), Requirement::AtMost(3));
+        assert_eq!(Requirement::MultipleOf(2), Requirement::MultipleOf(2));
+        assert_ne!(Requirement::MultipleOf(2), Requirement::AtLeast(2));
         assert_ne!(
             Requirement::InRange { min: 9, max: 16 },
             Requirement::InRange { min: 9, max: 15 }

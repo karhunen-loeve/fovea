@@ -88,7 +88,7 @@ fn strided_roi_offset(
 use std::borrow::Cow;
 use std::fmt;
 
-use crate::error::Error;
+use crate::error::{Error, ParameterError, Requirement, Value};
 use crate::pixel::bayer::BayerPixel;
 use crate::pixel::{OriginInvariantPixel, PlainChannel, PlainPixel, ZeroablePixel};
 
@@ -619,6 +619,158 @@ where
 }
 
 // ───────────────────────────────────────────────────────────────────
+// RowStride — the distance between rows of a borrowed buffer
+// ───────────────────────────────────────────────────────────────────
+
+/// The distance from the start of one row to the start of the next in a
+/// buffer of `P`, counted in pixels of `P`.
+///
+/// Image data from another system often has rows further apart than the
+/// image is wide: a camera that aligns every row, an array library's
+/// strides, a GPU buffer's row pitch. [`ImageRef::from_strided`] and
+/// [`ImageRefMut::from_strided`] borrow such a buffer and take the
+/// distance as a `RowStride`, so its unit is stated where it is made.
+///
+/// Other systems mostly count the distance in bytes: OpenCV's `step`,
+/// numpy's `strides` and Android's `rowStride` all do. [`RowStride::bytes`]
+/// converts such a count; [`RowStride::pixels`] takes one that is in
+/// pixels already.
+///
+/// The stride carries the pixel type it counts, so a stride converted for
+/// one pixel type does not compile with a buffer of another:
+///
+/// ```compile_fail
+/// use fovea::image::{ImageRef, RowStride};
+/// use fovea::pixel::{Mono8, Mono16};
+///
+/// let pixels = [Mono16::new(0); 8];
+/// let stride: RowStride<Mono8> = RowStride::bytes(8).unwrap();
+/// let _ = ImageRef::from_strided(3, 2, stride, &pixels);
+/// ```
+///
+/// # Examples
+///
+/// ```
+/// use fovea::image::RowStride;
+/// use fovea::pixel::Mono16;
+///
+/// // 16 bytes between rows hold 8 pixels of two bytes each.
+/// let stride: RowStride<Mono16> = RowStride::bytes(16)?;
+/// assert_eq!(stride.get(), 8);
+///
+/// // 15 bytes do not hold whole pixels.
+/// assert!(RowStride::<Mono16>::bytes(15).is_err());
+/// # Ok::<(), fovea::Error>(())
+/// ```
+pub struct RowStride<P> {
+    pixels: usize,
+    pixel: PhantomData<fn() -> P>,
+}
+
+impl<P> RowStride<P> {
+    /// A stride of `n` pixels.
+    #[must_use]
+    pub const fn pixels(n: usize) -> Self {
+        Self {
+            pixels: n,
+            pixel: PhantomData,
+        }
+    }
+
+    /// The stride in pixels.
+    #[must_use]
+    pub const fn get(self) -> usize {
+        self.pixels
+    }
+}
+
+impl<P: PlainPixel> RowStride<P> {
+    /// A stride of `n` bytes, converted to pixels of `P`.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::InvalidParameter`] with [`Requirement::MultipleOf`] the size
+    /// of `P` when `n` bytes do not hold a whole number of pixels. Every row
+    /// after the first would then start inside a pixel, and the buffer
+    /// cannot be read as pixels of `P` at all.
+    pub fn bytes(n: usize) -> Result<Self, Error> {
+        let () = <P as PlainChannel>::_ASSERT_SIZE;
+        let size = <P as PlainChannel>::SIZE;
+        if n % size == 0 {
+            Ok(Self::pixels(n / size))
+        } else {
+            Err(
+                ParameterError::new("row stride", Requirement::MultipleOf(size), Value::Usize(n))
+                    .into(),
+            )
+        }
+    }
+}
+
+// Derives would require `P: Clone`, `P: Debug` and so on; the pixel type is
+// never stored.
+
+impl<P> Clone for RowStride<P> {
+    #[inline]
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+impl<P> Copy for RowStride<P> {}
+impl<P> PartialEq for RowStride<P> {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.pixels == other.pixels
+    }
+}
+impl<P> Eq for RowStride<P> {}
+impl<P> fmt::Debug for RowStride<P> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RowStride")
+            .field("pixels", &self.pixels)
+            .finish()
+    }
+}
+
+/// Checks a view of `width` × `height` pixels with rows `stride` apart
+/// against a buffer of `len` elements, for the `from_strided` constructors.
+///
+/// The rows must not overlap, so the stride is at least the width: a
+/// mutable view hands out rows and tiles as disjoint `&mut` slices. The
+/// buffer must reach the end of the last row, which may end there without
+/// its padding, as camera planes often do. The rule holds for a view zero
+/// pixels wide as well, so that every row it hands out, though empty,
+/// starts inside the buffer.
+fn check_strided(width: usize, height: usize, stride: usize, len: usize) -> Result<(), Error> {
+    if stride < width {
+        return Err(ParameterError::new(
+            "row stride",
+            Requirement::AtLeast(width),
+            Value::Usize(stride),
+        )
+        .into());
+    }
+    let required = if height == 0 {
+        0
+    } else {
+        (height - 1)
+            .checked_mul(stride)
+            .and_then(|rows| rows.checked_add(width))
+            .ok_or(Error::LengthMismatch {
+                expected: usize::MAX,
+                actual: len,
+            })?
+    };
+    if len < required {
+        return Err(Error::LengthMismatch {
+            expected: required,
+            actual: len,
+        });
+    }
+    Ok(())
+}
+
+// ───────────────────────────────────────────────────────────────────
 // ImageRef — borrowed, strided image view
 // ───────────────────────────────────────────────────────────────────
 
@@ -630,6 +782,10 @@ where
 /// **Contiguous full-frame view** (`stride == size.width`, `offset == 0`):
 /// constructed via [`ImageRef::new`]. This is the zero-copy camera-SDK
 /// entry point.
+///
+/// **Padded full-frame view** (`stride >= size.width`, `offset == 0`):
+/// constructed via [`ImageRef::from_strided`], for a buffer whose rows sit
+/// further apart than the image is wide.
 ///
 /// **Strided sub-region view** (produced by [`SubView::roi`]):
 /// `stride` equals the parent image width; `offset` locates the
@@ -663,6 +819,58 @@ impl<'a, T> ImageRef<'a, T> {
                 actual: data.len(),
             })
         }
+    }
+
+    /// A view of a buffer whose rows are `row_stride` apart: the first
+    /// `width` pixels of each row are the image, the rest is padding.
+    ///
+    /// Image data from another system usually arrives this way, from a
+    /// camera that aligns its rows, an array library or a GPU buffer. The
+    /// view borrows the buffer without a copy and keeps the stride it was
+    /// built with; a sub-view keeps it as well.
+    ///
+    /// The buffer must reach the last pixel of the last row. That row may
+    /// end there, without its padding, as camera planes often do; a longer
+    /// buffer is accepted, and what follows is not part of the view.
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::InvalidParameter`] with [`Requirement::AtLeast`] the width
+    ///   when `row_stride` is smaller than `width`, so that rows would
+    ///   overlap.
+    /// - [`Error::LengthMismatch`] when `data` ends before the last pixel of
+    ///   the last row; `expected` is the length the view needs,
+    ///   `(height - 1) * row_stride + width`, or `usize::MAX` when that
+    ///   overflows.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fovea::image::{ImageRef, ImageView, RasterImage, RowStride};
+    /// use fovea::pixel::Mono8;
+    ///
+    /// // Rows 4 pixels apart, 3 of them image and 1 padding. The last row
+    /// // ends without its padding.
+    /// let data = [1, 2, 3, 0, 4, 5, 6].map(Mono8::new);
+    /// let view = ImageRef::from_strided(3, 2, RowStride::pixels(4), &data)?;
+    ///
+    /// assert_eq!(view.pixel_at(0, 1), Mono8::new(4));
+    /// assert_eq!(view.row(1), &data[4..7]);
+    /// # Ok::<(), fovea::Error>(())
+    /// ```
+    pub fn from_strided(
+        width: usize,
+        height: usize,
+        row_stride: RowStride<T>,
+        data: &'a [T],
+    ) -> Result<Self, Error> {
+        check_strided(width, height, row_stride.get(), data.len())?;
+        Ok(Self {
+            size: Size::new(width, height),
+            stride: row_stride.get(),
+            offset: 0,
+            data,
+        })
     }
 
     /// General strided view. Checks that all pixel indices are in bounds.
@@ -823,6 +1031,62 @@ impl<'a, T> ImageRefMut<'a, T> {
                 actual: data.len(),
             })
         }
+    }
+
+    /// A mutable view of a buffer whose rows are `row_stride` apart: the
+    /// first `width` pixels of each row are the image, the rest is padding.
+    ///
+    /// The writing twin of [`ImageRef::from_strided`], with the same
+    /// arguments and the same checks, for writing into a buffer another
+    /// system owns: an array library's array, a GPU staging buffer, an
+    /// SDK's output frame. The padding is never written.
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::InvalidParameter`] with [`Requirement::AtLeast`] the width
+    ///   when `row_stride` is smaller than `width`, so that rows would
+    ///   overlap.
+    /// - [`Error::LengthMismatch`] when `data` ends before the last pixel of
+    ///   the last row; `expected` is the length the view needs,
+    ///   `(height - 1) * row_stride + width`, or `usize::MAX` when that
+    ///   overflows.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fovea::image::{ImageRefMut, RasterImageMut, RowStride};
+    /// use fovea::pixel::Mono8;
+    ///
+    /// // Rows 4 pixels apart, 3 of them image and 1 padding.
+    /// let mut data = [Mono8::new(0); 8];
+    /// let mut view = ImageRefMut::from_strided(3, 2, RowStride::pixels(4), &mut data)?;
+    /// for y in 0..2 {
+    ///     view.row_mut(y).fill(Mono8::new(9));
+    /// }
+    ///
+    /// // The image is filled, the padding at index 3 and 7 is not.
+    /// assert_eq!(data.map(|p| p.value()), [9, 9, 9, 0, 9, 9, 9, 0]);
+    /// # Ok::<(), fovea::Error>(())
+    /// ```
+    pub fn from_strided(
+        width: usize,
+        height: usize,
+        row_stride: RowStride<T>,
+        data: &'a mut [T],
+    ) -> Result<Self, Error> {
+        check_strided(width, height, row_stride.get(), data.len())?;
+        // The invariant the accessors rely on holds: `data` is a live,
+        // exclusive borrow of `data_len` elements for `'a`, every pixel of
+        // the view lies inside it (checked above), and the rows do not
+        // overlap, so rows and tiles handed out together are disjoint.
+        Ok(Self {
+            size: Size::new(width, height),
+            stride: row_stride.get(),
+            offset: 0,
+            data: data.as_mut_ptr(),
+            data_len: data.len(),
+            _marker: PhantomData,
+        })
     }
 
     /// General strided mutable view.
@@ -3201,6 +3465,168 @@ mod tests {
         assert_eq!(reconstructed.pixel_at(1, 0).value(), 200);
         assert_eq!(reconstructed.pixel_at(0, 1).value(), 300);
         assert_eq!(reconstructed.pixel_at(1, 1).value(), 400);
+    }
+
+    // ─── from_strided and RowStride ───────────────────────────────────
+
+    /// A 3×3 image, 1 to 9, in rows 4 pixels apart with a padding value of
+    /// 0xFF, and the padding of the last row cut off.
+    fn padded_3x3() -> Vec<u8> {
+        vec![1, 2, 3, 0xFF, 4, 5, 6, 0xFF, 7, 8, 9]
+    }
+
+    #[test]
+    fn from_strided_skips_the_padding() {
+        let data = padded_3x3();
+        let view = ImageRef::from_strided(3, 3, RowStride::pixels(4), &data).unwrap();
+        assert_eq!(view.size(), Size::new(3, 3));
+        assert!(!view.is_contiguous());
+        assert_eq!(view.row(0), &[1, 2, 3]);
+        assert_eq!(view.row(1), &[4, 5, 6]);
+        assert_eq!(view.row(2), &[7, 8, 9]);
+        assert_eq!(view.get(3, 0), None);
+    }
+
+    /// [`padded_3x3`] as `Mono8`, which a sub-view can crop.
+    fn padded_3x3_mono8() -> Vec<Mono8> {
+        padded_3x3().into_iter().map(Mono8::new).collect()
+    }
+
+    fn values(row: &[Mono8]) -> Vec<u8> {
+        row.iter().map(|p| p.value()).collect()
+    }
+
+    #[test]
+    fn from_strided_sub_view_keeps_the_stride() {
+        let data = padded_3x3_mono8();
+        let view = ImageRef::from_strided(3, 3, RowStride::pixels(4), &data).unwrap();
+        let sub = view.roi(Rectangle::new((1, 1), Size::new(2, 2))).unwrap();
+        assert_eq!(values(sub.row(0)), [5, 6]);
+        assert_eq!(values(sub.row(1)), [8, 9]);
+    }
+
+    #[test]
+    fn from_strided_accepts_a_longer_buffer() {
+        let mut data = padded_3x3();
+        data.extend([0xFF; 5]);
+        let view = ImageRef::from_strided(3, 3, RowStride::pixels(4), &data).unwrap();
+        assert_eq!(view.pixel_at(2, 2), 9);
+    }
+
+    #[test]
+    fn from_strided_rejects_a_buffer_that_ends_early() {
+        let mut data = padded_3x3();
+        let short = Some(Error::LengthMismatch {
+            expected: 11,
+            actual: 10,
+        });
+        assert_eq!(
+            ImageRef::from_strided(3, 3, RowStride::pixels(4), &data[..10]).err(),
+            short
+        );
+        assert_eq!(
+            ImageRefMut::from_strided(3, 3, RowStride::pixels(4), &mut data[..10]).err(),
+            short
+        );
+    }
+
+    #[test]
+    fn from_strided_rejects_overlapping_rows() {
+        let mut data = [0u8; 12];
+        let overlap = Some(Error::from(ParameterError::new(
+            "row stride",
+            Requirement::AtLeast(3),
+            Value::Usize(2),
+        )));
+        assert_eq!(
+            ImageRef::from_strided(3, 2, RowStride::pixels(2), &data).err(),
+            overlap
+        );
+        assert_eq!(
+            ImageRefMut::from_strided(3, 2, RowStride::pixels(2), &mut data).err(),
+            overlap
+        );
+    }
+
+    #[test]
+    fn from_strided_reports_an_overflowing_extent() {
+        let data = [0u8; 4];
+        assert_eq!(
+            ImageRef::from_strided(2, 3, RowStride::pixels(usize::MAX), &data).err(),
+            Some(Error::LengthMismatch {
+                expected: usize::MAX,
+                actual: 4,
+            })
+        );
+    }
+
+    #[test]
+    fn from_strided_empty_views() {
+        let data: [u8; 0] = [];
+        // No rows: nothing to reach.
+        let view = ImageRef::from_strided(3, 0, RowStride::pixels(5), &data).unwrap();
+        assert_eq!(view.size(), Size::new(3, 0));
+        // Rows without pixels still start inside the buffer.
+        let view = ImageRef::from_strided(0, 4, RowStride::pixels(0), &data).unwrap();
+        assert_eq!(view.row(3), &[] as &[u8]);
+        assert_eq!(
+            ImageRef::from_strided(0, 4, RowStride::pixels(5), &data).err(),
+            Some(Error::LengthMismatch {
+                expected: 15,
+                actual: 0,
+            })
+        );
+    }
+
+    #[test]
+    fn from_strided_mut_writes_the_image_and_not_the_padding() {
+        let mut data = padded_3x3();
+        let mut view = ImageRefMut::from_strided(3, 3, RowStride::pixels(4), &mut data).unwrap();
+        for y in 0..3 {
+            for x in 0..3 {
+                *view.pixel_at_mut(x, y) *= 10;
+            }
+        }
+        assert_eq!(view.row(2), &[70, 80, 90]);
+        assert_eq!(data, [10, 20, 30, 0xFF, 40, 50, 60, 0xFF, 70, 80, 90]);
+    }
+
+    #[test]
+    fn from_strided_mut_sub_view_writes_inside_its_rectangle() {
+        let mut data = padded_3x3_mono8();
+        let mut view = ImageRefMut::from_strided(3, 3, RowStride::pixels(4), &mut data).unwrap();
+        let mut sub = view
+            .roi_mut(Rectangle::new((1, 1), Size::new(2, 2)))
+            .unwrap();
+        for y in 0..2 {
+            sub.row_mut(y).fill(Mono8::new(0));
+        }
+        assert_eq!(values(&data), [1, 2, 3, 0xFF, 4, 0, 0, 0xFF, 7, 0, 0]);
+    }
+
+    #[test]
+    fn row_stride_counts_pixels_of_its_type() {
+        let stride: RowStride<Mono16> = RowStride::bytes(16).unwrap();
+        assert_eq!(stride, RowStride::pixels(8));
+        assert_eq!(RowStride::<Rgb8>::bytes(12).unwrap().get(), 4);
+        assert_eq!(
+            RowStride::<Mono16>::bytes(15).err(),
+            Some(Error::from(ParameterError::new(
+                "row stride",
+                Requirement::MultipleOf(2),
+                Value::Usize(15),
+            )))
+        );
+        assert_eq!(format!("{stride:?}"), "RowStride { pixels: 8 }");
+    }
+
+    #[test]
+    fn from_strided_reads_a_byte_strided_mono16_plane() {
+        // Rows 10 bytes apart: 4 pixels of image and 2 bytes of padding.
+        let data: Vec<Mono16> = (0..14).map(Mono16::new).collect();
+        let view = ImageRef::from_strided(4, 3, RowStride::bytes(10).unwrap(), &data).unwrap();
+        assert_eq!(view.row(1), &data[5..9]);
+        assert_eq!(view.pixel_at(3, 2), Mono16::new(13));
     }
 
     // ───────────────────────────────────────────────────────────────────

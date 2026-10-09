@@ -70,7 +70,7 @@ pub use separable::{
 };
 pub use sequential::{
     ContiguousImage, ContiguousImageMut, Image, ImageArray, ImageRef, ImageRefMut, PlainImage,
-    PlainImageMut,
+    PlainImageMut, RowStride,
 };
 pub use tiles::{
     BayerSubView, BayerSubViewMut, EnumeratePositions, IntoTilesMut, SlidingWindow,
