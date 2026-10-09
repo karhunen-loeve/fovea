@@ -36,6 +36,54 @@
 //! let edges: BinaryImage = hysteresis_threshold(&thin, thresholds);
 //! ```
 //!
+//! ## In a loop
+//!
+//! [`canny`] allocates its working images on every call, the Gaussian
+//! blur's working set among them. A caller who runs it over a stream of
+//! frames of one size can keep the blur's working set across frames by
+//! building the pipeline by hand and blurring through a
+//! [`SeparableScratch`](crate::transform::SeparableScratch) into an image
+//! they keep: after the first frame the blur allocates nothing. The other
+//! stages still allocate their outputs. The mask is the one `canny` gives.
+//!
+//! ```
+//! use fovea::analyze::edge::canny;
+//! use fovea::analyze::threshold::{HysteresisThresholds, hysteresis_threshold};
+//! use fovea::border::Clamp;
+//! use fovea::image::{BinaryImage, ContiguousImage, Image};
+//! use fovea::pixel::MonoF32;
+//! use fovea::sigma;
+//! use fovea::transform::{
+//!     SeparableScratch, gradient_direction, gradient_magnitude, non_maximum_suppression,
+//!     scharr_x, scharr_y,
+//! };
+//!
+//! let thresholds = HysteresisThresholds::try_new(0.05_f32, 0.15).unwrap();
+//! let sigma = sigma!(1.4);
+//! let mut scratch = SeparableScratch::new();
+//! let mut blurred = Image::<MonoF32>::zero(64, 48);
+//!
+//! for shift in 0..3 {
+//!     // A frame of the stream: a bright square that moves to the right.
+//!     let frame = Image::generate(64, 48, |x, y| {
+//!         let inside = (16 + shift..40 + shift).contains(&x) && (12..36).contains(&y);
+//!         MonoF32::new(if inside { 0.8 } else { 0.2 })
+//!     });
+//!
+//!     scratch.gaussian_blur_into(&frame, sigma, &Clamp, &mut blurred);
+//!     let gx = scharr_x(&blurred, &Clamp);
+//!     let gy = scharr_y(&blurred, &Clamp);
+//!     let mag = gradient_magnitude(&gx, &gy).unwrap();
+//!     let dir = gradient_direction(&gx, &gy).unwrap();
+//!     let thin = non_maximum_suppression(&mag, &dir).unwrap();
+//!     let edges: BinaryImage = hysteresis_threshold(&thin, thresholds);
+//!
+//!     // The square's outline is found, and it is the mask `canny` gives.
+//!     assert!(edges.as_slice().iter().any(|&on| on));
+//!     assert!(edges == canny(&frame, thresholds, sigma));
+//! }
+//! ```
+//!
 //! ## From a mask to positions
 //!
 //! [`canny`] answers "which pixels are edge pixels". A measurement usually

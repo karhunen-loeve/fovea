@@ -505,6 +505,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ComplexF32` and `ComplexF64` map onto them, and the quick choice table of
   `guide::pixel_types` lists them.
 
+- The `analyze::edge` module documentation shows Canny in a loop over
+  frames: built from its public stages, with the blur through a
+  `SeparableScratch` kept across frames, so the blur allocates nothing
+  after the first frame. The mask is the one `canny` gives.
+
 - **The camera-buffer guide names the stride.** *Padded rows* in
   `guide::camera_buffers` takes a plane with `ImageRef::from_strided` and
   `RowStride::bytes` in one call, where it viewed the buffer at its stride
