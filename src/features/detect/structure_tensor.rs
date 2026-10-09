@@ -11,7 +11,7 @@ use crate::error::{Error, ParameterError, Requirement, Value};
 use crate::features::Corner;
 use crate::image::{Decimated, Image, ImageView, RasterImage, RasterImageMut};
 use crate::pixel::{FromLinear, LinearPixel, SingleChannel, ZeroablePixel};
-use crate::transform::{PixelMultiply, combine_images, gaussian_blur, sobel_x, sobel_y};
+use crate::transform::{PixelMultiply, SeparableScratch, combine_images, sobel_x, sobel_y};
 use crate::{Sigma, Size};
 
 use super::peaks::{NmsRadius, corner_peaks, lift_peaks, scan_peaks};
@@ -385,7 +385,8 @@ where
     /// by a Gaussian of standard deviation `window`.
     ///
     /// The two stages, in order: the pixel-wise products `Gx·Gx`, `Gx·Gy`,
-    /// `Gy·Gy`, then a [`gaussian_blur`] of each with a [`Clamp`] border.
+    /// `Gy·Gy`, then a [`gaussian_blur`](crate::transform::gaussian_blur) of
+    /// each with a [`Clamp`] border.
     ///
     /// The window is what makes the tensor *have* two eigenvalues: without
     /// it every `M` is the outer product of a single gradient vector, whose
@@ -409,8 +410,9 @@ where
     /// # Panics
     ///
     /// Panics if `window`'s derived kernel radius exceeds
-    /// [`MAX_RADIUS`](crate::image::MAX_RADIUS) (via [`gaussian_blur`]),
-    /// testable up front with
+    /// [`MAX_RADIUS`](crate::image::MAX_RADIUS) (via
+    /// [`gaussian_blur`](crate::transform::gaussian_blur)), testable up front
+    /// with
     /// [`gaussian_kernel_size`](crate::image::gaussian_kernel_size).
     pub fn from_gradients<IX, IY>(gx: &IX, gy: &IY, window: Sigma) -> Result<Self, Error>
     where
@@ -423,10 +425,18 @@ where
         let xx = combine_images(gx, gx, PixelMultiply).expect("gx shares its own size");
         let yy = combine_images(gy, gy, PixelMultiply).expect("gy shares its own size");
 
+        // The three blurs are the same size, so they share one working set:
+        // the first sizes it, the other two allocate only their outputs.
+        let mut scratch = SeparableScratch::new();
+        let mut blur = |product: &Image<P>| {
+            let mut out = Image::<P>::zero(product.width(), product.height());
+            scratch.gaussian_blur_into(product, window, &Clamp, &mut out);
+            out
+        };
         Ok(Self {
-            xx: gaussian_blur(&xx, window, &Clamp),
-            xy: gaussian_blur(&xy, window, &Clamp),
-            yy: gaussian_blur(&yy, window, &Clamp),
+            xx: blur(&xx),
+            xy: blur(&xy),
+            yy: blur(&yy),
         })
     }
 }
@@ -672,7 +682,8 @@ impl CornerParams {
 /// # Panics
 ///
 /// Panics if `window`'s derived kernel radius exceeds
-/// [`MAX_RADIUS`](crate::image::MAX_RADIUS) (via [`gaussian_blur`]).
+/// [`MAX_RADIUS`](crate::image::MAX_RADIUS) (via
+/// [`gaussian_blur`](crate::transform::gaussian_blur)).
 ///
 /// # Example
 ///
@@ -766,7 +777,8 @@ where
 /// # Panics
 ///
 /// Panics if the window σ's derived kernel radius exceeds
-/// [`MAX_RADIUS`](crate::image::MAX_RADIUS) (via [`gaussian_blur`]).
+/// [`MAX_RADIUS`](crate::image::MAX_RADIUS) (via
+/// [`gaussian_blur`](crate::transform::gaussian_blur)).
 #[must_use]
 pub fn detect_corners<I, M, P, Acc>(image: &I, method: M, params: CornerParams) -> Vec<Corner>
 where
@@ -844,7 +856,8 @@ where
 /// # Panics
 ///
 /// Panics if the window σ's derived kernel radius exceeds
-/// [`MAX_RADIUS`](crate::image::MAX_RADIUS) (via [`gaussian_blur`]).
+/// [`MAX_RADIUS`](crate::image::MAX_RADIUS) (via
+/// [`gaussian_blur`](crate::transform::gaussian_blur)).
 #[must_use]
 pub fn detect_corners_in_level<L, M, P, Acc>(
     level: &L,
@@ -885,6 +898,33 @@ mod tests {
     use crate::pixel::{Mono8, Mono16, MonoF32, MonoF64};
     use crate::transform::{Gaussian, PyramidMethod, pyr_down, rotate_90};
     use crate::{pixel_distance, sigma};
+
+    #[test]
+    fn the_shared_working_set_blurs_bit_for_bit_like_the_free_blur() {
+        // The three windowed products must be exactly what `gaussian_blur`
+        // of each product gives, the path the tensor took before the blurs
+        // shared one scratch.
+        let gx: Image<MonoF32> = Image::generate(23, 17, |x, y| {
+            MonoF32::new(((x * 37 + y * 11) % 29) as f32 * 0.37)
+        });
+        let gy: Image<MonoF32> = Image::generate(23, 17, |x, y| {
+            MonoF32::new(((x * 13 + y * 31) % 23) as f32 * -0.41)
+        });
+        let window = sigma!(1.3);
+        let tensor = StructureTensor::from_gradients(&gx, &gy, window).unwrap();
+
+        let product = |a: &Image<MonoF32>, b: &Image<MonoF32>| -> Image<MonoF32> {
+            let p = combine_images(a, b, PixelMultiply).unwrap();
+            crate::transform::gaussian_blur(&p, window, &Clamp)
+        };
+        use crate::image::ContiguousImage;
+        let bits = |img: &Image<MonoF32>| -> Vec<u32> {
+            img.as_slice().iter().map(|p| p.value().to_bits()).collect()
+        };
+        assert_eq!(bits(tensor.xx()), bits(&product(&gx, &gx)));
+        assert_eq!(bits(tensor.xy()), bits(&product(&gx, &gy)));
+        assert_eq!(bits(tensor.yy()), bits(&product(&gy, &gy)));
+    }
 
     // ── Fixtures ────────────────────────────────────────────────────────
 

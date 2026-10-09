@@ -19,11 +19,12 @@
 use crate::border::Mirror;
 use crate::error::Error;
 use crate::image::{
-    Dyadic, Image, ImageView, ImageViewMut, LevelChain, OriginOffset, PlacedImage, PlacedPyramid,
-    Pyramid, PyramidLevel, RasterImage, ScaledImage, ScaledPyramid, SeparableKernel,
+    Dyadic, Image, ImageRef, ImageRefMut, ImageView, ImageViewMut, LevelChain, OriginOffset,
+    PlacedImage, PlacedPyramid, Pyramid, PyramidLevel, RasterImage, ScaledImage, ScaledPyramid,
+    SeparableKernel,
 };
 use crate::pixel::{FromLinear, LinearPixel, LinearSpace, ZeroablePixel};
-use crate::transform::convolve_separable::convolve_separable;
+use crate::transform::convolve_separable::{SeparableScratch, convolve_separable};
 use crate::{PixelDistance, Sigma, Size};
 
 /// The `pyr_up` interpolation kernel: the binomial `[1, 4, 6, 4, 1] / 8`
@@ -89,10 +90,44 @@ where
         + LinearPixel<f32, Accumulator = Acc>
         + std::ops::Add<Output = Acc>,
 {
-    let blurred: Image<P> = convolve_separable(image, &SeparableKernel::gaussian_5(), &Mirror);
-    let out_width = image.width().div_ceil(2);
-    let out_height = image.height().div_ceil(2);
-    Image::generate(out_width, out_height, |x, y| blurred.pixel_at(2 * x, 2 * y))
+    pyr_down_with(image, &mut SeparableScratch::new(), &mut Vec::new())
+}
+
+/// [`pyr_down`] with its working set supplied: the blur's scratch and the
+/// buffer for the full-size blurred image. A pyramid passes the same two to
+/// every level, so only the first level allocates them.
+fn pyr_down_with<I, P, Acc>(
+    image: &I,
+    scratch: &mut SeparableScratch<Acc>,
+    blurred: &mut Vec<P>,
+) -> Image<P>
+where
+    I: RasterImage<Pixel = P>,
+    P: LinearPixel<f32, Accumulator = Acc> + LinearSpace + ZeroablePixel + FromLinear<Acc>,
+    Acc: Copy
+        + Default
+        + ZeroablePixel
+        + LinearPixel<f32, Accumulator = Acc>
+        + std::ops::Add<Output = Acc>,
+{
+    let Size { width, height } = image.size();
+    let area = width
+        .checked_mul(height)
+        .expect("an image's area fits usize");
+    // Grow to the high-water mark; the blur writes every pixel it views, so
+    // nothing left from a larger level survives into this one.
+    if blurred.len() < area {
+        blurred.resize(area, P::zero());
+    }
+    let mut view = ImageRefMut::new(width, height, &mut blurred[..area])
+        .expect("the blurred view is exactly width * height");
+    scratch.convolve_separable_into(image, &SeparableKernel::gaussian_5(), &Mirror, &mut view);
+
+    let blurred = ImageRef::new(width, height, &blurred[..area])
+        .expect("the blurred view is exactly width * height");
+    Image::generate(width.div_ceil(2), height.div_ceil(2), |x, y| {
+        blurred.pixel_at(2 * x, 2 * y)
+    })
 }
 
 /// Upsamples the image by a factor of 2 to an explicit target size.
@@ -550,6 +585,10 @@ where
             .expect("rows fill width * height exactly")
     };
     let mut levels = vec![base];
+    // One working set for every level: the first sizes it, and the smaller
+    // levels after it allocate only their own pixels.
+    let mut scratch = SeparableScratch::new();
+    let mut blurred = Vec::new();
     while levels.len() < resolved {
         let prev = levels.last().expect("levels start non-empty");
         let Size { width, height } = prev.size();
@@ -558,7 +597,7 @@ where
         if width <= 1 && height <= 1 || width == 0 || height == 0 {
             break;
         }
-        let next = pyr_down(prev);
+        let next = pyr_down_with(prev, &mut scratch, &mut blurred);
         levels.push(next);
     }
     levels
@@ -573,6 +612,35 @@ mod tests {
     use crate::image::{Decimated, PyramidLevel, ScaleLevel};
     use crate::pixel::{Mono8, MonoF32};
     use crate::{pixel_distance, sigma};
+
+    #[test]
+    fn levels_sharing_a_working_set_match_the_allocating_blur_bit_for_bit() {
+        // Each level must be exactly the allocating blur of its parent,
+        // decimated: the path every level took before the levels shared one
+        // scratch and one blurred buffer. Odd sizes, so a smaller level
+        // reuses a buffer a larger one left behind.
+        let src = Image::generate(37, 29, |x, y| {
+            MonoF32::new(((x * 31 + y * 17 + x * y) % 41) as f32 * 0.29)
+        });
+        let pyramid: PlacedPyramid<MonoF32> = Gaussian.build(&src, 5);
+        assert_eq!(pyramid.depth(), 5);
+
+        use crate::image::ContiguousImage;
+        let bits = |img: &Image<MonoF32>| -> Vec<u32> {
+            img.as_slice().iter().map(|p| p.value().to_bits()).collect()
+        };
+        let mut expected = src.clone();
+        for level in pyramid.iter().skip(1) {
+            let blurred: Image<MonoF32> =
+                convolve_separable(&expected, &SeparableKernel::gaussian_5(), &Mirror);
+            expected = Image::generate(
+                expected.width().div_ceil(2),
+                expected.height().div_ceil(2),
+                |x, y| blurred.pixel_at(2 * x, 2 * y),
+            );
+            assert_eq!(bits(level.image()), bits(&expected));
+        }
+    }
 
     // ── pyr_down: size contract ─────────────────────────────────────────
 

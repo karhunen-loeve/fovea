@@ -475,6 +475,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   1024 × 1024 and 524 MiB/s at 4096 × 4096, against 428 MiB/s, 211 MiB/s
   and 80 MiB/s before. The output is unchanged, pinned by the existing
   tests.
+- `StructureTensor::from_gradients` runs its three same-size blurs through
+  one `SeparableScratch`, and a Gaussian pyramid passes one scratch and one
+  blurred buffer to every level. On a 64 × 48 `MonoF32` pair the tensor
+  allocates 10 times per call instead of 21, and each pyramid level after
+  the first allocates only its own pixels, once instead of 7 times;
+  `tests/allocation.rs` asserts both. The results are bit for bit the
+  same, pinned against the allocating blur. No wall-clock claim is made.
 
 ### Documentation
 

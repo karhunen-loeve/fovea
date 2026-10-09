@@ -14,10 +14,13 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
 use fovea::border::{Clamp, Skip};
-use fovea::image::{Image, SeparableKernel};
+use fovea::features::detect::StructureTensor;
+use fovea::image::{Image, PlacedPyramid, SeparableKernel};
 use fovea::pixel::{Mono8, MonoF32};
 use fovea::sigma;
-use fovea::transform::{SeparableScratch, gaussian_blur_into};
+use fovea::transform::{
+    Gaussian, PixelMultiply, PyramidMethod, SeparableScratch, combine_images, gaussian_blur_into,
+};
 
 thread_local! {
     /// Allocations (including reallocations) made by this thread.
@@ -171,4 +174,45 @@ fn separable_convolution_through_scratch_allocates_nothing_after_warmup() {
         allocations, 0,
         "a second identical separable convolution must not allocate",
     );
+}
+
+// ─── In-crate callers that blur several times per call ─────────────────────
+
+#[test]
+fn structure_tensor_blurs_share_one_working_set() {
+    let gx: Image<MonoF32> =
+        Image::generate(64, 48, |x, y| MonoF32::new(((x * 7 + y * 3) % 11) as f32));
+    let gy: Image<MonoF32> =
+        Image::generate(64, 48, |x, y| MonoF32::new(((x * 5 + y * 9) % 13) as f32));
+    let window = sigma!(1.5);
+    // Warm-up, so nothing initialised once per process is counted below.
+    let _ = StructureTensor::from_gradients(&gx, &gy, window).unwrap();
+
+    let (_, product) = allocations_of(|| combine_images(&gx, &gy, PixelMultiply).unwrap());
+    let (_, output) = allocations_of(|| Image::<MonoF32>::zero(64, 48));
+    let (_, first_blur) = allocations_of(|| {
+        let mut scratch = SeparableScratch::new();
+        let mut out = Image::<MonoF32>::zero(64, 48);
+        scratch.gaussian_blur_into(&gx, window, &Clamp, &mut out);
+        out
+    });
+    let (_, tensor) = allocations_of(|| StructureTensor::from_gradients(&gx, &gy, window).unwrap());
+
+    // Three products, then the first blur with its output and the working
+    // set it sizes, then the other two blurs with nothing but their outputs.
+    assert_eq!(tensor, 3 * product + first_blur + 2 * output);
+}
+
+#[test]
+fn a_further_pyramid_level_allocates_only_its_pixels() {
+    let img = Image::fill(64, 64, MonoF32::new(0.5));
+    let _: PlacedPyramid<MonoF32> = Gaussian.build(&img, 4);
+
+    let (_, three) = allocations_of(|| -> PlacedPyramid<MonoF32> { Gaussian.build(&img, 3) });
+    let (_, four) = allocations_of(|| -> PlacedPyramid<MonoF32> { Gaussian.build(&img, 4) });
+
+    // Depth 3 and 4 hold their levels in a vector of the same capacity, so
+    // the difference is the fourth level alone: its pixels, and no blur
+    // working set, which the levels share.
+    assert_eq!(four - three, 1);
 }
