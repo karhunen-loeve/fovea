@@ -22,6 +22,15 @@
 //! inverse is the exact inverse, so the round trip gives back the image
 //! without a factor.
 //!
+//! ## Phase correlation
+//!
+//! [`phase_correlate`](crate::frequency::phase_correlate) measures where
+//! the content of one image lies relative to another, to a fraction of a
+//! pixel, from the phase of their cross-power spectrum, so that brightness
+//! and contrast barely move the result. Its documentation describes how to
+//! choose the one parameter it needs, the radius of the weight on the
+//! frequencies.
+//!
 //! ## Choosing a method
 //!
 //! | Method | Sizes | Returns |
@@ -65,6 +74,7 @@
 //! ```
 
 mod convolve;
+mod correlate;
 mod engine;
 mod filters;
 mod method;
@@ -74,6 +84,7 @@ mod testing;
 mod units;
 
 pub use convolve::convolve;
+pub use correlate::{CorrelationRadius, PhaseCorrelation, PhaseReference, phase_correlate};
 pub use filters::{
     Band, BandPass, BandStop, Butterworth, Gaussian, HighPass, Ideal, LowPass, Notch, Profile,
     Radius, TransferFunction,

@@ -263,6 +263,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   15 × 15 on 512 × 512, this one from about 21 × 21), that one NaN spreads
   to every output pixel, and that its accuracy is relative to the whole
   image. `transform::convolve` is unchanged.
+- **Phase correlation, `frequency::phase_correlate(&reference, &moving,
+  radius, method)`**, the translation between two images of one size.
+  `Ok(Some(found))` carries `found.shift()`, a `Vector<Pixels>` saying
+  where the content of `moving` lies, so a point `p` of the reference is
+  at `p + shift`, and `found.peak()`, 1 for identical images. The phase
+  of the cross-power spectrum is weighted by a Gaussian of a mandatory
+  radius, a `CorrelationRadius` strictly between 0 and 0.5 cycles per
+  pixel (`correlation_radius!(0.06)` for a literal, so a size in pixels
+  written by mistake fails to build), and its peak is located by a
+  three-point Gaussian fit. Both images are windowed by Hann, and a
+  second pass windows them over the part they share. The documentation
+  gives the accuracy measured by radius and sharpness of the images,
+  0.03 as the start for an unknown image, and a recipe to check a radius
+  on one's own images. A radius not exceeding 3 frequency bins of the
+  shorter side is an `Error::InvalidParameter` naming the smallest one
+  allowed, images of different sizes an `Error::SizeMismatch`, and an
+  image without structure or with a NaN gives `Ok(None)`.
+  `PhaseReference` prepares one reference for many images.
 - **`transform::pad`**, which enlarges an image and fills the new pixels by
   a border policy: `pad(&img, Size::new(2048, 1024), &Mirror)?` to a target
   size with the image at the origin, or `pad(&img, Margins { left, right,
