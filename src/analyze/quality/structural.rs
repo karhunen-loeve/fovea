@@ -6,6 +6,7 @@
 //! the [module docs](super) for the full-scale value both need.
 
 use crate::error::{ParameterError, Requirement, Value};
+use crate::geometry::Pixels;
 use crate::image::{
     Image, ImageView, ImageViewMut, MAX_RADIUS, RasterImage, RasterImageMut, gaussian_kernel_1d,
     gaussian_kernel_size,
@@ -262,7 +263,7 @@ impl SsimParams {
 pub fn ssim<A, B, P>(a: &A, b: &B, params: SsimParams) -> Result<f64, Error>
 where
     A: RasterImage<Pixel = P>,
-    B: RasterImage<Pixel = P>,
+    B: RasterImage<Pixel = P, Space = A::Space>,
     P: SingleChannel + ChannelwiseMath,
     P::Channel: StatisticsChannel,
 {
@@ -379,10 +380,14 @@ where
 /// assert!(clean_score > 0.99, "{clean_score}");
 /// # Ok::<(), fovea::Error>(())
 /// ```
-pub fn ssim_map<A, B, P>(a: &A, b: &B, params: SsimParams) -> Result<Image<MonoF64>, Error>
+pub fn ssim_map<A, B, P>(
+    a: &A,
+    b: &B,
+    params: SsimParams,
+) -> Result<Image<MonoF64, A::Space>, Error>
 where
     A: RasterImage<Pixel = P>,
-    B: RasterImage<Pixel = P>,
+    B: RasterImage<Pixel = P, Space = A::Space>,
     P: SingleChannel + ChannelwiseMath,
     P::Channel: StatisticsChannel,
 {
@@ -415,7 +420,7 @@ where
 
     let mut plane_a = centered_plane(a, offset_a);
     let mut plane_b = centered_plane(b, offset_b);
-    let mut plane_ab = Image::<MonoF64>::zero(a.width(), a.height());
+    let mut plane_ab = Image::<MonoF64, Pixels>::zero(a.width(), a.height());
     for y in 0..plane_ab.height() {
         for x in 0..plane_ab.width() {
             let product = plane_a.pixel_at(x, y).0 * plane_b.pixel_at(x, y).0;
@@ -435,8 +440,8 @@ where
     let kernel = gaussian_kernel_1d(params.sigma, SsimParams::TRUNCATE);
     let valid = Size::new(a.width() + 1 - kernel.len(), a.height() + 1 - kernel.len());
     let mut scratch = SeparableScratch::new();
-    let mut blur = |plane: &Image<MonoF64>| {
-        let mut moment = Image::<MonoF64>::zero(valid.width, valid.height);
+    let mut blur = |plane: &Image<MonoF64, Pixels>| {
+        let mut moment = Image::<MonoF64, Pixels>::zero(valid.width, valid.height);
         scratch.convolve_separable_into(plane, &kernel, &Skip, &mut moment);
         moment
     };
@@ -458,7 +463,7 @@ where
     let c1 = (params.k1 * peak) * (params.k1 * peak);
     let c2 = (params.k2 * peak) * (params.k2 * peak);
 
-    let mut map = Image::<MonoF64>::zero(mean_a.width(), mean_a.height());
+    let mut map = Image::<MonoF64, Pixels>::zero(mean_a.width(), mean_a.height());
     for y in 0..map.height() {
         for x in 0..map.width() {
             // Window means of the centred planes; the true luminances add the
@@ -499,7 +504,7 @@ where
         }
     }
 
-    Ok(map)
+    Ok(map.into_space())
 }
 
 /// The image's mean channel value if it is usable as a centring constant, and
@@ -520,13 +525,13 @@ where
 }
 
 /// The image's single channel widened to `f64`, with `offset` subtracted.
-fn centered_plane<I, P>(image: &I, offset: f64) -> Image<MonoF64>
+fn centered_plane<I, P>(image: &I, offset: f64) -> Image<MonoF64, Pixels>
 where
     I: RasterImage<Pixel = P>,
     P: SingleChannel,
     P::Channel: StatisticsChannel,
 {
-    let mut plane = Image::<MonoF64>::zero(image.width(), image.height());
+    let mut plane = Image::<MonoF64, Pixels>::zero(image.width(), image.height());
     for y in 0..image.height() {
         let source = image.row(y);
         let destination = plane.row_mut(y);
@@ -538,7 +543,7 @@ where
 }
 
 /// Squares every value of `plane` in place.
-fn square_in_place(plane: &mut Image<MonoF64>) {
+fn square_in_place(plane: &mut Image<MonoF64, Pixels>) {
     for y in 0..plane.height() {
         for cell in plane.row_mut(y) {
             cell.0 *= cell.0;

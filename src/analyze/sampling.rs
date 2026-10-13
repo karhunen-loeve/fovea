@@ -11,14 +11,15 @@
 //! `(2, 0)` and `(3, 0)`.
 
 use crate::border::BorderPolicy;
+use crate::geometry::Point;
 use crate::image::ImageView;
 use crate::pixel::{LinearPixel, LinearSpace};
 use crate::transform::{InterpolationKernel, MAX_SAMPLE_RADIUS};
-use crate::{Coordinate, CoordinateF64, Rectangle, SignedCoordinate, Size};
+use crate::{Coordinate, Rectangle, SignedCoordinate, Size};
 
 /// The largest `|position|` sampled. Beyond it, `f64` no longer separates
 /// neighbouring pixels, and tap indices could overflow `isize`.
-const MAX_POSITION: f64 = (1u64 << 52) as f64;
+pub(crate) const MAX_POSITION: f64 = (1u64 << 52) as f64;
 
 /// The taps of one axis: the first tap's index and up to
 /// `2 · MAX_SAMPLE_RADIUS` normalised weights.
@@ -106,7 +107,7 @@ impl AxisTaps {
 /// # Example
 ///
 /// ```
-/// use fovea::CoordinateF64;
+/// use fovea::{Pixels, Point};
 /// use fovea::analyze::sampling::sample;
 /// use fovea::border::Skip;
 /// use fovea::image::Image;
@@ -116,22 +117,22 @@ impl AxisTaps {
 /// // A ramp: pixel x holds 10 · x.
 /// let ramp = Image::generate(8, 8, |x, _| Mono8::new(10 * x as u8));
 ///
-/// let v = sample(&ramp, CoordinateF64::new(2.5, 3.0), Bilinear, &Skip);
+/// let v = sample(&ramp, Point::new(2.5, 3.0), Bilinear, &Skip);
 /// assert_eq!(v, Some(MonoF32::new(25.0)));
 ///
 /// // Catmull-Rom reproduces a ramp exactly, too, and reads two taps each side.
-/// let v = sample(&ramp, CoordinateF64::new(4.25, 3.0), CatmullRom, &Skip).unwrap();
+/// let v = sample(&ramp, Point::new(4.25, 3.0), CatmullRom, &Skip).unwrap();
 /// assert!((v.value() - 42.5).abs() < 1e-4);
 ///
 /// // Too close to the edge for Catmull-Rom's taps: no value rather than a guess.
-/// assert_eq!(sample(&ramp, CoordinateF64::new(0.5, 3.0), CatmullRom, &Skip), None);
+/// assert_eq!(sample(&ramp, Point::new(0.5, 3.0), CatmullRom, &Skip), None);
 /// ```
 ///
 /// A Bayer mosaic is not in a linear space, so interpolating it does not
 /// compile:
 ///
 /// ```compile_fail
-/// use fovea::CoordinateF64;
+/// use fovea::{Pixels, Point};
 /// use fovea::analyze::sampling::sample;
 /// use fovea::border::Skip;
 /// use fovea::image::Image;
@@ -140,13 +141,29 @@ impl AxisTaps {
 ///
 /// let raw = Image::fill(8, 8, BayerRggb8::new(100));
 /// // ERROR: `BayerRggb8: LinearSpace` is not satisfied.
-/// let _ = sample(&raw, CoordinateF64::new(2.5, 2.5), Bilinear, &Skip);
+/// let _ = sample(&raw, Point::new(2.5, 2.5), Bilinear, &Skip);
+/// ```
+///
+/// The position lies in the image's space, so a point of the ideal image
+/// does not sample a camera image:
+///
+/// ```compile_fail
+/// use fovea::{IdealPixels, Point};
+/// use fovea::analyze::sampling::sample;
+/// use fovea::border::Skip;
+/// use fovea::image::Image;
+/// use fovea::pixel::{Mono8, MonoF32};
+/// use fovea::transform::Bilinear;
+///
+/// let camera = Image::fill(8, 8, Mono8::new(100));
+/// let ideal: Point<IdealPixels> = Point::new(2.5, 2.5);
+/// let _: Option<MonoF32> = sample(&camera, ideal, Bilinear, &Skip);
 /// ```
 ///
 /// A kernel wider than [`MAX_SAMPLE_RADIUS`] taps a side fails to build:
 ///
 /// ```compile_fail
-/// use fovea::CoordinateF64;
+/// use fovea::{Pixels, Point};
 /// use fovea::analyze::sampling::sample;
 /// use fovea::border::Clamp;
 /// use fovea::image::Image;
@@ -155,9 +172,9 @@ impl AxisTaps {
 ///
 /// let img = Image::fill(32, 32, MonoF32::new(1.0));
 /// // ERROR: the kernel is wider than the point sampler's buffer.
-/// let _ = sample(&img, CoordinateF64::new(8.5, 8.5), Lanczos::<9>, &Clamp);
+/// let _ = sample(&img, Point::new(8.5, 8.5), Lanczos::<9>, &Clamp);
 /// ```
-pub fn sample<I, K, B, Q>(image: &I, at: CoordinateF64, kernel: K, border: &B) -> Option<Q>
+pub fn sample<I, K, B, Q>(image: &I, at: Point<I::Space>, kernel: K, border: &B) -> Option<Q>
 where
     I: ImageView,
     I::Pixel: LinearPixel<Accumulator = Q> + LinearSpace,
@@ -217,13 +234,14 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Pixels;
     use crate::border::{Clamp, Constant, Mirror, Skip};
     use crate::image::{Image, SubView};
     use crate::pixel::{Mono8, Mono16, MonoF32, MonoF64, RgbF32};
     use crate::transform::{Bilinear, CatmullRom, KeysBicubic, Lanczos, Lanczos2, Lanczos3};
 
-    fn at(x: f64, y: f64) -> CoordinateF64 {
-        CoordinateF64::new(x, y)
+    fn at(x: f64, y: f64) -> Point<Pixels> {
+        Point::new(x, y)
     }
 
     fn field() -> Image<MonoF32> {

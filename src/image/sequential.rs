@@ -1,6 +1,7 @@
 use std::marker::PhantomData;
 use std::ops::{Index, IndexMut};
 
+use crate::geometry::{PixelSpace, Pixels};
 use crate::image::tiles::{
     BayerSubView, BayerSubViewMut, SubView, SubViewMut, cfa_phase_preserved,
 };
@@ -307,14 +308,15 @@ where
 /// so `[T; W * H]` cannot be used directly in a const-generic context.  The
 /// supported `(W, H)` pairs are enumerated via a macro.  When `generic_const_exprs`
 /// stabilises, this restriction will be lifted.
-pub struct ImageArray<T, const W: usize, const H: usize>
+pub struct ImageArray<T, const W: usize, const H: usize, S = Pixels>
 where
     private::Dim<T, W, H>: private::_Array2D,
 {
     data: <private::Dim<T, W, H> as private::_Array2D>::Array,
+    space: PhantomData<fn() -> S>,
 }
 
-impl<T: Copy, const W: usize, const H: usize> ImageArray<T, W, H>
+impl<T: Copy, const W: usize, const H: usize> ImageArray<T, W, H, Pixels>
 where
     private::Dim<T, W, H>: private::_Array2D,
 {
@@ -339,7 +341,10 @@ where
     /// assert_eq!(img.get(0, 0), Some(10));
     /// ```
     pub fn new(data: <private::Dim<T, W, H> as private::_Array2D>::Array) -> Self {
-        Self { data }
+        Self {
+            data,
+            space: PhantomData,
+        }
     }
 
     /// Generate a new ImageArray using the provided closure.
@@ -351,12 +356,15 @@ where
     /// # use fovea::image::ImageArray;
     /// let img: ImageArray<u8, 3, 4> = ImageArray::generate(|x,y| (x + y * 3) as u8 + 1);
     /// ```
-    pub fn generate(f: impl Fn(usize, usize) -> <ImageArray<T, W, H> as ImageView>::Pixel) -> Self {
+    pub fn generate(
+        f: impl Fn(usize, usize) -> <private::Dim<T, W, H> as private::_Array2D>::Pixel,
+    ) -> Self {
         // Use MaybeUninit to avoid initializing array elements before setting them
         let mut uninit_data: std::mem::MaybeUninit<
             <private::Dim<T, W, H> as private::_Array2D>::Array,
         > = std::mem::MaybeUninit::uninit();
-        let data_ptr = uninit_data.as_mut_ptr() as *mut <ImageArray<T, W, H> as ImageView>::Pixel;
+        let data_ptr =
+            uninit_data.as_mut_ptr() as *mut <private::Dim<T, W, H> as private::_Array2D>::Pixel;
 
         // Initialize all elements using the provided function
         for y in 0..H {
@@ -369,9 +377,44 @@ where
 
         // # Safety: All elements have been initialized in the loops above
         let data = unsafe { uninit_data.assume_init() };
-        Self { data }
+        Self {
+            data,
+            space: PhantomData,
+        }
     }
+}
 
+impl<T: Copy, const W: usize, const H: usize, S> ImageArray<T, W, H, S>
+where
+    private::Dim<T, W, H>: private::_Array2D,
+{
+    /// The same pixels, stated to lie in the space `S2`.
+    ///
+    /// Changes no pixel and costs nothing; see
+    /// [`Image::into_space`](crate::image::Image::into_space).
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use fovea::IdealPixels;
+    /// use fovea::image::{ImageArray, ImageView};
+    ///
+    /// let a: ImageArray<u8, 2, 2> = ImageArray::new([1, 2, 3, 4]);
+    /// let ideal = a.into_space::<IdealPixels>();
+    /// assert_eq!(ideal.pixel_at(1, 1), 4);
+    /// ```
+    pub fn into_space<S2: PixelSpace>(self) -> ImageArray<T, W, H, S2> {
+        ImageArray {
+            data: self.data,
+            space: PhantomData,
+        }
+    }
+}
+
+impl<T: Copy, const W: usize, const H: usize, S: PixelSpace> ImageArray<T, W, H, S>
+where
+    private::Dim<T, W, H>: private::_Array2D,
+{
     /// The strided sub-view construction shared by [`SubView::roi`] and the
     /// CFA-phase-preserving Bayer ROI. See [`strided_roi_offset`].
     ///
@@ -383,7 +426,7 @@ where
     /// `T` so that this block needs no `_Array2D<Pixel = T>` projection —
     /// the two unify wherever a caller does supply it.
     #[inline]
-    fn strided_roi(&self, rect: Rectangle) -> Option<ImageRef<'_, <Self as ImageView>::Pixel>> {
+    fn strided_roi(&self, rect: Rectangle) -> Option<ImageRef<'_, <Self as ImageView>::Pixel, S>> {
         let offset = strided_roi_offset(Size::new(W, H), W, 0, rect)?;
         ImageRef::strided(rect.size, W, offset, self.as_slice())
     }
@@ -394,7 +437,7 @@ where
     fn strided_roi_mut(
         &mut self,
         rect: Rectangle,
-    ) -> Option<ImageRefMut<'_, <Self as ImageView>::Pixel>> {
+    ) -> Option<ImageRefMut<'_, <Self as ImageView>::Pixel, S>> {
         let offset = strided_roi_offset(Size::new(W, H), W, 0, rect)?;
         let slice = self.as_mut_slice();
         let len = slice.len();
@@ -406,11 +449,12 @@ where
     }
 }
 
-impl<T: Copy, const W: usize, const H: usize> ImageView for ImageArray<T, W, H>
+impl<T: Copy, const W: usize, const H: usize, S: PixelSpace> ImageView for ImageArray<T, W, H, S>
 where
     private::Dim<T, W, H>: private::_Array2D,
 {
     type Pixel = <private::Dim<T, W, H> as private::_Array2D>::Pixel;
+    type Space = S;
 
     fn size(&self) -> Size {
         Size::new(W, H)
@@ -439,7 +483,7 @@ where
     }
 }
 
-impl<T: Copy, const W: usize, const H: usize> ImageViewMut for ImageArray<T, W, H>
+impl<T: Copy, const W: usize, const H: usize, S: PixelSpace> ImageViewMut for ImageArray<T, W, H, S>
 where
     private::Dim<T, W, H>: private::_Array2D,
 {
@@ -458,12 +502,13 @@ where
     }
 }
 
-impl<T: OriginInvariantPixel, const W: usize, const H: usize> SubView for ImageArray<T, W, H>
+impl<T: OriginInvariantPixel, const W: usize, const H: usize, S: PixelSpace> SubView
+    for ImageArray<T, W, H, S>
 where
     private::Dim<T, W, H>: private::_Array2D,
 {
     type Sub<'a>
-        = ImageRef<'a, Self::Pixel>
+        = ImageRef<'a, Self::Pixel, S>
     where
         Self: 'a;
 
@@ -472,12 +517,13 @@ where
     }
 }
 
-impl<T: OriginInvariantPixel, const W: usize, const H: usize> SubViewMut for ImageArray<T, W, H>
+impl<T: OriginInvariantPixel, const W: usize, const H: usize, S: PixelSpace> SubViewMut
+    for ImageArray<T, W, H, S>
 where
     private::Dim<T, W, H>: private::_Array2D,
 {
     type SubMut<'a>
-        = ImageRefMut<'a, Self::Pixel>
+        = ImageRefMut<'a, Self::Pixel, S>
     where
         Self: 'a;
 
@@ -492,12 +538,13 @@ where
 // the associated projection rather than `T` itself. Every `_Array2D` impl
 // sets `Pixel = T`, so the extra bound narrows nothing; it only tells the
 // compiler what the macro already guarantees.
-impl<T: BayerPixel, const W: usize, const H: usize> BayerSubView for ImageArray<T, W, H>
+impl<T: BayerPixel, const W: usize, const H: usize, S: PixelSpace> BayerSubView
+    for ImageArray<T, W, H, S>
 where
     private::Dim<T, W, H>: private::_Array2D<Pixel = T>,
 {
     type Sub<'a>
-        = ImageRef<'a, Self::Pixel>
+        = ImageRef<'a, Self::Pixel, S>
     where
         Self: 'a;
 
@@ -507,12 +554,13 @@ where
     }
 }
 
-impl<T: BayerPixel, const W: usize, const H: usize> BayerSubViewMut for ImageArray<T, W, H>
+impl<T: BayerPixel, const W: usize, const H: usize, S: PixelSpace> BayerSubViewMut
+    for ImageArray<T, W, H, S>
 where
     private::Dim<T, W, H>: private::_Array2D<Pixel = T>,
 {
     type SubMut<'a>
-        = ImageRefMut<'a, Self::Pixel>
+        = ImageRefMut<'a, Self::Pixel, S>
     where
         Self: 'a;
 
@@ -522,7 +570,7 @@ where
     }
 }
 
-impl<T: Copy, const W: usize, const H: usize> RasterImage for ImageArray<T, W, H>
+impl<T: Copy, const W: usize, const H: usize, S: PixelSpace> RasterImage for ImageArray<T, W, H, S>
 where
     private::Dim<T, W, H>: private::_Array2D,
 {
@@ -532,7 +580,8 @@ where
     }
 }
 
-impl<T: Copy, const W: usize, const H: usize> RasterImageMut for ImageArray<T, W, H>
+impl<T: Copy, const W: usize, const H: usize, S: PixelSpace> RasterImageMut
+    for ImageArray<T, W, H, S>
 where
     private::Dim<T, W, H>: private::_Array2D,
 {
@@ -542,12 +591,15 @@ where
     }
 }
 
-impl<T: Copy, const W: usize, const H: usize> contiguous_sealed::Sealed for ImageArray<T, W, H> where
-    private::Dim<T, W, H>: private::_Array2D
+impl<T: Copy, const W: usize, const H: usize, S: PixelSpace> contiguous_sealed::Sealed
+    for ImageArray<T, W, H, S>
+where
+    private::Dim<T, W, H>: private::_Array2D,
 {
 }
 
-impl<T: Copy, const W: usize, const H: usize> ContiguousImage for ImageArray<T, W, H>
+impl<T: Copy, const W: usize, const H: usize, S: PixelSpace> ContiguousImage
+    for ImageArray<T, W, H, S>
 where
     private::Dim<T, W, H>: private::_Array2D,
 {
@@ -556,7 +608,8 @@ where
     }
 }
 
-impl<T: Copy, const W: usize, const H: usize> ContiguousImageMut for ImageArray<T, W, H>
+impl<T: Copy, const W: usize, const H: usize, S: PixelSpace> ContiguousImageMut
+    for ImageArray<T, W, H, S>
 where
     private::Dim<T, W, H>: private::_Array2D,
 {
@@ -565,7 +618,7 @@ where
     }
 }
 
-impl<T: Copy, const W: usize, const H: usize> PlainImage for ImageArray<T, W, H>
+impl<T: Copy, const W: usize, const H: usize, S: PixelSpace> PlainImage for ImageArray<T, W, H, S>
 where
     T: PlainPixel,
     private::Dim<T, W, H>: private::_Array2D<Pixel = T>,
@@ -583,7 +636,8 @@ where
     }
 }
 
-impl<T: Copy, const W: usize, const H: usize> PlainImageMut for ImageArray<T, W, H>
+impl<T: Copy, const W: usize, const H: usize, S: PixelSpace> PlainImageMut
+    for ImageArray<T, W, H, S>
 where
     T: PlainPixel,
     private::Dim<T, W, H>: private::_Array2D<Pixel = T>,
@@ -593,7 +647,8 @@ where
     }
 }
 
-impl<T: Copy, C: Into<Coordinate>, const W: usize, const H: usize> Index<C> for ImageArray<T, W, H>
+impl<T: Copy, C: Into<Coordinate>, const W: usize, const H: usize, S: PixelSpace> Index<C>
+    for ImageArray<T, W, H, S>
 where
     private::Dim<T, W, H>: private::_Array2D<Pixel = T>,
 {
@@ -606,8 +661,8 @@ where
     }
 }
 
-impl<T: Copy, C: Into<Coordinate>, const W: usize, const H: usize> IndexMut<C>
-    for ImageArray<T, W, H>
+impl<T: Copy, C: Into<Coordinate>, const W: usize, const H: usize, S: PixelSpace> IndexMut<C>
+    for ImageArray<T, W, H, S>
 where
     private::Dim<T, W, H>: private::_Array2D<Pixel = T>,
 {
@@ -790,15 +845,39 @@ fn check_strided(width: usize, height: usize, stride: usize, len: usize) -> Resu
 /// **Strided sub-region view** (produced by [`SubView::roi`]):
 /// `stride` equals the parent image width; `offset` locates the
 /// top-left corner within the parent buffer.
-#[derive(Copy, Clone, Debug)]
-pub struct ImageRef<'a, T> {
+///
+/// `S` is the space the view's grid lies in, the parent's for a region of
+/// interest; the constructors build a view in [`Pixels`].
+pub struct ImageRef<'a, T, S = Pixels> {
     size: Size,
     stride: usize,
     offset: usize,
     data: &'a [T],
+    space: PhantomData<fn() -> S>,
 }
 
-impl<'a, T> ImageRef<'a, T> {
+// Written by hand rather than derived: a derive would require `S: Copy`,
+// `S: Clone` and `S: Debug` of a marker that is never instantiated.
+impl<T, S> Clone for ImageRef<'_, T, S> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T, S> Copy for ImageRef<'_, T, S> {}
+
+impl<T: fmt::Debug, S> fmt::Debug for ImageRef<'_, T, S> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ImageRef")
+            .field("size", &self.size)
+            .field("stride", &self.stride)
+            .field("offset", &self.offset)
+            .field("data", &self.data)
+            .finish()
+    }
+}
+
+impl<'a, T> ImageRef<'a, T, Pixels> {
     /// Contiguous full-frame view. Returns `Err` if `data.len() != width * height`.
     pub fn new(width: usize, height: usize, data: &'a [T]) -> Result<Self, Error> {
         let size = Size::new(width, height);
@@ -812,6 +891,7 @@ impl<'a, T> ImageRef<'a, T> {
                 stride: width,
                 offset: 0,
                 data,
+                space: PhantomData,
             })
         } else {
             Err(Error::LengthMismatch {
@@ -870,7 +950,36 @@ impl<'a, T> ImageRef<'a, T> {
             stride: row_stride.get(),
             offset: 0,
             data,
+            space: PhantomData,
         })
+    }
+}
+
+impl<'a, T, S> ImageRef<'a, T, S> {
+    /// The same view, stated to lie in the space `S2`.
+    ///
+    /// Changes no pixel and costs nothing; see
+    /// [`Image::into_space`](crate::image::Image::into_space).
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use fovea::IdealPixels;
+    /// use fovea::image::{ImageRef, ImageView};
+    ///
+    /// let data = [1u8, 2, 3, 4];
+    /// let view = ImageRef::new(2, 2, &data)?.into_space::<IdealPixels>();
+    /// assert_eq!(view.pixel_at(1, 0), 2);
+    /// # Ok::<(), fovea::Error>(())
+    /// ```
+    pub fn into_space<S2: PixelSpace>(self) -> ImageRef<'a, T, S2> {
+        ImageRef {
+            size: self.size,
+            stride: self.stride,
+            offset: self.offset,
+            data: self.data,
+            space: PhantomData,
+        }
     }
 
     /// General strided view. Checks that all pixel indices are in bounds.
@@ -881,6 +990,7 @@ impl<'a, T> ImageRef<'a, T> {
                 stride,
                 offset,
                 data,
+                space: PhantomData,
             });
         }
         // Check that the last pixel is in bounds using checked arithmetic
@@ -898,6 +1008,7 @@ impl<'a, T> ImageRef<'a, T> {
                 stride,
                 offset,
                 data,
+                space: PhantomData,
             })
         } else {
             None
@@ -907,7 +1018,7 @@ impl<'a, T> ImageRef<'a, T> {
     /// The strided sub-view construction shared by [`SubView::roi`] and the
     /// CFA-phase-preserving Bayer ROI. See [`strided_roi_offset`].
     #[inline]
-    fn strided_roi(&self, rect: Rectangle) -> Option<ImageRef<'_, T>> {
+    fn strided_roi(&self, rect: Rectangle) -> Option<ImageRef<'_, T, S>> {
         let offset = strided_roi_offset(self.size, self.stride, self.offset, rect)?;
         ImageRef::strided(rect.size, self.stride, offset, self.data)
     }
@@ -919,8 +1030,9 @@ impl<'a, T> ImageRef<'a, T> {
     }
 }
 
-impl<T: Copy> ImageView for ImageRef<'_, T> {
+impl<T: Copy, S: PixelSpace> ImageView for ImageRef<'_, T, S> {
     type Pixel = T;
+    type Space = S;
 
     fn size(&self) -> Size {
         self.size
@@ -949,7 +1061,7 @@ impl<T: Copy> ImageView for ImageRef<'_, T> {
     }
 }
 
-impl<T: Copy> RasterImage for ImageRef<'_, T> {
+impl<T: Copy, S: PixelSpace> RasterImage for ImageRef<'_, T, S> {
     #[inline(always)]
     fn row(&self, y: usize) -> &[Self::Pixel] {
         let start = strided_checked_row_start_or_panic(&self.size, self.stride, self.offset, y);
@@ -957,24 +1069,24 @@ impl<T: Copy> RasterImage for ImageRef<'_, T> {
     }
 }
 
-impl<T: OriginInvariantPixel> SubView for ImageRef<'_, T> {
+impl<T: OriginInvariantPixel, S: PixelSpace> SubView for ImageRef<'_, T, S> {
     type Sub<'b>
-        = ImageRef<'b, T>
+        = ImageRef<'b, T, S>
     where
         Self: 'b;
 
-    fn roi(&self, rect: Rectangle) -> Option<ImageRef<'_, T>> {
+    fn roi(&self, rect: Rectangle) -> Option<ImageRef<'_, T, S>> {
         self.strided_roi(rect)
     }
 }
 
-impl<T: BayerPixel> BayerSubView for ImageRef<'_, T> {
+impl<T: BayerPixel, S: PixelSpace> BayerSubView for ImageRef<'_, T, S> {
     type Sub<'b>
-        = ImageRef<'b, T>
+        = ImageRef<'b, T, S>
     where
         Self: 'b;
 
-    fn aligned_bayer_roi(&self, rect: Rectangle) -> Option<ImageRef<'_, T>> {
+    fn aligned_bayer_roi(&self, rect: Rectangle) -> Option<ImageRef<'_, T, S>> {
         cfa_phase_preserved(rect).then_some(())?;
         self.strided_roi(rect)
     }
@@ -989,24 +1101,29 @@ impl<T: BayerPixel> BayerSubView for ImageRef<'_, T> {
 /// Uses a raw pointer internally so that [`TileIterMut`](crate::image::TileIterMut) can yield
 /// multiple disjoint mutable tiles from a single image simultaneously
 /// without violating Rust's aliasing rules.
-pub struct ImageRefMut<'a, T> {
+///
+/// `S` is the space the view's grid lies in, the parent's for a region of
+/// interest; the constructors build a view in [`Pixels`].
+pub struct ImageRefMut<'a, T, S = Pixels> {
     size: Size,
     stride: usize,
     offset: usize,
     data: *mut T,
     data_len: usize,
     _marker: PhantomData<&'a mut T>,
+    space: PhantomData<fn() -> S>,
 }
 
 // SAFETY: ImageRefMut has exclusive access to its pixel region.
 // Sending it to another thread is safe when T is Send (same as &'a mut [T]).
-unsafe impl<T: Send> Send for ImageRefMut<'_, T> {}
+// The space is a marker behind `fn() -> S`, which is `Send` for every `S`.
+unsafe impl<T: Send, S> Send for ImageRefMut<'_, T, S> {}
 
 // SAFETY: Shared access (&ImageRefMut) only provides &T references.
 // This is safe when T is Sync (same as &'a mut [T]).
-unsafe impl<T: Sync> Sync for ImageRefMut<'_, T> {}
+unsafe impl<T: Sync, S> Sync for ImageRefMut<'_, T, S> {}
 
-impl<'a, T> ImageRefMut<'a, T> {
+impl<'a, T> ImageRefMut<'a, T, Pixels> {
     /// Contiguous full-frame mutable view. Returns `Err` if `data.len() != width * height`.
     pub fn new(width: usize, height: usize, data: &'a mut [T]) -> Result<Self, Error> {
         let size = Size::new(width, height);
@@ -1024,6 +1141,7 @@ impl<'a, T> ImageRefMut<'a, T> {
                 data: ptr,
                 data_len: len,
                 _marker: PhantomData,
+                space: PhantomData,
             })
         } else {
             Err(Error::LengthMismatch {
@@ -1086,7 +1204,39 @@ impl<'a, T> ImageRefMut<'a, T> {
             data: data.as_mut_ptr(),
             data_len: data.len(),
             _marker: PhantomData,
+            space: PhantomData,
         })
+    }
+}
+
+impl<'a, T, S> ImageRefMut<'a, T, S> {
+    /// The same view, stated to lie in the space `S2`.
+    ///
+    /// Changes no pixel and costs nothing; see
+    /// [`Image::into_space`](crate::image::Image::into_space).
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use fovea::IdealPixels;
+    /// use fovea::image::{ImageRefMut, ImageView, ImageViewMut};
+    ///
+    /// let mut data = [0u8; 4];
+    /// let mut view = ImageRefMut::new(2, 2, &mut data)?.into_space::<IdealPixels>();
+    /// *view.pixel_at_mut(1, 1) = 7;
+    /// assert_eq!(data[3], 7);
+    /// # Ok::<(), fovea::Error>(())
+    /// ```
+    pub fn into_space<S2: PixelSpace>(self) -> ImageRefMut<'a, T, S2> {
+        ImageRefMut {
+            size: self.size,
+            stride: self.stride,
+            offset: self.offset,
+            data: self.data,
+            data_len: self.data_len,
+            _marker: PhantomData,
+            space: PhantomData,
+        }
     }
 
     /// General strided mutable view.
@@ -1108,6 +1258,7 @@ impl<'a, T> ImageRefMut<'a, T> {
             data,
             data_len,
             _marker: PhantomData,
+            space: PhantomData,
         }
     }
 
@@ -1118,11 +1269,11 @@ impl<'a, T> ImageRefMut<'a, T> {
     }
 }
 
-impl<T> ImageRefMut<'_, T> {
+impl<T, S> ImageRefMut<'_, T, S> {
     /// The strided sub-view construction shared by [`SubViewMut::roi_mut`]
     /// and the CFA-phase-preserving Bayer ROI. See [`strided_roi_offset`].
     #[inline]
-    fn strided_roi_mut(&mut self, rect: Rectangle) -> Option<ImageRefMut<'_, T>> {
+    fn strided_roi_mut(&mut self, rect: Rectangle) -> Option<ImageRefMut<'_, T, S>> {
         let offset = strided_roi_offset(self.size, self.stride, self.offset, rect)?;
         // SAFETY: `strided_roi_offset` proved `rect` lies inside this view,
         // whose own construction proved it lies inside the allocation;
@@ -1135,7 +1286,7 @@ impl<T> ImageRefMut<'_, T> {
     /// The strided read-only sub-view construction shared by
     /// [`SubView::roi`] and the CFA-phase-preserving Bayer ROI.
     #[inline]
-    fn strided_roi(&self, rect: Rectangle) -> Option<ImageRef<'_, T>> {
+    fn strided_roi(&self, rect: Rectangle) -> Option<ImageRef<'_, T, S>> {
         let offset = strided_roi_offset(self.size, self.stride, self.offset, rect)?;
         // The elements the sub-view can address: its first element through
         // its last, `(h-1)*stride + w` in total. Zero for an empty rect.
@@ -1193,8 +1344,9 @@ impl<T> ImageRefMut<'_, T> {
     }
 }
 
-impl<T: Copy> ImageView for ImageRefMut<'_, T> {
+impl<T: Copy, S: PixelSpace> ImageView for ImageRefMut<'_, T, S> {
     type Pixel = T;
+    type Space = S;
 
     fn size(&self) -> Size {
         self.size
@@ -1238,7 +1390,7 @@ impl<T: Copy> ImageView for ImageRefMut<'_, T> {
     }
 }
 
-impl<T: Copy> RasterImage for ImageRefMut<'_, T> {
+impl<T: Copy, S: PixelSpace> RasterImage for ImageRefMut<'_, T, S> {
     #[inline(always)]
     fn row(&self, y: usize) -> &[Self::Pixel] {
         assert!(
@@ -1255,7 +1407,7 @@ impl<T: Copy> RasterImage for ImageRefMut<'_, T> {
     }
 }
 
-impl<T: Copy> RasterImageMut for ImageRefMut<'_, T> {
+impl<T: Copy, S: PixelSpace> RasterImageMut for ImageRefMut<'_, T, S> {
     #[inline(always)]
     fn row_mut(&mut self, y: usize) -> &mut [Self::Pixel] {
         assert!(
@@ -1272,7 +1424,7 @@ impl<T: Copy> RasterImageMut for ImageRefMut<'_, T> {
     }
 }
 
-impl<T: Copy> ImageViewMut for ImageRefMut<'_, T> {
+impl<T: Copy, S: PixelSpace> ImageViewMut for ImageRefMut<'_, T, S> {
     fn get_mut(&mut self, x: usize, y: usize) -> Option<&mut Self::Pixel> {
         if x < self.size.width && y < self.size.height {
             let idx = self
@@ -1300,48 +1452,48 @@ impl<T: Copy> ImageViewMut for ImageRefMut<'_, T> {
     }
 }
 
-impl<T: OriginInvariantPixel> SubViewMut for ImageRefMut<'_, T> {
+impl<T: OriginInvariantPixel, S: PixelSpace> SubViewMut for ImageRefMut<'_, T, S> {
     type SubMut<'b>
-        = ImageRefMut<'b, T>
+        = ImageRefMut<'b, T, S>
     where
         Self: 'b;
 
-    fn roi_mut(&mut self, rect: Rectangle) -> Option<ImageRefMut<'_, T>> {
+    fn roi_mut(&mut self, rect: Rectangle) -> Option<ImageRefMut<'_, T, S>> {
         self.strided_roi_mut(rect)
     }
 }
 
 // ImageRefMut also implements SubView (read-only roi yields an ImageRef)
-impl<T: OriginInvariantPixel> SubView for ImageRefMut<'_, T> {
+impl<T: OriginInvariantPixel, S: PixelSpace> SubView for ImageRefMut<'_, T, S> {
     type Sub<'b>
-        = ImageRef<'b, T>
+        = ImageRef<'b, T, S>
     where
         Self: 'b;
 
-    fn roi(&self, rect: Rectangle) -> Option<ImageRef<'_, T>> {
+    fn roi(&self, rect: Rectangle) -> Option<ImageRef<'_, T, S>> {
         self.strided_roi(rect)
     }
 }
 
-impl<T: BayerPixel> BayerSubView for ImageRefMut<'_, T> {
+impl<T: BayerPixel, S: PixelSpace> BayerSubView for ImageRefMut<'_, T, S> {
     type Sub<'b>
-        = ImageRef<'b, T>
+        = ImageRef<'b, T, S>
     where
         Self: 'b;
 
-    fn aligned_bayer_roi(&self, rect: Rectangle) -> Option<ImageRef<'_, T>> {
+    fn aligned_bayer_roi(&self, rect: Rectangle) -> Option<ImageRef<'_, T, S>> {
         cfa_phase_preserved(rect).then_some(())?;
         self.strided_roi(rect)
     }
 }
 
-impl<T: BayerPixel> BayerSubViewMut for ImageRefMut<'_, T> {
+impl<T: BayerPixel, S: PixelSpace> BayerSubViewMut for ImageRefMut<'_, T, S> {
     type SubMut<'b>
-        = ImageRefMut<'b, T>
+        = ImageRefMut<'b, T, S>
     where
         Self: 'b;
 
-    fn aligned_bayer_roi_mut(&mut self, rect: Rectangle) -> Option<ImageRefMut<'_, T>> {
+    fn aligned_bayer_roi_mut(&mut self, rect: Rectangle) -> Option<ImageRefMut<'_, T, S>> {
         cfa_phase_preserved(rect).then_some(())?;
         self.strided_roi_mut(rect)
     }
@@ -1383,17 +1535,146 @@ impl<T: BayerPixel> BayerSubViewMut for ImageRefMut<'_, T> {
 /// assert_eq!(img.get(1, 2), Some(8));
 /// assert_eq!(img.get(2, 3), Some(12));
 /// ```
-#[derive(Clone)]
-pub struct Image<T> {
+///
+/// # The space
+///
+/// `S` is the space the image's grid lies in, [`Pixels`] unless stated
+/// otherwise: `Image<Mono8>` is `Image<Mono8, Pixels>`, the image as the
+/// camera delivered it. Every constructor builds an image in `Pixels`,
+/// operations pass their input's space through, and a remap through a
+/// lens model returns an image in [`IdealPixels`](crate::IdealPixels). Two
+/// images in different spaces do not combine:
+///
+/// ```compile_fail
+/// use fovea::IdealPixels;
+/// use fovea::image::Image;
+/// use fovea::pixel::Mono8;
+/// use fovea::transform::abs_diff;
+///
+/// let raw = Image::fill(4, 4, Mono8::new(10));
+/// let ideal = Image::fill(4, 4, Mono8::new(12)).into_space::<IdealPixels>();
+/// let _ = abs_diff(&raw, &ideal);
+/// ```
+///
+/// Stating that they do is a named step, [`as_space`](Image::as_space):
+///
+/// ```
+/// use fovea::{IdealPixels, Pixels};
+/// use fovea::image::{Image, ImageView};
+/// use fovea::pixel::Mono8;
+/// use fovea::transform::abs_diff;
+///
+/// let raw = Image::fill(4, 4, Mono8::new(10));
+/// let ideal = Image::fill(4, 4, Mono8::new(12)).into_space::<IdealPixels>();
+/// let diff = abs_diff(&raw, &ideal.as_space::<Pixels>())?;
+/// assert_eq!(diff.pixel_at(0, 0), Mono8::new(2));
+/// # Ok::<(), fovea::Error>(())
+/// ```
+pub struct Image<T, S = Pixels> {
     size: Size,
     data: Box<[T]>,
+    space: PhantomData<fn() -> S>,
 }
 
-impl<T> Image<T> {
+// Written by hand rather than derived: a derive would require `S: Clone`
+// of a marker that is never instantiated.
+impl<T: Clone, S> Clone for Image<T, S> {
+    fn clone(&self) -> Self {
+        Self {
+            size: self.size,
+            data: self.data.clone(),
+            space: PhantomData,
+        }
+    }
+}
+
+impl<T, S> Image<T, S> {
+    /// The same pixels, stated to lie in the space `S2`.
+    ///
+    /// A relabelling: it changes no pixel and costs nothing. It is how an
+    /// image built from numbers enters a space other than [`Pixels`], and
+    /// how a caller states that two images may be compared although their
+    /// types say otherwise. The compiler cannot check the statement, so the
+    /// name stands at the call site for review and search.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use fovea::IdealPixels;
+    /// use fovea::image::{Image, ImageView};
+    /// use fovea::pixel::Mono8;
+    ///
+    /// let blank: Image<Mono8, IdealPixels> =
+    ///     Image::fill(640, 480, Mono8::new(0)).into_space();
+    /// assert_eq!(blank.pixel_at(0, 0), Mono8::new(0));
+    /// ```
+    pub fn into_space<S2: PixelSpace>(self) -> Image<T, S2> {
+        Image {
+            size: self.size,
+            data: self.data,
+            space: PhantomData,
+        }
+    }
+
+    /// A borrowed view of the same pixels, stated to lie in the space `S2`.
+    ///
+    /// The borrowing form of [`into_space`](Image::into_space): no copy, no
+    /// change. Comparing a camera image with an undistorted one, as a check
+    /// of the calibration, reads `abs_diff(&raw, &ideal.as_space::<Pixels>())`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use fovea::{IdealPixels, Pixels};
+    /// use fovea::image::{Image, ImageView};
+    /// use fovea::pixel::Mono8;
+    ///
+    /// let ideal: Image<Mono8, IdealPixels> =
+    ///     Image::fill(2, 2, Mono8::new(5)).into_space();
+    /// let view = ideal.as_space::<Pixels>();
+    /// assert_eq!(view.pixel_at(1, 1), Mono8::new(5));
+    /// ```
+    pub fn as_space<S2: PixelSpace>(&self) -> ImageRef<'_, T, S2> {
+        ImageRef {
+            size: self.size,
+            stride: self.size.width,
+            offset: 0,
+            data: &self.data,
+            space: PhantomData,
+        }
+    }
+
+    /// A mutable borrowed view of the same pixels, stated to lie in the
+    /// space `S2`.
+    ///
+    /// The mutable form of [`as_space`](Image::as_space), for writing the
+    /// result of an `_into` operation whose input lies in `S2`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use fovea::IdealPixels;
+    /// use fovea::image::{Image, ImageView, ImageViewMut};
+    /// use fovea::pixel::Mono8;
+    ///
+    /// let mut img = Image::fill(2, 2, Mono8::new(0));
+    /// *img.as_space_mut::<IdealPixels>().pixel_at_mut(0, 1) = Mono8::new(9);
+    /// assert_eq!(img.pixel_at(0, 1), Mono8::new(9));
+    /// ```
+    pub fn as_space_mut<S2: PixelSpace>(&mut self) -> ImageRefMut<'_, T, S2> {
+        let len = self.data.len();
+        let ptr = self.data.as_mut_ptr();
+        // SAFETY: `ptr` comes from this image's own boxed slice of `len`
+        // elements, which holds exactly `width * height` pixels with rows
+        // `width` apart, and `&mut self` guarantees exclusivity for the
+        // returned lifetime.
+        unsafe { ImageRefMut::strided(self.size, self.size.width, 0, ptr, len) }
+    }
+
     /// The strided sub-view construction shared by [`SubView::roi`] and the
     /// CFA-phase-preserving Bayer ROI. See [`strided_roi_offset`].
     #[inline]
-    fn strided_roi(&self, rect: Rectangle) -> Option<ImageRef<'_, T>> {
+    fn strided_roi(&self, rect: Rectangle) -> Option<ImageRef<'_, T, S>> {
         let stride = self.size.width;
         let offset = strided_roi_offset(self.size, stride, 0, rect)?;
         ImageRef::strided(rect.size, stride, offset, &self.data)
@@ -1402,7 +1683,7 @@ impl<T> Image<T> {
     /// The strided mutable sub-view construction shared by
     /// [`SubViewMut::roi_mut`] and the CFA-phase-preserving Bayer ROI.
     #[inline]
-    fn strided_roi_mut(&mut self, rect: Rectangle) -> Option<ImageRefMut<'_, T>> {
+    fn strided_roi_mut(&mut self, rect: Rectangle) -> Option<ImageRefMut<'_, T, S>> {
         let stride = self.size.width;
         let offset = strided_roi_offset(self.size, stride, 0, rect)?;
         let len = self.data.len();
@@ -1412,7 +1693,43 @@ impl<T> Image<T> {
         // `&mut self` guarantees exclusivity for the returned lifetime.
         Some(unsafe { ImageRefMut::strided(rect.size, stride, offset, ptr, len) })
     }
+}
 
+// ── Constructors in any space, for the crate's own operations ───────────────
+//
+// An operation builds its result in its input's space. The public
+// constructors build in `Pixels`, because a caller's numbers carry no space;
+// these build in the space the surrounding code names or infers. They stay
+// crate-private: a caller enters another space through `into_space`, which
+// names the step.
+
+impl<T, S: PixelSpace> Image<T, S> {
+    /// [`Image::from_vec`] in the space `S`.
+    pub(crate) fn from_vec_in(width: usize, height: usize, data: Vec<T>) -> Result<Self, Error> {
+        Image::<T, Pixels>::from_vec(width, height, data).map(Image::into_space)
+    }
+
+    /// [`Image::generate`] in the space `S`.
+    pub(crate) fn generate_in(width: usize, height: usize, f: impl Fn(usize, usize) -> T) -> Self {
+        Image::<T, Pixels>::generate(width, height, f).into_space()
+    }
+}
+
+impl<T: ZeroablePixel, S: PixelSpace> Image<T, S> {
+    /// [`Image::zero`] in the space `S`.
+    pub(crate) fn zero_in(width: usize, height: usize) -> Self {
+        Image::<T, Pixels>::zero(width, height).into_space()
+    }
+}
+
+impl<T: Clone, S: PixelSpace> Image<T, S> {
+    /// [`Image::fill`] in the space `S`.
+    pub(crate) fn fill_in(width: usize, height: usize, value: T) -> Self {
+        Image::<T, Pixels>::fill(width, height, value).into_space()
+    }
+}
+
+impl<T> Image<T, Pixels> {
     /// Create an `Image` from a `Vec` of pixel data.
     ///
     /// Returns `Err` if `data.len() != width * height`.
@@ -1426,6 +1743,7 @@ impl<T> Image<T> {
             Ok(Self {
                 size,
                 data: data.into_boxed_slice(),
+                space: PhantomData,
             })
         } else {
             Err(Error::LengthMismatch {
@@ -1509,7 +1827,11 @@ impl<T> Image<T> {
         // - count * T::SIZE == expected == boxed_bytes.len() (exact fit)
         let data =
             unsafe { Box::from_raw(std::ptr::slice_from_raw_parts_mut(raw_ptr as *mut T, count)) };
-        Ok(Self { size, data })
+        Ok(Self {
+            size,
+            data,
+            space: PhantomData,
+        })
     }
 
     /// Create an `Image` by copying and reinterpreting raw bytes as pixels.
@@ -1561,6 +1883,7 @@ impl<T> Image<T> {
         Ok(Self {
             size,
             data: data.into_boxed_slice(),
+            space: PhantomData,
         })
     }
 
@@ -1586,11 +1909,12 @@ impl<T> Image<T> {
         Self {
             size,
             data: data.into_boxed_slice(),
+            space: PhantomData,
         }
     }
 }
 
-impl<T: ZeroablePixel> Image<T> {
+impl<T: ZeroablePixel> Image<T, Pixels> {
     /// Creates an image with all pixels set to their zero value.
     ///
     /// Use [`Image::fill`] when you need a non-zero initial value.
@@ -1600,11 +1924,12 @@ impl<T: ZeroablePixel> Image<T> {
         Self {
             size,
             data: data.into_boxed_slice(),
+            space: PhantomData,
         }
     }
 }
 
-impl<T: Clone> Image<T> {
+impl<T: Clone> Image<T, Pixels> {
     /// Construct an image of the given dimensions, filled with copies of `value`.
     ///
     /// Only requires `T: Clone` — the value is cloned into every pixel.
@@ -1617,6 +1942,7 @@ impl<T: Clone> Image<T> {
         Self {
             size,
             data: data.into_boxed_slice(),
+            space: PhantomData,
         }
     }
 }
@@ -1636,16 +1962,19 @@ impl<T: Clone> Image<T> {
 // diagnostic string — the stdlib does not guarantee a stable format,
 // but it is stable enough for human reading).
 
-impl<T> fmt::Debug for Image<T> {
+impl<T, S> fmt::Debug for Image<T, S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let pixel_ty = std::any::type_name::<T>();
         // Strip the leading module path for readability:
         //   "fovea::pixel::srgb::Srgb8"  →  "Srgb8"
         let pixel_short = pixel_ty.rsplit("::").next().unwrap_or(pixel_ty);
+        let space_ty = std::any::type_name::<S>();
+        let space_short = space_ty.rsplit("::").next().unwrap_or(space_ty);
         f.debug_struct("Image")
             .field("width", &self.size.width)
             .field("height", &self.size.height)
             .field("pixel", &pixel_short)
+            .field("space", &space_short)
             .finish()
     }
 }
@@ -1656,16 +1985,17 @@ impl<T> fmt::Debug for Image<T> {
 // compares equal. Dimensions are checked first so we never compare
 // pixel slices of different lengths.
 
-impl<T: PartialEq> PartialEq for Image<T> {
+impl<T: PartialEq, S> PartialEq for Image<T, S> {
     fn eq(&self, other: &Self) -> bool {
         self.size == other.size && self.data[..] == other.data[..]
     }
 }
 
-impl<T: Eq> Eq for Image<T> {}
+impl<T: Eq, S> Eq for Image<T, S> {}
 
-impl<T: Copy> ImageView for Image<T> {
+impl<T: Copy, S: PixelSpace> ImageView for Image<T, S> {
     type Pixel = T;
+    type Space = S;
 
     fn size(&self) -> Size {
         self.size
@@ -1692,7 +2022,7 @@ impl<T: Copy> ImageView for Image<T> {
     }
 }
 
-impl<T: Copy> ImageViewMut for Image<T> {
+impl<T: Copy, S: PixelSpace> ImageViewMut for Image<T, S> {
     #[inline(always)]
     fn pixel_at_mut(&mut self, x: usize, y: usize) -> &mut Self::Pixel {
         let idx = internal::checked_index_or_panic(&self.size, x, y);
@@ -1700,54 +2030,55 @@ impl<T: Copy> ImageViewMut for Image<T> {
     }
 }
 
-impl<T: OriginInvariantPixel> SubView for Image<T> {
+impl<T: OriginInvariantPixel, S: PixelSpace> SubView for Image<T, S> {
     type Sub<'a>
-        = ImageRef<'a, T>
+        = ImageRef<'a, T, S>
     where
         Self: 'a;
 
-    fn roi(&self, rect: Rectangle) -> Option<ImageRef<'_, T>> {
+    fn roi(&self, rect: Rectangle) -> Option<ImageRef<'_, T, S>> {
         self.strided_roi(rect)
     }
 }
 
-impl<T: OriginInvariantPixel> SubViewMut for Image<T> {
+impl<T: OriginInvariantPixel, S: PixelSpace> SubViewMut for Image<T, S> {
     type SubMut<'a>
-        = ImageRefMut<'a, T>
+        = ImageRefMut<'a, T, S>
     where
         Self: 'a;
 
-    fn roi_mut(&mut self, rect: Rectangle) -> Option<ImageRefMut<'_, T>> {
+    fn roi_mut(&mut self, rect: Rectangle) -> Option<ImageRefMut<'_, T, S>> {
         self.strided_roi_mut(rect)
     }
 }
 
-impl<T: BayerPixel> BayerSubView for Image<T> {
+impl<T: BayerPixel, S: PixelSpace> BayerSubView for Image<T, S> {
     type Sub<'a>
-        = ImageRef<'a, T>
+        = ImageRef<'a, T, S>
     where
         Self: 'a;
 
-    fn aligned_bayer_roi(&self, rect: Rectangle) -> Option<ImageRef<'_, T>> {
+    fn aligned_bayer_roi(&self, rect: Rectangle) -> Option<ImageRef<'_, T, S>> {
         cfa_phase_preserved(rect).then_some(())?;
         self.strided_roi(rect)
     }
 }
 
-impl<T: BayerPixel> BayerSubViewMut for Image<T> {
+impl<T: BayerPixel, S: PixelSpace> BayerSubViewMut for Image<T, S> {
     type SubMut<'a>
-        = ImageRefMut<'a, T>
+        = ImageRefMut<'a, T, S>
     where
         Self: 'a;
 
-    fn aligned_bayer_roi_mut(&mut self, rect: Rectangle) -> Option<ImageRefMut<'_, T>> {
+    fn aligned_bayer_roi_mut(&mut self, rect: Rectangle) -> Option<ImageRefMut<'_, T, S>> {
         cfa_phase_preserved(rect).then_some(())?;
         self.strided_roi_mut(rect)
     }
 }
 
-impl<T: Copy> ImageView for &Image<T> {
+impl<T: Copy, S: PixelSpace> ImageView for &Image<T, S> {
     type Pixel = T;
+    type Space = S;
 
     fn size(&self) -> Size {
         (**self).size()
@@ -1770,15 +2101,16 @@ impl<T: Copy> ImageView for &Image<T> {
     }
 }
 
-impl<T: Copy> RasterImage for &Image<T> {
+impl<T: Copy, S: PixelSpace> RasterImage for &Image<T, S> {
     #[inline(always)]
     fn row(&self, y: usize) -> &[Self::Pixel] {
         (**self).row(y)
     }
 }
 
-impl<T: Copy> ImageView for &mut Image<T> {
+impl<T: Copy, S: PixelSpace> ImageView for &mut Image<T, S> {
     type Pixel = T;
+    type Space = S;
 
     fn size(&self) -> Size {
         (**self).size()
@@ -1801,7 +2133,7 @@ impl<T: Copy> ImageView for &mut Image<T> {
     }
 }
 
-impl<T: Copy> ImageViewMut for &mut Image<T> {
+impl<T: Copy, S: PixelSpace> ImageViewMut for &mut Image<T, S> {
     #[inline(always)]
     fn get_mut(&mut self, x: usize, y: usize) -> Option<&mut Self::Pixel> {
         (*self).get_mut(x, y)
@@ -1813,21 +2145,21 @@ impl<T: Copy> ImageViewMut for &mut Image<T> {
     }
 }
 
-impl<T: Copy> RasterImage for &mut Image<T> {
+impl<T: Copy, S: PixelSpace> RasterImage for &mut Image<T, S> {
     #[inline(always)]
     fn row(&self, y: usize) -> &[Self::Pixel] {
         (**self).row(y)
     }
 }
 
-impl<T: Copy> RasterImageMut for &mut Image<T> {
+impl<T: Copy, S: PixelSpace> RasterImageMut for &mut Image<T, S> {
     #[inline(always)]
     fn row_mut(&mut self, y: usize) -> &mut [Self::Pixel] {
         (*self).row_mut(y)
     }
 }
 
-impl<T: Copy> RasterImage for Image<T> {
+impl<T: Copy, S: PixelSpace> RasterImage for Image<T, S> {
     #[inline(always)]
     fn row(&self, y: usize) -> &[Self::Pixel] {
         let (start, end) = internal::checked_row_range_or_panic(&self.size, y);
@@ -1835,7 +2167,7 @@ impl<T: Copy> RasterImage for Image<T> {
     }
 }
 
-impl<T: Copy> RasterImageMut for Image<T> {
+impl<T: Copy, S: PixelSpace> RasterImageMut for Image<T, S> {
     #[inline(always)]
     fn row_mut(&mut self, y: usize) -> &mut [Self::Pixel] {
         let (start, end) = internal::checked_row_range_or_panic(&self.size, y);
@@ -1843,21 +2175,21 @@ impl<T: Copy> RasterImageMut for Image<T> {
     }
 }
 
-impl<T: Copy> contiguous_sealed::Sealed for Image<T> {}
+impl<T: Copy, S: PixelSpace> contiguous_sealed::Sealed for Image<T, S> {}
 
-impl<T: Copy> ContiguousImage for Image<T> {
+impl<T: Copy, S: PixelSpace> ContiguousImage for Image<T, S> {
     fn as_slice(&self) -> &[Self::Pixel] {
         &self.data
     }
 }
 
-impl<T: Copy> ContiguousImageMut for Image<T> {
+impl<T: Copy, S: PixelSpace> ContiguousImageMut for Image<T, S> {
     fn as_mut_slice(&mut self) -> &mut [Self::Pixel] {
         &mut self.data
     }
 }
 
-impl<T: PlainPixel> PlainImage for Image<T> {
+impl<T: PlainPixel, S: PixelSpace> PlainImage for Image<T, S> {
     fn as_bytes(&self) -> &[u8] {
         unsafe { internal::as_bytes(self.as_slice()) }
     }
@@ -1871,13 +2203,13 @@ impl<T: PlainPixel> PlainImage for Image<T> {
     }
 }
 
-impl<T: PlainPixel> PlainImageMut for Image<T> {
+impl<T: PlainPixel, S: PixelSpace> PlainImageMut for Image<T, S> {
     fn as_mut_bytes(&mut self) -> &mut [u8] {
         unsafe { internal::as_mut_bytes(self.as_mut_slice()) }
     }
 }
 
-impl<P: Copy, C: Into<Coordinate>> Index<C> for Image<P> {
+impl<P: Copy, C: Into<Coordinate>, S: PixelSpace> Index<C> for Image<P, S> {
     type Output = P;
 
     #[inline(always)]
@@ -1887,7 +2219,7 @@ impl<P: Copy, C: Into<Coordinate>> Index<C> for Image<P> {
     }
 }
 
-impl<P: Copy, C: Into<Coordinate>> IndexMut<C> for Image<P> {
+impl<P: Copy, C: Into<Coordinate>, S: PixelSpace> IndexMut<C> for Image<P, S> {
     #[inline(always)]
     fn index_mut(&mut self, index: C) -> &mut Self::Output {
         let Coordinate { x, y } = index.into();
@@ -1910,7 +2242,10 @@ mod tests {
 
     #[test]
     fn test_image_array_get() {
-        let mut img = ImageArray::<u8, 2, 2> { data: [1, 2, 3, 4] };
+        let mut img = ImageArray::<u8, 2, 2> {
+            data: [1, 2, 3, 4],
+            space: PhantomData,
+        };
         assert_eq!(img.get(0, 0), Some(1));
         assert_eq!(img.get(1, 0), Some(2));
         assert_eq!(img.get(0, 1), Some(3));
@@ -3248,7 +3583,7 @@ mod tests {
         assert!(view.is_contiguous());
 
         // Strided view is not contiguous
-        let strided = ImageRef::strided(Size::new(2, 2), 3, 0, &data).unwrap();
+        let strided = ImageRef::<_, Pixels>::strided(Size::new(2, 2), 3, 0, &data).unwrap();
         assert!(!strided.is_contiguous());
     }
 
@@ -3256,7 +3591,7 @@ mod tests {
     fn test_image_ref_strided_pixel_at() {
         // 4x3 buffer, viewing a 2x2 sub-region starting at (1, 1)
         let data: Vec<u8> = (0..12).collect();
-        let view = ImageRef::strided(Size::new(2, 2), 4, 5, &data).unwrap();
+        let view = ImageRef::<_, Pixels>::strided(Size::new(2, 2), 4, 5, &data).unwrap();
         assert_eq!(view.pixel_at(0, 0), 5); // data[5]
         assert_eq!(view.pixel_at(1, 0), 6); // data[6]
         assert_eq!(view.pixel_at(0, 1), 9); // data[9]
@@ -3957,7 +4292,7 @@ mod tests {
 
     #[test]
     fn test_raster_image_via_trait() {
-        fn read_row(img: &dyn RasterImage<Pixel = u8>, y: usize) -> Vec<u8> {
+        fn read_row(img: &dyn RasterImage<Pixel = u8, Space = Pixels>, y: usize) -> Vec<u8> {
             img.row(y).to_vec()
         }
 
@@ -3968,7 +4303,7 @@ mod tests {
 
     #[test]
     fn test_raster_image_mut_via_trait() {
-        fn fill_row(img: &mut dyn RasterImageMut<Pixel = u8>, y: usize, val: u8) {
+        fn fill_row(img: &mut dyn RasterImageMut<Pixel = u8, Space = Pixels>, y: usize, val: u8) {
             img.row_mut(y).fill(val);
         }
 
@@ -4296,5 +4631,75 @@ mod origin_invariant_gate_tests {
         );
         assert_eq!(img.tiles(Size::new(2, 2)).count(), 4);
         assert_eq!(img.sliding_windows(Size::new(2, 2)).count(), 9);
+    }
+
+    // ── The space ──────────────────────────────────────────────────────
+
+    use crate::geometry::{PixelSpace, Pixels};
+    use crate::image::{ContiguousImage, ImageArray, ImageRef, ImageRefMut, RasterImage};
+
+    /// A space that implements nothing beyond the two marker traits, and
+    /// holds a raw pointer, so it is neither `Send` nor `Sync`.
+    struct Bare(#[allow(dead_code)] *const u8);
+    impl crate::geometry::LengthUnit for Bare {}
+    impl PixelSpace for Bare {}
+
+    #[test]
+    fn an_image_is_send_and_sync_whatever_its_space() {
+        fn send_sync<T: Send + Sync>() {}
+        send_sync::<Image<Mono8, Bare>>();
+        send_sync::<ImageRef<'static, Mono8, Bare>>();
+        send_sync::<ImageRefMut<'static, Mono8, Bare>>();
+        send_sync::<ImageArray<Mono8, 2, 2, Bare>>();
+    }
+
+    #[test]
+    fn clone_debug_and_equality_need_nothing_of_the_space() {
+        let a: Image<Mono8, Bare> = Image::fill(2, 2, Mono8::new(7)).into_space();
+        let b = a.clone();
+        assert_eq!(a, b);
+        assert!(format!("{a:?}").contains("space: \"Bare\""));
+        let view = a.as_space::<Bare>();
+        let copy = view;
+        assert_eq!(copy.pixel_at(1, 1), Mono8::new(7));
+        assert!(format!("{view:?}").starts_with("ImageRef"));
+    }
+
+    #[test]
+    fn relabelling_changes_no_pixel() {
+        use crate::IdealPixels;
+        let raw = Image::generate(3, 2, |x, y| Mono8::new((10 * y + x) as u8));
+        let ideal: Image<Mono8, IdealPixels> = raw.clone().into_space();
+        assert_eq!(ideal.as_slice(), raw.as_slice());
+
+        let back = ideal.as_space::<Pixels>();
+        for y in 0..2 {
+            for x in 0..3 {
+                assert_eq!(back.pixel_at(x, y), raw.pixel_at(x, y));
+            }
+        }
+
+        let mut target = Image::fill(3, 2, Mono8::new(0));
+        let mut view = target.as_space_mut::<IdealPixels>();
+        *view.pixel_at_mut(2, 1) = Mono8::new(42);
+        assert_eq!(target.pixel_at(2, 1), Mono8::new(42));
+
+        let data = [1u8, 2, 3, 4];
+        let r = ImageRef::new(2, 2, &data)
+            .unwrap()
+            .into_space::<IdealPixels>();
+        assert_eq!(r.row(1), &[3, 4]);
+        let a: ImageArray<u8, 2, 2> = ImageArray::new([5, 6, 7, 8]);
+        assert_eq!(a.into_space::<IdealPixels>().as_slice(), &[5, 6, 7, 8]);
+    }
+
+    #[test]
+    fn a_region_keeps_its_parents_space() {
+        use crate::IdealPixels;
+        let ideal: Image<Mono8, IdealPixels> =
+            Image::generate(4, 4, |x, y| Mono8::new((4 * y + x) as u8)).into_space();
+        let roi: ImageRef<'_, Mono8, IdealPixels> =
+            ideal.roi(Rectangle::new((1, 1), (2, 2))).unwrap();
+        assert_eq!(roi.pixel_at(0, 0), Mono8::new(5));
     }
 }

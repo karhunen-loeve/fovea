@@ -1,3 +1,4 @@
+use crate::geometry::PixelSpace;
 use crate::{Size, internal};
 
 // ───────────────────────────────────────────────────────────────────
@@ -9,6 +10,55 @@ use crate::{Size, internal};
 pub trait ImageView {
     /// The pixel type stored in this image view.
     type Pixel: Copy;
+
+    /// The space the image's grid lies in:
+    /// [`Pixels`](crate::Pixels) for an image as the camera delivered it,
+    /// [`IdealPixels`](crate::IdealPixels) for one remapped through a lens
+    /// model, or a [`PixelSpace`] of your own.
+    ///
+    /// Every operation passes the space through: a filter, a resize or a
+    /// region of interest returns an image in the space of its input, a
+    /// position found on an image is a [`Point`](crate::Point) in that
+    /// space, and an operation that combines two images requires them to
+    /// share one. Images built from numbers are in `Pixels`; a named
+    /// relabelling such as [`Image::into_space`](crate::image::Image::into_space)
+    /// states another.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use fovea::image::{Image, ImageView};
+    /// use fovea::pixel::Mono8;
+    /// use fovea::{IdealPixels, Pixels};
+    ///
+    /// fn space_name<I: ImageView>(_: &I) -> &'static str {
+    ///     core::any::type_name::<I::Space>().rsplit("::").next().unwrap()
+    /// }
+    ///
+    /// let raw = Image::fill(4, 4, Mono8::new(0));
+    /// let ideal = raw.clone().into_space::<IdealPixels>();
+    /// assert_eq!(space_name(&raw), "Pixels");
+    /// assert_eq!(space_name(&ideal), "IdealPixels");
+    /// let _: &Image<Mono8, Pixels> = &raw;
+    /// ```
+    ///
+    /// An image whose space is a unit of the world is no image view, so no
+    /// operation accepts it:
+    ///
+    /// ```compile_fail
+    /// use fovea::Millimeter;
+    /// use fovea::image::{Image, ImageView};
+    /// use fovea::pixel::Mono8;
+    ///
+    /// fn width(image: &impl ImageView) -> usize {
+    ///     image.width()
+    /// }
+    ///
+    /// fn in_millimetres(image: &Image<Mono8, Millimeter>) -> usize {
+    ///     width(image)
+    /// }
+    /// ```
+    type Space: PixelSpace;
 
     /// Returns the dimensions of the image as a [`Size`].
     fn size(&self) -> Size;

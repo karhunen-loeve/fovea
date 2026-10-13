@@ -258,14 +258,14 @@ pub trait DemosaicMethod<B: BayerPixel> {
 /// let _: Image<Rgb8> = demosaic(&raw, BayerBilinear);
 /// ```
 #[must_use]
-pub fn demosaic<I, B, M>(image: &I, method: M) -> Image<B::RgbOutput>
+pub fn demosaic<I, B, M>(image: &I, method: M) -> Image<B::RgbOutput, I::Space>
 where
     I: ImageView<Pixel = B>,
     B: BayerPixel + LinearPixel<f32, Accumulator = MonoF32>,
     B::RgbOutput: ZeroablePixel + FromLinear<RgbF32>,
     M: DemosaicMethod<B>,
 {
-    let mut output = Image::<B::RgbOutput>::zero(image.width(), image.height());
+    let mut output = Image::<B::RgbOutput, _>::zero_in(image.width(), image.height());
     demosaic_into(image, &mut output, method);
     output
 }
@@ -313,7 +313,7 @@ pub fn demosaic_into<I, B, O, M>(image: &I, output: &mut O, method: M)
 where
     I: ImageView<Pixel = B>,
     B: BayerPixel + LinearPixel<f32, Accumulator = MonoF32>,
-    O: ImageViewMut<Pixel = B::RgbOutput>,
+    O: ImageViewMut<Pixel = B::RgbOutput, Space = I::Space>,
     B::RgbOutput: FromLinear<RgbF32>,
     M: DemosaicMethod<B>,
 {
@@ -833,12 +833,12 @@ impl BayerGains {
 /// assert_eq!(balanced.pixel_at(1, 1).value(), 1250); // B site
 /// ```
 #[must_use]
-pub fn white_balance<I, B>(image: &I, gains: BayerGains) -> Image<B>
+pub fn white_balance<I, B>(image: &I, gains: BayerGains) -> Image<B, I::Space>
 where
     I: ImageView<Pixel = B>,
     B: BayerPixel + LinearPixel<f32, Accumulator = MonoF32> + FromLinear<MonoF32> + ZeroablePixel,
 {
-    let mut output = Image::<B>::zero(image.width(), image.height());
+    let mut output = Image::<B, _>::zero_in(image.width(), image.height());
     white_balance_into(image, &mut output, gains);
     output
 }
@@ -873,7 +873,7 @@ pub fn white_balance_into<I, B, O>(image: &I, output: &mut O, gains: BayerGains)
 where
     I: ImageView<Pixel = B>,
     B: BayerPixel + LinearPixel<f32, Accumulator = MonoF32> + FromLinear<MonoF32>,
-    O: ImageViewMut<Pixel = B>,
+    O: ImageViewMut<Pixel = B, Space = I::Space>,
 {
     assert_eq!(
         image.size(),

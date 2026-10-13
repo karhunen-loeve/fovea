@@ -299,7 +299,7 @@ pub fn fold_neighborhood_into<I, WI, B, O, F, P, W, Out>(
     WI: ImageView<Pixel = W>,
     W: Copy,
     B: BorderPolicy<I>,
-    O: RasterImageMut<Pixel = Out>,
+    O: RasterImageMut<Pixel = Out, Space = I::Space>,
     F: FoldOp<P, W, Output = Out>,
 {
     // Owns the working buffers for the duration of the call and delegates
@@ -370,7 +370,7 @@ pub(crate) fn fold_neighborhood_into_with_scratch<I, WI, B, O, F, P, W, Out>(
     WI: ImageView<Pixel = W>,
     W: Copy,
     B: BorderPolicy<I>,
-    O: RasterImageMut<Pixel = Out>,
+    O: RasterImageMut<Pixel = Out, Space = I::Space>,
     F: FoldOp<P, W, Output = Out>,
 {
     let FoldScratch { acc_row, positions } = scratch;
@@ -563,7 +563,7 @@ pub fn fold_neighborhood<I, WI, B, F, P, W, Out>(
     anchor: Coordinate,
     border: &B,
     f: F,
-) -> Image<Out>
+) -> Image<Out, I::Space>
 where
     I: RasterImage<Pixel = P>,
     P: Copy,
@@ -574,7 +574,7 @@ where
     F: FoldOp<P, W, Output = Out>,
 {
     let output_region = border.output_region(image.size(), weights.size(), anchor);
-    let mut out = Image::<Out>::zero(output_region.size.width, output_region.size.height);
+    let mut out = Image::<Out, _>::zero_in(output_region.size.width, output_region.size.height);
     fold_neighborhood_into(image, weights, anchor, border, &mut out, f);
     out
 }
@@ -631,7 +631,7 @@ pub fn fold_neighborhood_fn_into<I, WI, B, O, F, P, W, Out>(
     WI: ImageView<Pixel = W>,
     W: Copy,
     B: BorderPolicy<I>,
-    O: RasterImageMut<Pixel = Out>,
+    O: RasterImageMut<Pixel = Out, Space = I::Space>,
     F: FnMut(&mut dyn Iterator<Item = FoldItem<P, W>>) -> Out,
 {
     fold_neighborhood_into(image, weights, anchor, border, output, ClosureFold(f));
@@ -682,7 +682,7 @@ pub fn fold_neighborhood_fn<I, WI, B, F, P, W, Out>(
     anchor: Coordinate,
     border: &B,
     f: F,
-) -> Image<Out>
+) -> Image<Out, I::Space>
 where
     I: RasterImage<Pixel = P>,
     P: Copy,

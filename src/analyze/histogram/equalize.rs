@@ -116,13 +116,13 @@ where
 /// assert_eq!(u8::from(out.pixel_at(0, 0)), 0);
 /// assert_eq!(u8::from(out.pixel_at(10, 0)), 255);
 /// ```
-pub fn equalize_image<I, P>(image: &I) -> Result<Image<P>, Error>
+pub fn equalize_image<I, P>(image: &I) -> Result<Image<P, I::Space>, Error>
 where
     I: RasterImage<Pixel = P>,
     P: ChannelwiseMath<Channel = Saturating<u8>> + ZeroablePixel,
     NaturalBins: BinningStrategy<P::Channel>,
 {
-    let mut out = Image::<P>::zero(image.width(), image.height());
+    let mut out = Image::<P, _>::zero_in(image.width(), image.height());
     equalize_image_into(image, &mut out)?;
     Ok(out)
 }
@@ -135,7 +135,7 @@ where
 pub fn equalize_image_into<I, O, P>(image: &I, out: &mut O) -> Result<(), Error>
 where
     I: RasterImage<Pixel = P>,
-    O: RasterImageMut<Pixel = P>,
+    O: RasterImageMut<Pixel = P, Space = I::Space>,
     P: ChannelwiseMath<Channel = Saturating<u8>>,
     NaturalBins: BinningStrategy<P::Channel>,
 {

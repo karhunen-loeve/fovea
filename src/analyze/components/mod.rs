@@ -45,7 +45,7 @@
 //! ];
 //! let img = BinaryImage::from_vec(4, 4, pixels).unwrap();
 //! let result: Labeling<Label32> =
-//!     connected_components::<Label32, Connectivity4>(&img).unwrap();
+//!     connected_components::<Label32, Connectivity4, _>(&img).unwrap();
 //! assert_eq!(result.label_count, 2);
 //! ```
 
@@ -63,13 +63,15 @@ pub use engine::{
 pub use measurements::BlobMeasurements;
 pub use stats::ComponentStats;
 
+use crate::geometry::{PixelSpace, Pixels};
 use crate::image::{Image, ImageView};
 use crate::pixel::LabelPixel;
 
 /// The result of a connected-components pass.
 ///
 /// Plain-fields struct: callers read `labels` and `label_count`
-/// directly. `labels` is a regular [`Image<L>`] that flows through
+/// directly. `labels` is a regular [`Image<L, S>`](Image), in the space
+/// `S` of the labeled image, that flows through
 /// every `ImageView` / `RasterImage` / `SubView` consumer unchanged;
 /// `label_count` exists so callers don't have to rescan the image to
 /// recover the number of distinct foreground components.
@@ -91,16 +93,16 @@ use crate::pixel::LabelPixel;
 /// deliberately *not* derived because there is no canonical notion of
 /// equality for two labelings that survives a permutation of labels
 /// (relabel-equivalence is a separate, follow-up concept).
-pub struct Labeling<L: LabelPixel> {
+pub struct Labeling<L: LabelPixel, S = Pixels> {
     /// The label image. Pixel `(x, y) == L::zero()` is background;
     /// any other value is a foreground label in `1..=label_count`.
-    pub labels: Image<L>,
+    pub labels: Image<L, S>,
 
     /// Number of distinct foreground components in `labels`.
     pub label_count: u32,
 }
 
-impl<L: LabelPixel> core::fmt::Debug for Labeling<L> {
+impl<L: LabelPixel, S: PixelSpace> core::fmt::Debug for Labeling<L, S> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Labeling")
             .field("width", &self.labels.width())
@@ -110,14 +112,10 @@ impl<L: LabelPixel> core::fmt::Debug for Labeling<L> {
     }
 }
 
-impl<L: LabelPixel> Clone for Labeling<L> {
+impl<L: LabelPixel, S> Clone for Labeling<L, S> {
     fn clone(&self) -> Self {
-        // Clone the underlying buffer pixel-by-pixel via `Image::generate`.
-        let w = self.labels.width();
-        let h = self.labels.height();
-        let labels = Image::<L>::generate(w, h, |x, y| self.labels.pixel_at(x, y));
         Self {
-            labels,
+            labels: self.labels.clone(),
             label_count: self.label_count,
         }
     }

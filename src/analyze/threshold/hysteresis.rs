@@ -8,7 +8,7 @@
 use crate::Error;
 use crate::analyze::components::{Connectivity8, connected_components};
 use crate::error::{ParameterError, Requirement, Value};
-use crate::image::{BinaryImage, ImageView, RasterImage, RasterImageMut};
+use crate::image::{BinaryImage, Image, ImageView, RasterImage, RasterImageMut};
 use crate::pixel::{Label32, LabelPixel, SingleChannel};
 
 /// A validated pair of hysteresis thresholds: `low <= high`.
@@ -191,7 +191,7 @@ impl<C: Copy> HysteresisThresholds<C> {
 pub fn hysteresis_threshold<I, P>(
     image: &I,
     thresholds: HysteresisThresholds<P::Channel>,
-) -> BinaryImage
+) -> BinaryImage<I::Space>
 where
     I: RasterImage<Pixel = P>,
     P: SingleChannel,
@@ -199,7 +199,7 @@ where
 {
     // Owned variant allocates the output and delegates, matching the
     // `connected_components` / `connected_components_into` convention.
-    let mut out = BinaryImage::fill(image.width(), image.height(), false);
+    let mut out = Image::fill_in(image.width(), image.height(), false);
     hysteresis_threshold_into(image, thresholds, &mut out);
     out
 }
@@ -217,7 +217,7 @@ where
 pub fn hysteresis_threshold_into<I, P>(
     image: &I,
     thresholds: HysteresisThresholds<P::Channel>,
-    out: &mut BinaryImage,
+    out: &mut BinaryImage<I::Space>,
 ) where
     I: RasterImage<Pixel = P>,
     P: SingleChannel,
@@ -252,7 +252,7 @@ pub fn hysteresis_threshold_into<I, P>(
 
     // 2. Label the weak mask with 8-connectivity. The strong mask is
     //    never materialised — `>= high` is tested inline in step 3.
-    let labeling = connected_components::<Label32, Connectivity8>(&weak).expect(
+    let labeling = connected_components::<Label32, Connectivity8, _>(&weak).expect(
         "hysteresis_threshold: weak-component count exceeds Label32 capacity (u32::MAX); \
          an image with that many components is not representable",
     );

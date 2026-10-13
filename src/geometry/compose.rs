@@ -5,7 +5,7 @@ use super::homography::Homography;
 use super::lens::BrownConrady;
 use super::map::{AffineMap, PlaneMap};
 use super::point::Point;
-use super::units::{LengthUnit, Pixels};
+use super::units::{IdealPixels, LengthUnit, PixelSpace};
 
 /// The composition of one mapping with another: `self` first, then `next`.
 ///
@@ -28,7 +28,7 @@ pub trait Compose<B> {
 /// # Example
 ///
 /// ```
-/// use fovea::{Pixels, Point};
+/// use fovea::{IdealPixels, Pixels, Point};
 /// use fovea::geometry::{BrownConrady, CameraMatrix, FocalLength, PlaneMap, UniformScale};
 ///
 /// let cam = CameraMatrix::try_new(FocalLength { x: 1000.0, y: 1000.0 }, Point::new(640.0, 480.0))?;
@@ -36,7 +36,7 @@ pub trait Compose<B> {
 ///
 /// // An undistorted view at half the resolution: a pixel of it is two of
 /// // the ideal image, which the lens then distorts.
-/// let half: UniformScale<Pixels, Pixels> = fovea::uniform_scale!(2.0);
+/// let half: UniformScale<Pixels, IdealPixels> = fovea::uniform_scale!(2.0);
 /// let chain = half.then(lens);
 /// let p = Point::new(100.0, 50.0);
 /// assert_eq!(chain.try_map_point(p), lens.try_map_point(Point::new(200.0, 100.0)));
@@ -77,11 +77,12 @@ where
     }
 }
 
-/// Any mapping ending in pixels, followed by a lens model: undistort then
-/// rectify, or give the undistorted image a camera matrix of its own.
+/// Any mapping ending in the ideal image, followed by a lens model: a
+/// rectification read through the lens in one step, or the undistorted
+/// image given a camera matrix of its own.
 impl<A> Compose<BrownConrady> for A
 where
-    A: PlaneMap<Codomain = Pixels>,
+    A: PlaneMap<Codomain = IdealPixels>,
 {
     type Output = Chain<A, BrownConrady>;
 
@@ -136,10 +137,20 @@ mod sealed {
 /// Implemented by the two direction types, [`DestToSource`] and
 /// [`SourceToDest`], and by nothing else, so a remap always says in its
 /// type which way its mapping runs. Sealed.
+///
+/// Both ends are spaces measured in pixels: a remap reads an image in
+/// [`Source`](Self::Source) and returns one in [`Dest`](Self::Dest). A
+/// mapping into a unit of the world, a calibration, is no lookup, so a
+/// remap through it does not compile.
 pub trait SourceLookup: sealed::Sealed {
+    /// The space of the destination, the image a remap returns.
+    type Dest: PixelSpace;
+    /// The space of the source, the image a remap reads.
+    type Source: PixelSpace;
+
     /// The position in the source image of the destination pixel `dest`, or
     /// `None` where the mapping has none.
-    fn source_of(&self, dest: Point<Pixels>) -> Option<Point<Pixels>>;
+    fn source_of(&self, dest: Point<Self::Dest>) -> Option<Point<Self::Source>>;
 }
 
 /// A mapping from destination pixels to source pixels, used as it is.
@@ -213,18 +224,28 @@ impl<M: Invertible> sealed::Sealed for SourceToDest<M> {}
 
 impl<M> SourceLookup for DestToSource<M>
 where
-    M: PlaneMap<Domain = Pixels, Codomain = Pixels>,
+    M: PlaneMap,
+    M::Domain: PixelSpace,
+    M::Codomain: PixelSpace,
 {
-    fn source_of(&self, dest: Point<Pixels>) -> Option<Point<Pixels>> {
+    type Dest = M::Domain;
+    type Source = M::Codomain;
+
+    fn source_of(&self, dest: Point<M::Domain>) -> Option<Point<M::Codomain>> {
         self.0.try_map_point(dest)
     }
 }
 
 impl<M> SourceLookup for SourceToDest<M>
 where
-    M: Invertible<Domain = Pixels, Codomain = Pixels>,
+    M: Invertible,
+    M::Domain: PixelSpace,
+    M::Codomain: PixelSpace,
 {
-    fn source_of(&self, dest: Point<Pixels>) -> Option<Point<Pixels>> {
+    type Dest = M::Codomain;
+    type Source = M::Domain;
+
+    fn source_of(&self, dest: Point<M::Codomain>) -> Option<Point<M::Domain>> {
         self.inverse.try_map_point(dest)
     }
 }
@@ -233,6 +254,7 @@ where
 mod tests {
     use super::*;
     use crate::geometry::{CameraMatrix, FocalLength, Vector};
+    use crate::{IdealPixels, Pixels};
 
     fn lens() -> BrownConrady {
         let cam =
@@ -243,7 +265,7 @@ mod tests {
 
     #[test]
     fn a_chain_applies_its_mappings_in_order() {
-        let shift: Affine<Pixels, Pixels> =
+        let shift: Affine<Pixels, IdealPixels> =
             Affine::try_new([[1.0, 0.0], [0.0, 1.0]], Vector::new(10.0, -5.0)).unwrap();
         let chain = shift.then(lens());
         let p = Point::new(100.0, 200.0);
@@ -257,7 +279,7 @@ mod tests {
 
     #[test]
     fn a_chain_has_no_image_where_its_first_mapping_has_none() {
-        let h: Homography<Pixels, Pixels> =
+        let h: Homography<Pixels, IdealPixels> =
             Homography::try_new([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.5, 1.0]]).unwrap();
         let chain = h.then(lens());
         assert_eq!(chain.try_map_point(Point::new(3.0, -2.0)), None);

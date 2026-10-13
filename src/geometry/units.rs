@@ -25,7 +25,59 @@ use core::marker::PhantomData;
 /// ```
 pub trait LengthUnit {}
 
-/// The pixels of the image a position was measured in.
+/// A space measured in the pixels of an image: the space an image's grid
+/// lies in.
+///
+/// Every image carries one as its [`ImageView::Space`], and so does every
+/// position the crate reports from an image. Implemented by [`Pixels`], the
+/// image as stored, and [`IdealPixels`], the ideal image of a lens model.
+/// The trait is open: an image rectified onto a plane of your own lies in a
+/// space of your own, which implements [`LengthUnit`] and `PixelSpace`.
+///
+/// A unit of the world is not a pixel space. A position in millimetres
+/// reaches an image through the inverse of a calibration, which says which
+/// pixel space it lands in, so a remap or a sample through a calibration
+/// does not compile.
+///
+/// # Example
+///
+/// ```
+/// use fovea::geometry::{LengthUnit, PixelSpace, Point};
+///
+/// /// The pixels of an image rectified onto the measured plate.
+/// struct Plate;
+/// impl LengthUnit for Plate {}
+/// impl PixelSpace for Plate {}
+///
+/// let p: Point<Plate> = Point::new(40.0, 12.5);
+/// assert_eq!(p.x, 40.0);
+/// ```
+///
+/// A world unit is refused where a pixel space is required:
+///
+/// ```compile_fail
+/// use fovea::Millimeter;
+/// use fovea::geometry::PixelSpace;
+///
+/// fn needs_pixels<S: PixelSpace>() {}
+/// needs_pixels::<Millimeter>();
+/// ```
+///
+/// [`ImageView::Space`]: crate::image::ImageView::Space
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` is not a space measured in pixels",
+    label = "an image, a caliper and a remap need a pixel space",
+    note = "a unit of the world reaches an image through the inverse of a calibration; \
+            a pixel space of your own implements `PixelSpace`"
+)]
+pub trait PixelSpace: LengthUnit {}
+
+/// The pixels of an image as it is stored: the grid the camera delivered.
+///
+/// Through a distorting lens, straight lines of the scene bend in this
+/// space. [`IdealPixels`] is the space after a lens model's correction. A
+/// calibration from `Pixels` straight into a unit of the world, without a
+/// lens model, states that the distortion is negligible.
 ///
 /// Positions follow the pixel-centre convention: `Point::<Pixels>::new(0.0,
 /// 0.0)` is the centre of pixel `(0, 0)`, and a step between columns 5 and
@@ -33,18 +85,62 @@ pub trait LengthUnit {}
 /// level's pixels; map it to the base image through the level's grid
 /// spacing and origin offset before combining it with base-image positions.
 ///
+/// Every image constructor builds its image in `Pixels`, the default space
+/// of [`Image`](crate::image::Image), so `Image<Mono8>` is
+/// `Image<Mono8, Pixels>`.
+///
 /// # Example
 ///
 /// ```
-/// use fovea::{CoordinateF64, Pixels, Point};
+/// use fovea::{Pixels, Point};
 ///
-/// let p: Point<Pixels> = CoordinateF64::new(12.5, 3.0).into();
+/// let p: Point<Pixels> = Point::new(12.5, 3.0);
 /// assert_eq!((p.x, p.y), (12.5, 3.0));
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Pixels;
 
 impl LengthUnit for Pixels {}
+impl PixelSpace for Pixels {}
+
+/// The pixels of the ideal image of a lens model: where a camera without
+/// distortion would have put each point.
+///
+/// In this space straight lines are straight, so a line fit is correct.
+/// Lengths and circles keep their shape only on a plane square to the
+/// optical axis, or through a telecentric lens; a calibration from here
+/// into a unit of the world says which case holds, by its class (a
+/// conformal mapping for the square plane, a homography for a tilted one).
+///
+/// A lens model's correction of a measured point returns a position in this
+/// space, and a remap through the lens model returns an image in it, so a
+/// point corrected twice, or a camera image compared with an undistorted
+/// one, does not compile.
+///
+/// # Example
+///
+/// ```
+/// use fovea::{IdealPixels, Pixels, Point};
+///
+/// let raw: Point<Pixels> = Point::new(10.0, 20.0);
+/// let ideal: Point<IdealPixels> = Point::new(10.4, 20.3);
+/// assert_eq!((raw.x, ideal.x), (10.0, 10.4));
+/// ```
+///
+/// The two spaces do not mix:
+///
+/// ```compile_fail
+/// use fovea::{IdealPixels, Pixels, Point};
+///
+/// let raw: Point<Pixels> = Point::new(10.0, 20.0);
+/// let ideal: Point<IdealPixels> = Point::new(10.4, 20.3);
+/// let _ = raw - ideal;
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct IdealPixels;
+
+impl LengthUnit for IdealPixels {}
+impl PixelSpace for IdealPixels {}
 
 mod sealed {
     pub trait Sealed {}

@@ -9,6 +9,7 @@
 use crate::{Coordinate, Offset};
 
 use super::Contour;
+use crate::geometry::PixelSpace;
 
 /// One step of an 8-connected chain code, in image coordinates.
 ///
@@ -103,7 +104,7 @@ impl ChainDirection {
 /// use fovea::pixel::Label32;
 ///
 /// let img: BinaryImage = Image::generate(4, 4, |x, y| (1..3).contains(&x) && (1..3).contains(&y));
-/// let (_, hierarchy) = extract_contours::<Label32, Connectivity8>(&img).unwrap();
+/// let (_, hierarchy) = extract_contours::<Label32, Connectivity8, _>(&img).unwrap();
 /// let contour = hierarchy.components()[0].outer();
 ///
 /// let chain = contour.chain_code();
@@ -122,7 +123,7 @@ impl ChainCode {
     /// Total: every consecutive pair of traced points — including the
     /// closing pair last→first — is 8-adjacent by construction.
     #[must_use]
-    pub fn from_contour(contour: &Contour) -> Self {
+    pub fn from_contour<S: PixelSpace>(contour: &Contour<S>) -> Self {
         let points = contour.points();
         let start = points[0];
         let moves = if points.len() < 2 {

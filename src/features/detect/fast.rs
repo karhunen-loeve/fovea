@@ -6,9 +6,10 @@
 use crate::border::BorderPolicy;
 use crate::error::{Error, ParameterError, Requirement, Value};
 use crate::features::Corner;
+use crate::geometry::{PixelSpace, Point};
 use crate::image::{Decimated, Image, ImageView, RasterImage, RasterImageMut};
 use crate::pixel::{LinearPixel, MonoF32, SingleChannel};
-use crate::{Coordinate, CoordinateF64, Offset, Rectangle, Size};
+use crate::{Coordinate, Offset, Rectangle, Size};
 
 use super::peaks::{NmsRadius, corner_peaks, lift_peaks, scan_peaks};
 
@@ -416,7 +417,11 @@ where
 /// assert_eq!(scores.pixel_at(16, 16).value(), 0.0);
 /// ```
 #[must_use]
-pub fn fast_score_map<I, P, Acc, B>(image: &I, test: SegmentTest, border: &B) -> Image<MonoF32>
+pub fn fast_score_map<I, P, Acc, B>(
+    image: &I,
+    test: SegmentTest,
+    border: &B,
+) -> Image<MonoF32, I::Space>
 where
     I: RasterImage<Pixel = P>,
     P: Copy + LinearPixel<f32, Accumulator = Acc>,
@@ -426,7 +431,7 @@ where
 {
     let region = scored_region(image, border);
     let (width, height) = (image.width(), image.height());
-    let mut out = Image::fill(width, height, MonoF32::new(0.0));
+    let mut out = Image::fill_in(width, height, MonoF32::new(0.0));
 
     // The columns whose ring fits horizontally, intersected with the region.
     // `Skip` already excludes the border, so under it this *is* the region
@@ -521,7 +526,7 @@ where
 /// assert!(corners.iter().all(|c| (c.response() - 1.0).abs() < 1e-6));
 /// ```
 #[must_use]
-pub fn fast<I, P, Acc, B>(image: &I, params: FastParams, border: &B) -> Vec<Corner>
+pub fn fast<I, P, Acc, B>(image: &I, params: FastParams, border: &B) -> Vec<Corner<I::Space>>
 where
     I: RasterImage<Pixel = P>,
     P: Copy + LinearPixel<f32, Accumulator = Acc>,
@@ -556,7 +561,7 @@ where
 /// # Example
 ///
 /// ```
-/// use fovea::CoordinateF64;
+/// use fovea::{Pixels, Point};
 /// use fovea::border::Skip;
 /// use fovea::features::HasPosition;
 /// use fovea::features::detect::{fast_in_level, FastParams, NmsRadius, SegmentTest};
@@ -581,13 +586,17 @@ where
 /// assert!(corners.iter().any(|c| c.position().x > 32.0), "{corners:?}");
 /// ```
 #[must_use]
-pub fn fast_in_level<L, P, Acc, B>(level: &L, params: FastParams, border: &B) -> Vec<Corner>
+pub fn fast_in_level<L, P, Acc, B>(
+    level: &L,
+    params: FastParams,
+    border: &B,
+) -> Vec<Corner<L::Space>>
 where
     L: Decimated<Pixel = P>,
     P: Copy + LinearPixel<f32, Accumulator = Acc>,
     Acc: SingleChannel,
     f64: From<Acc::Channel>,
-    B: BorderPolicy<Image<P>>,
+    B: BorderPolicy<Image<P, L::Space>>,
 {
     let scores = fast_score_map(level.as_image(), params.test(), border);
     lift_peaks(
@@ -609,16 +618,20 @@ where
 /// `f64: From<P::Channel>` bound: with two type parameters to infer and an
 /// environment bound of exactly that shape, the compiler unifies the map's
 /// pixel type with the input image's.
-fn score_peaks(scores: &Image<MonoF32>, threshold: f32, radius: usize) -> Vec<Corner> {
+fn score_peaks<S: PixelSpace>(
+    scores: &Image<MonoF32, S>,
+    threshold: f32,
+    radius: usize,
+) -> Vec<Corner<S>> {
     corner_peaks(scores, threshold, radius)
 }
 
 /// [`scan_peaks`] at the concrete score-map type; see [`score_peaks`].
-fn scan_score_peaks(
-    scores: &Image<MonoF32>,
+fn scan_score_peaks<S: PixelSpace>(
+    scores: &Image<MonoF32, S>,
     threshold: f32,
     radius: usize,
-) -> Vec<(CoordinateF64, f32)> {
+) -> Vec<(Point<S>, f32)> {
     scan_peaks(scores, threshold, radius)
 }
 

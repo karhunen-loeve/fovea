@@ -192,7 +192,7 @@ where
     P: Copy + Ord,
     K: Kernel<Weight = bool>,
     B: BorderPolicy<I>,
-    O: RasterImageMut<Pixel = P>,
+    O: RasterImageMut<Pixel = P, Space = I::Space>,
 {
     map_neighborhood_into(
         image,
@@ -227,7 +227,7 @@ where
 /// assert_eq!(result.pixel_at(2, 2), 6);
 /// ```
 #[must_use]
-pub fn erode<I, K, B, P>(image: &I, kernel: &K, border: &B) -> Image<P>
+pub fn erode<I, K, B, P>(image: &I, kernel: &K, border: &B) -> Image<P, I::Space>
 where
     I: RasterImage<Pixel = P>,
     P: Copy + Ord + ZeroablePixel,
@@ -280,7 +280,7 @@ where
     P: Copy + Ord,
     K: Kernel<Weight = bool>,
     B: BorderPolicy<I>,
-    O: RasterImageMut<Pixel = P>,
+    O: RasterImageMut<Pixel = P, Space = I::Space>,
 {
     map_neighborhood_into(
         image,
@@ -315,7 +315,7 @@ where
 /// assert_eq!(result.pixel_at(2, 2), 18);
 /// ```
 #[must_use]
-pub fn dilate<I, K, B, P>(image: &I, kernel: &K, border: &B) -> Image<P>
+pub fn dilate<I, K, B, P>(image: &I, kernel: &K, border: &B) -> Image<P, I::Space>
 where
     I: RasterImage<Pixel = P>,
     P: Copy + Ord + ZeroablePixel,
@@ -365,13 +365,13 @@ pub fn opening_into<I, K, B, O, P>(
     kernel: &K,
     border: &B,
     output: &mut O,
-    scratch: &mut Image<P>,
+    scratch: &mut Image<P, I::Space>,
 ) where
     I: RasterImage<Pixel = P>,
     P: Copy + Ord + ZeroablePixel,
     K: Kernel<Weight = bool>,
-    B: BorderPolicy<I> + BorderPolicy<Image<P>>,
-    O: RasterImageMut<Pixel = P>,
+    B: BorderPolicy<I> + BorderPolicy<Image<P, I::Space>>,
+    O: RasterImageMut<Pixel = P, Space = I::Space>,
 {
     erode_into(image, kernel, border, scratch);
     dilate_into(scratch, kernel, border, output);
@@ -415,13 +415,13 @@ pub fn closing_into<I, K, B, O, P>(
     kernel: &K,
     border: &B,
     output: &mut O,
-    scratch: &mut Image<P>,
+    scratch: &mut Image<P, I::Space>,
 ) where
     I: RasterImage<Pixel = P>,
     P: Copy + Ord + ZeroablePixel,
     K: Kernel<Weight = bool>,
-    B: BorderPolicy<I> + BorderPolicy<Image<P>>,
-    O: RasterImageMut<Pixel = P>,
+    B: BorderPolicy<I> + BorderPolicy<Image<P, I::Space>>,
+    O: RasterImageMut<Pixel = P, Space = I::Space>,
 {
     dilate_into(image, kernel, border, scratch);
     erode_into(scratch, kernel, border, output);
@@ -452,12 +452,12 @@ pub fn closing_into<I, K, B, O, P>(
 /// }
 /// ```
 #[must_use]
-pub fn opening<I, K, B, P>(image: &I, kernel: &K, border: &B) -> Image<P>
+pub fn opening<I, K, B, P>(image: &I, kernel: &K, border: &B) -> Image<P, I::Space>
 where
     I: RasterImage<Pixel = P>,
     P: Copy + Ord + ZeroablePixel,
     K: Kernel<Weight = bool>,
-    B: BorderPolicy<I> + BorderPolicy<Image<P>>,
+    B: BorderPolicy<I> + BorderPolicy<Image<P, I::Space>>,
 {
     // #todo: can we avoid the intermediate image allocation?
     let eroded = erode(image, kernel, border);
@@ -489,12 +489,12 @@ where
 /// }
 /// ```
 #[must_use]
-pub fn closing<I, K, B, P>(image: &I, kernel: &K, border: &B) -> Image<P>
+pub fn closing<I, K, B, P>(image: &I, kernel: &K, border: &B) -> Image<P, I::Space>
 where
     I: RasterImage<Pixel = P>,
     P: Copy + Ord + ZeroablePixel,
     K: Kernel<Weight = bool>,
-    B: BorderPolicy<I> + BorderPolicy<Image<P>>,
+    B: BorderPolicy<I> + BorderPolicy<Image<P, I::Space>>,
 {
     // #todo: can we avoid the intermediate image allocation?
     let dilated = dilate(image, kernel, border);
@@ -531,12 +531,12 @@ where
 /// }
 /// ```
 #[must_use]
-pub fn morphological_gradient<I, K, B, P>(image: &I, kernel: &K, border: &B) -> Image<P>
+pub fn morphological_gradient<I, K, B, P>(image: &I, kernel: &K, border: &B) -> Image<P, I::Space>
 where
     I: RasterImage<Pixel = P>,
     P: Copy + Ord + ZeroablePixel + core::ops::Sub<Output = P>,
     K: Kernel<Weight = bool>,
-    B: BorderPolicy<I> + BorderPolicy<Image<P>>,
+    B: BorderPolicy<I> + BorderPolicy<Image<P, I::Space>>,
 {
     let dilated = dilate(image, kernel, border);
     let eroded = erode(image, kernel, border);
@@ -592,7 +592,7 @@ where
 /// let _: Image<u8> = top_hat(&src, &se, &Skip);
 /// ```
 #[must_use]
-pub fn top_hat<I, K, B, P>(image: &I, kernel: &K, border: &B) -> Image<P>
+pub fn top_hat<I, K, B, P>(image: &I, kernel: &K, border: &B) -> Image<P, I::Space>
 where
     I: RasterImage<Pixel = P>,
     P: Copy + Ord + ZeroablePixel + core::ops::Sub<Output = P>,
@@ -600,7 +600,7 @@ where
     // Composite morphology subtracts `opening(image)` from `image` pixel-wise,
     // so both must have the same dimensions. `FullFrameBorder` excludes
     // `Skip` (which shrinks the output) at compile time.
-    B: FullFrameBorder<I> + BorderPolicy<Image<P>>,
+    B: FullFrameBorder<I> + BorderPolicy<Image<P, I::Space>>,
 {
     let opened = opening(image, kernel, border);
 
@@ -639,13 +639,13 @@ where
 /// }
 /// ```
 #[must_use]
-pub fn black_hat<I, K, B, P>(image: &I, kernel: &K, border: &B) -> Image<P>
+pub fn black_hat<I, K, B, P>(image: &I, kernel: &K, border: &B) -> Image<P, I::Space>
 where
     I: RasterImage<Pixel = P>,
     P: Copy + Ord + ZeroablePixel + core::ops::Sub<Output = P>,
     K: Kernel<Weight = bool>,
     // See `top_hat` — same frame-size constraint applies here.
-    B: FullFrameBorder<I> + BorderPolicy<Image<P>>,
+    B: FullFrameBorder<I> + BorderPolicy<Image<P, I::Space>>,
 {
     let closed = closing(image, kernel, border);
 
@@ -686,7 +686,7 @@ where
 /// assert_eq!(result.pixel_at(2, 2), 50);
 /// ```
 #[must_use]
-pub fn median_filter<I, K, B, P>(image: &I, kernel: &K, border: &B) -> Image<P>
+pub fn median_filter<I, K, B, P>(image: &I, kernel: &K, border: &B) -> Image<P, I::Space>
 where
     I: RasterImage<Pixel = P>,
     P: Copy + Ord + ZeroablePixel,

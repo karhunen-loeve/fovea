@@ -317,7 +317,7 @@ pub fn map_neighborhood_into<I, MI, B, O, M, P>(
     P: Copy,
     MI: ImageView<Pixel = bool>,
     B: BorderPolicy<I>,
-    O: RasterImageMut<Pixel = M::Output>,
+    O: RasterImageMut<Pixel = M::Output, Space = I::Space>,
     M: MapOp<P>,
     M::Output: Copy,
 {
@@ -526,7 +526,7 @@ pub fn map_neighborhood<I, MI, B, M, P>(
     anchor: Coordinate,
     border: &B,
     op: M,
-) -> Image<M::Output>
+) -> Image<M::Output, I::Space>
 where
     I: RasterImage<Pixel = P>,
     P: Copy,
@@ -536,7 +536,8 @@ where
     M::Output: Copy + ZeroablePixel,
 {
     let output_region = border.output_region(src.size(), mask_weights.size(), anchor);
-    let mut out = Image::<M::Output>::zero(output_region.size.width, output_region.size.height);
+    let mut out =
+        Image::<M::Output, _>::zero_in(output_region.size.width, output_region.size.height);
     map_neighborhood_into(src, mask_weights, anchor, border, &mut out, op);
     out
 }
@@ -590,7 +591,7 @@ pub fn map_neighborhood_fn_into<I, MI, B, O, F, P, Out>(
     P: Copy,
     MI: ImageView<Pixel = bool>,
     B: BorderPolicy<I>,
-    O: RasterImageMut<Pixel = Out>,
+    O: RasterImageMut<Pixel = Out, Space = I::Space>,
     F: FnMut(P, &mut dyn Iterator<Item = MapItem<P>>) -> Out,
     Out: Copy,
 {
@@ -656,7 +657,7 @@ pub fn map_neighborhood_fn<I, MI, B, F, P, Out>(
     anchor: Coordinate,
     border: &B,
     f: F,
-) -> Image<Out>
+) -> Image<Out, I::Space>
 where
     I: RasterImage<Pixel = P>,
     P: Copy,

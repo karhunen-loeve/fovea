@@ -8,6 +8,8 @@ use crate::error::{ParameterError, Requirement, Value};
 use crate::{AxialOrientation, Error};
 use core::marker::PhantomData;
 
+use crate::geometry::PixelSpace;
+
 // ── Shapes ──────────────────────────────────────────────────────────────────
 
 /// A radius around a frequency, in the unit `U`: finite and positive.
@@ -727,7 +729,7 @@ impl Frequency<CyclesPerPixel> {
 
 // ── On the spectrum ─────────────────────────────────────────────────────────
 
-impl<P: SpectrumSource> Spectrum<P> {
+impl<P: SpectrumSource, S: PixelSpace> Spectrum<P, S> {
     /// Multiplies every bin by the gain of `transfer` at its frequency.
     ///
     /// The transfer function is a value: one of the filters of this
@@ -773,7 +775,7 @@ impl<P: SpectrumSource> Spectrum<P> {
     /// spectrum.low_pass(Radius::cycles_per_pixel(0.1)?, Butterworth::<2>);
     /// # Ok::<(), fovea::Error>(())
     /// ```
-    pub fn low_pass<U: FrequencyUnit, S: Profile>(&mut self, cutoff: Radius<U>, profile: S) {
+    pub fn low_pass<U: FrequencyUnit, R: Profile>(&mut self, cutoff: Radius<U>, profile: R) {
         self.filter(&LowPass::new(cutoff, profile));
     }
 
@@ -790,7 +792,7 @@ impl<P: SpectrumSource> Spectrum<P> {
     /// spectrum.high_pass(Radius::cycles_per_pixel(0.02)?, Gaussian);
     /// # Ok::<(), fovea::Error>(())
     /// ```
-    pub fn high_pass<U: FrequencyUnit, S: Profile>(&mut self, cutoff: Radius<U>, profile: S) {
+    pub fn high_pass<U: FrequencyUnit, R: Profile>(&mut self, cutoff: Radius<U>, profile: R) {
         self.filter(&HighPass::new(cutoff, profile));
     }
 
@@ -807,7 +809,7 @@ impl<P: SpectrumSource> Spectrum<P> {
     /// spectrum.band_pass(Band::cycles_per_pixel(0.05, 0.2)?, Gaussian);
     /// # Ok::<(), fovea::Error>(())
     /// ```
-    pub fn band_pass<U: FrequencyUnit, S: Profile>(&mut self, band: Band<U>, profile: S) {
+    pub fn band_pass<U: FrequencyUnit, R: Profile>(&mut self, band: Band<U>, profile: R) {
         self.filter(&BandPass::new(band, profile));
     }
 
@@ -824,7 +826,7 @@ impl<P: SpectrumSource> Spectrum<P> {
     /// spectrum.band_stop(Band::cycles_per_pixel(0.2, 0.25)?, Ideal);
     /// # Ok::<(), fovea::Error>(())
     /// ```
-    pub fn band_stop<U: FrequencyUnit, S: Profile>(&mut self, band: Band<U>, profile: S) {
+    pub fn band_stop<U: FrequencyUnit, R: Profile>(&mut self, band: Band<U>, profile: R) {
         self.filter(&BandStop::new(band, profile));
     }
 
@@ -842,11 +844,11 @@ impl<P: SpectrumSource> Spectrum<P> {
     /// spectrum.notch(Frequency::bins(8.0, 3.0), Radius::bins(1.5)?, Gaussian);
     /// # Ok::<(), fovea::Error>(())
     /// ```
-    pub fn notch<U: FrequencyUnit, S: Profile>(
+    pub fn notch<U: FrequencyUnit, R: Profile>(
         &mut self,
         center: Frequency<U>,
         radius: Radius<U>,
-        profile: S,
+        profile: R,
     ) {
         self.filter(&Notch::new(center, radius, profile));
     }

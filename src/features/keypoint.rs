@@ -3,8 +3,9 @@
 
 use core::cmp::Ordering;
 
+use crate::geometry::{PixelSpace, Pixels, Point};
 use crate::image::{Decimated, ScaleLevel};
-use crate::{CoordinateF64, Orientation, Sigma};
+use crate::{Orientation, Sigma};
 
 // ─── Capability traits ──────────────────────────────────────────────────────
 
@@ -22,15 +23,18 @@ use crate::{CoordinateF64, Orientation, Sigma};
 /// # Example
 ///
 /// ```
-/// use fovea::CoordinateF64;
+/// use fovea::{Pixels, Point};
 /// use fovea::features::{Corner, HasPosition};
 ///
-/// let corner = Corner::new(CoordinateF64::new(12.25, 4.5), 0.8);
-/// assert_eq!(corner.position(), CoordinateF64::new(12.25, 4.5));
+/// let corner: Corner = Corner::new(Point::new(12.25, 4.5), 0.8);
+/// assert_eq!(corner.position(), Point::new(12.25, 4.5));
 /// ```
 pub trait HasPosition {
+    /// The space of the image the keypoint was found on.
+    type Space: PixelSpace;
+
     /// Returns the sub-pixel location, in base-image coordinates.
-    fn position(&self) -> CoordinateF64;
+    fn position(&self) -> Point<Self::Space>;
 }
 
 /// A keypoint carrying a detector strength.
@@ -46,10 +50,10 @@ pub trait HasPosition {
 /// # Example
 ///
 /// ```
-/// use fovea::CoordinateF64;
+/// use fovea::{Pixels, Point};
 /// use fovea::features::{Corner, HasResponse};
 ///
-/// let corner = Corner::new(CoordinateF64::new(3.0, 7.0), 1.5);
+/// let corner: Corner = Corner::new(Point::new(3.0, 7.0), 1.5);
 /// assert_eq!(corner.response(), 1.5);
 /// ```
 pub trait HasResponse {
@@ -76,11 +80,11 @@ pub trait HasResponse {
 /// # Example
 ///
 /// ```
-/// use fovea::CoordinateF64;
+/// use fovea::{Pixels, Point};
 /// use fovea::features::{HasScale, ScaleKeypoint};
 /// use fovea::sigma;
 ///
-/// let kp = ScaleKeypoint::new(CoordinateF64::new(8.0, 2.5), 0.4, sigma!(1.6));
+/// let kp: ScaleKeypoint = ScaleKeypoint::new(Point::new(8.0, 2.5), 0.4, sigma!(1.6));
 /// assert_eq!(kp.scale().get(), 1.6);
 /// ```
 pub trait HasScale {
@@ -115,16 +119,18 @@ pub trait HasScale {
 /// detector with its own keypoint type joins the same vocabulary:
 ///
 /// ```
-/// use fovea::{CoordinateF64, Orientation};
+/// use fovea::{Pixels, Point, Orientation};
 /// use fovea::features::{HasOrientation, HasPosition};
 ///
 /// struct MyOrientedCorner {
-///     at: CoordinateF64,
+///     at: Point<Pixels>,
 ///     angle: Orientation,
 /// }
 ///
 /// impl HasPosition for MyOrientedCorner {
-///     fn position(&self) -> CoordinateF64 {
+///     type Space = Pixels;
+///
+///     fn position(&self) -> Point<Pixels> {
 ///         self.at
 ///     }
 /// }
@@ -137,7 +143,7 @@ pub trait HasScale {
 ///
 /// // Built straight from a gradient vector — no wrapping, nothing to unwrap.
 /// let kp = MyOrientedCorner {
-///     at: CoordinateF64::new(1.0, 2.0),
+///     at: Point::new(1.0, 2.0),
 ///     angle: Orientation::from_atan2(1.0, 1.0),
 /// };
 /// assert_eq!(kp.orientation(), Orientation::from_atan2(1.0, 1.0));
@@ -162,11 +168,11 @@ pub trait HasOrientation {
 /// # Example
 ///
 /// ```
-/// use fovea::CoordinateF64;
+/// use fovea::{Pixels, Point};
 /// use fovea::features::{Corner, HasPosition, HasResponse};
 ///
-/// let corner = Corner::new(CoordinateF64::new(10.5, 20.25), 0.93);
-/// assert_eq!(corner.position(), CoordinateF64::new(10.5, 20.25));
+/// let corner: Corner = Corner::new(Point::new(10.5, 20.25), 0.93);
+/// assert_eq!(corner.position(), Point::new(10.5, 20.25));
 /// assert_eq!(corner.response(), 0.93);
 /// ```
 ///
@@ -174,32 +180,57 @@ pub trait HasOrientation {
 /// runtime — the reason the capabilities are separate traits:
 ///
 /// ```compile_fail
-/// use fovea::CoordinateF64;
+/// use fovea::{Pixels, Point};
 /// use fovea::features::{Corner, HasPosition, HasScale};
 ///
 /// fn patch_radius(kp: &(impl HasPosition + HasScale)) -> f32 {
 ///     3.0 * kp.scale().get()
 /// }
 ///
-/// let corner = Corner::new(CoordinateF64::new(10.5, 20.25), 0.93);
+/// let corner: Corner = Corner::new(Point::new(10.5, 20.25), 0.93);
 /// // ERROR: `Corner: HasScale` is not satisfied.
 /// let _r = patch_radius(&corner);
 /// ```
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Corner {
-    /// Sub-pixel position in the base-image frame.
-    pub at: CoordinateF64,
+pub struct Corner<S = Pixels> {
+    /// Sub-pixel position in the base-image frame, in the space of the
+    /// image the corner was found on.
+    pub at: Point<S>,
     /// Detector response; ordering only.
     pub response: f32,
 }
 
-impl Corner {
+// Written by hand rather than derived: a derive would require `S: Clone`,
+// `S: Debug` and `S: PartialEq` of a marker that is never instantiated.
+impl<S> Clone for Corner<S> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<S> Copy for Corner<S> {}
+
+impl<S> PartialEq for Corner<S> {
+    fn eq(&self, other: &Self) -> bool {
+        self.at == other.at && self.response == other.response
+    }
+}
+
+impl<S> core::fmt::Debug for Corner<S> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Corner")
+            .field("at", &self.at)
+            .field("response", &self.response)
+            .finish()
+    }
+}
+
+impl<S: PixelSpace> Corner<S> {
     /// Creates a corner at a position already expressed in the base-image
     /// frame.
     ///
     /// For a detection made on a pyramid level, prefer
     /// [`from_level`](Self::from_level), which performs the lift.
-    pub fn new(at: CoordinateF64, response: f32) -> Self {
+    pub fn new(at: Point<S>, response: f32) -> Self {
         Self { at, response }
     }
 
@@ -216,7 +247,7 @@ impl Corner {
     /// # Example
     ///
     /// ```
-    /// use fovea::CoordinateF64;
+    /// use fovea::{Pixels, Point};
     /// use fovea::features::{Corner, HasPosition};
     /// use fovea::image::{Image, OriginOffset, PlacedImage};
     /// use fovea::pixel::MonoF32;
@@ -232,10 +263,10 @@ impl Corner {
     /// );
     ///
     /// // Detected at (3.5, 2.0) on the level → (7.0, 4.0) in the base image.
-    /// let corner = Corner::from_level(&level, CoordinateF64::new(3.5, 2.0), 0.7);
-    /// assert_eq!(corner.position(), CoordinateF64::new(7.0, 4.0));
+    /// let corner = Corner::from_level(&level, Point::new(3.5, 2.0), 0.7);
+    /// assert_eq!(corner.position(), Point::new(7.0, 4.0));
     /// ```
-    pub fn from_level(level: &impl Decimated, local: CoordinateF64, response: f32) -> Self {
+    pub fn from_level(level: &impl Decimated<Space = S>, local: Point<S>, response: f32) -> Self {
         Self {
             at: level.to_base(local),
             response,
@@ -243,14 +274,16 @@ impl Corner {
     }
 }
 
-impl HasPosition for Corner {
+impl<S: PixelSpace> HasPosition for Corner<S> {
+    type Space = S;
+
     #[inline]
-    fn position(&self) -> CoordinateF64 {
+    fn position(&self) -> Point<S> {
         self.at
     }
 }
 
-impl HasResponse for Corner {
+impl<S> HasResponse for Corner<S> {
     #[inline]
     fn response(&self) -> f32 {
         self.response
@@ -270,30 +303,56 @@ impl HasResponse for Corner {
 /// # Example
 ///
 /// ```
-/// use fovea::CoordinateF64;
+/// use fovea::{Pixels, Point};
 /// use fovea::features::{HasScale, ScaleKeypoint};
 /// use fovea::sigma;
 ///
-/// let kp = ScaleKeypoint::new(CoordinateF64::new(4.0, 9.5), 0.2, sigma!(2.4));
+/// let kp: ScaleKeypoint = ScaleKeypoint::new(Point::new(4.0, 9.5), 0.2, sigma!(2.4));
 /// assert_eq!(kp.scale(), sigma!(2.4));
 /// ```
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ScaleKeypoint {
-    /// Sub-pixel position in the base-image frame.
-    pub at: CoordinateF64,
+pub struct ScaleKeypoint<S = Pixels> {
+    /// Sub-pixel position in the base-image frame, in the space of the
+    /// image the keypoint was found on.
+    pub at: Point<S>,
     /// Detector response; ordering only.
     pub response: f32,
     /// Characteristic Gaussian σ, in base-image pixels.
     pub scale: Sigma,
 }
 
-impl ScaleKeypoint {
+// Written by hand rather than derived: a derive would require `S: Clone`,
+// `S: Debug` and `S: PartialEq` of a marker that is never instantiated.
+impl<S> Clone for ScaleKeypoint<S> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<S> Copy for ScaleKeypoint<S> {}
+
+impl<S> PartialEq for ScaleKeypoint<S> {
+    fn eq(&self, other: &Self) -> bool {
+        self.at == other.at && self.response == other.response && self.scale == other.scale
+    }
+}
+
+impl<S> core::fmt::Debug for ScaleKeypoint<S> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ScaleKeypoint")
+            .field("at", &self.at)
+            .field("response", &self.response)
+            .field("scale", &self.scale)
+            .finish()
+    }
+}
+
+impl<S: PixelSpace> ScaleKeypoint<S> {
     /// Creates a scale keypoint from values already expressed in the
     /// base-image frame.
     ///
     /// For a detection made on a pyramid level, prefer
     /// [`from_level`](Self::from_level).
-    pub fn new(at: CoordinateF64, response: f32, scale: Sigma) -> Self {
+    pub fn new(at: Point<S>, response: f32, scale: Sigma) -> Self {
         Self {
             at,
             response,
@@ -320,7 +379,7 @@ impl ScaleKeypoint {
     /// # Example
     ///
     /// ```
-    /// use fovea::CoordinateF64;
+    /// use fovea::{Pixels, Point};
     /// use fovea::features::{HasPosition, HasScale, ScaleKeypoint};
     /// use fovea::image::{Image, OriginOffset, ScaledImage};
     /// use fovea::pixel::MonoF32;
@@ -333,13 +392,13 @@ impl ScaleKeypoint {
     ///     sigma!(1.6),
     /// );
     ///
-    /// let kp = ScaleKeypoint::from_level(&level, CoordinateF64::new(1.0, 2.5), 0.5);
-    /// assert_eq!(kp.position(), CoordinateF64::new(2.0, 5.0));
+    /// let kp = ScaleKeypoint::from_level(&level, Point::new(1.0, 2.5), 0.5);
+    /// assert_eq!(kp.position(), Point::new(2.0, 5.0));
     /// assert_eq!(kp.scale(), sigma!(1.6));
     /// ```
-    pub fn from_level<L>(level: &L, local: CoordinateF64, response: f32) -> Self
+    pub fn from_level<L>(level: &L, local: Point<S>, response: f32) -> Self
     where
-        L: Decimated + ScaleLevel,
+        L: Decimated<Space = S> + ScaleLevel,
     {
         Self {
             at: level.to_base(local),
@@ -349,21 +408,23 @@ impl ScaleKeypoint {
     }
 }
 
-impl HasPosition for ScaleKeypoint {
+impl<S: PixelSpace> HasPosition for ScaleKeypoint<S> {
+    type Space = S;
+
     #[inline]
-    fn position(&self) -> CoordinateF64 {
+    fn position(&self) -> Point<S> {
         self.at
     }
 }
 
-impl HasResponse for ScaleKeypoint {
+impl<S> HasResponse for ScaleKeypoint<S> {
     #[inline]
     fn response(&self) -> f32 {
         self.response
     }
 }
 
-impl HasScale for ScaleKeypoint {
+impl<S> HasScale for ScaleKeypoint<S> {
     #[inline]
     fn scale(&self) -> Sigma {
         self.scale
@@ -392,16 +453,16 @@ impl HasScale for ScaleKeypoint {
 ///
 /// ```
 /// use core::cmp::Ordering;
-/// use fovea::CoordinateF64;
+/// use fovea::{Pixels, Point};
 /// use fovea::features::{by_response_then_position, Corner};
 ///
-/// let strong = Corner::new(CoordinateF64::new(0.0, 9.0), 0.9);
-/// let weak = Corner::new(CoordinateF64::new(0.0, 0.0), 0.1);
+/// let strong: Corner = Corner::new(Point::new(0.0, 9.0), 0.9);
+/// let weak: Corner = Corner::new(Point::new(0.0, 0.0), 0.1);
 /// assert_eq!(by_response_then_position(&strong, &weak), Ordering::Less);
 ///
 /// // Equal response: the smaller y comes first.
-/// let upper = Corner::new(CoordinateF64::new(5.0, 1.0), 0.5);
-/// let lower = Corner::new(CoordinateF64::new(5.0, 2.0), 0.5);
+/// let upper: Corner = Corner::new(Point::new(5.0, 1.0), 0.5);
+/// let lower: Corner = Corner::new(Point::new(5.0, 2.0), 0.5);
 /// assert_eq!(by_response_then_position(&upper, &lower), Ordering::Less);
 /// ```
 pub fn by_response_then_position<K>(a: &K, b: &K) -> Ordering
@@ -436,13 +497,13 @@ fn ascending_nan_last(a: f64, b: f64) -> Ordering {
 /// # Example
 ///
 /// ```
-/// use fovea::CoordinateF64;
+/// use fovea::{Pixels, Point};
 /// use fovea::features::{sort_by_response, Corner, HasResponse};
 ///
-/// let mut corners = vec![
-///     Corner::new(CoordinateF64::new(0.0, 0.0), 0.2),
-///     Corner::new(CoordinateF64::new(1.0, 1.0), 0.9),
-///     Corner::new(CoordinateF64::new(2.0, 2.0), 0.5),
+/// let mut corners: Vec<Corner> = vec![
+///     Corner::new(Point::new(0.0, 0.0), 0.2),
+///     Corner::new(Point::new(1.0, 1.0), 0.9),
+///     Corner::new(Point::new(2.0, 2.0), 0.5),
 /// ];
 /// sort_by_response(&mut corners);
 ///
@@ -472,14 +533,14 @@ where
 /// # Example
 ///
 /// ```
-/// use fovea::CoordinateF64;
+/// use fovea::{Pixels, Point};
 /// use fovea::features::{retain_top_n, Corner, HasPosition};
 ///
-/// let mut corners = vec![
-///     Corner::new(CoordinateF64::new(9.0, 9.0), 0.1),
+/// let mut corners: Vec<Corner> = vec![
+///     Corner::new(Point::new(9.0, 9.0), 0.1),
 ///     // Two identical responses: the smaller y wins the cut.
-///     Corner::new(CoordinateF64::new(0.0, 5.0), 0.6),
-///     Corner::new(CoordinateF64::new(0.0, 3.0), 0.6),
+///     Corner::new(Point::new(0.0, 5.0), 0.6),
+///     Corner::new(Point::new(0.0, 3.0), 0.6),
 /// ];
 /// retain_top_n(&mut corners, 2);
 ///
@@ -517,21 +578,17 @@ mod tests {
 
     #[test]
     fn corner_new_reports_its_fields() {
-        let corner = Corner::new(CoordinateF64::new(1.5, 2.5), 0.75);
-        assert_eq!(corner.position(), CoordinateF64::new(1.5, 2.5));
+        let corner = Corner::<Pixels>::new(Point::new(1.5, 2.5), 0.75);
+        assert_eq!(corner.position(), Point::new(1.5, 2.5));
         assert_eq!(corner.response(), 0.75);
-        assert_eq!(corner.at, CoordinateF64::new(1.5, 2.5));
+        assert_eq!(corner.at, Point::new(1.5, 2.5));
         assert_eq!(corner.response, 0.75);
     }
 
     #[test]
     fn corner_from_level_lifts_position() {
-        let corner = Corner::from_level(
-            &level(2.0, (0.0, 0.0), 1.0),
-            CoordinateF64::new(3.5, 2.0),
-            0.7,
-        );
-        assert_eq!(corner.position(), CoordinateF64::new(7.0, 4.0));
+        let corner = Corner::from_level(&level(2.0, (0.0, 0.0), 1.0), Point::new(3.5, 2.0), 0.7);
+        assert_eq!(corner.position(), Point::new(7.0, 4.0));
         assert_eq!(corner.response(), 0.7);
     }
 
@@ -539,42 +596,30 @@ mod tests {
     fn corner_from_level_applies_the_origin_offset() {
         // The half-pixel term is the whole reason the lift is named: a
         // ratio-only lift would report (4.0, 2.0) here.
-        let corner = Corner::from_level(
-            &level(2.0, (0.5, 0.5), 1.0),
-            CoordinateF64::new(2.0, 1.0),
-            0.1,
-        );
-        assert_eq!(corner.position(), CoordinateF64::new(4.5, 2.5));
+        let corner = Corner::from_level(&level(2.0, (0.5, 0.5), 1.0), Point::new(2.0, 1.0), 0.1);
+        assert_eq!(corner.position(), Point::new(4.5, 2.5));
     }
 
     #[test]
     fn corner_from_level_on_the_base_level_is_the_identity() {
-        let corner = Corner::from_level(
-            &level(1.0, (0.0, 0.0), 0.5),
-            CoordinateF64::new(6.25, 7.75),
-            0.3,
-        );
-        assert_eq!(corner.position(), CoordinateF64::new(6.25, 7.75));
+        let corner = Corner::from_level(&level(1.0, (0.0, 0.0), 0.5), Point::new(6.25, 7.75), 0.3);
+        assert_eq!(corner.position(), Point::new(6.25, 7.75));
     }
 
     #[test]
     fn corner_from_level_handles_an_upsampled_level() {
         // Octave −1: samples half a base pixel apart, so local coordinates
         // shrink rather than grow.
-        let corner = Corner::from_level(
-            &level(0.5, (0.0, 0.0), 0.8),
-            CoordinateF64::new(6.0, 10.0),
-            0.2,
-        );
-        assert_eq!(corner.position(), CoordinateF64::new(3.0, 5.0));
+        let corner = Corner::from_level(&level(0.5, (0.0, 0.0), 0.8), Point::new(6.0, 10.0), 0.2);
+        assert_eq!(corner.position(), Point::new(3.0, 5.0));
     }
 
     #[test]
     fn corner_is_copy_and_comparable() {
-        let a = Corner::new(CoordinateF64::new(1.0, 1.0), 0.5);
+        let a = Corner::<Pixels>::new(Point::new(1.0, 1.0), 0.5);
         let b = a; // Copy, not move
         assert_eq!(a, b);
-        assert_ne!(a, Corner::new(CoordinateF64::new(1.0, 1.0), 0.6));
+        assert_ne!(a, Corner::<Pixels>::new(Point::new(1.0, 1.0), 0.6));
         assert!(format!("{a:?}").contains("Corner"));
     }
 
@@ -582,20 +627,16 @@ mod tests {
 
     #[test]
     fn scale_keypoint_new_reports_its_fields() {
-        let kp = ScaleKeypoint::new(CoordinateF64::new(2.0, 3.0), 0.4, sigma!(1.6));
-        assert_eq!(kp.position(), CoordinateF64::new(2.0, 3.0));
+        let kp = ScaleKeypoint::<Pixels>::new(Point::new(2.0, 3.0), 0.4, sigma!(1.6));
+        assert_eq!(kp.position(), Point::new(2.0, 3.0));
         assert_eq!(kp.response(), 0.4);
         assert_eq!(kp.scale(), sigma!(1.6));
     }
 
     #[test]
     fn scale_keypoint_from_level_takes_position_and_sigma_from_the_level() {
-        let kp = ScaleKeypoint::from_level(
-            &level(2.0, (0.0, 0.0), 1.6),
-            CoordinateF64::new(1.0, 2.5),
-            0.5,
-        );
-        assert_eq!(kp.position(), CoordinateF64::new(2.0, 5.0));
+        let kp = ScaleKeypoint::from_level(&level(2.0, (0.0, 0.0), 1.6), Point::new(1.0, 2.5), 0.5);
+        assert_eq!(kp.position(), Point::new(2.0, 5.0));
         assert_eq!(kp.scale(), sigma!(1.6));
         assert_eq!(kp.response(), 0.5);
     }
@@ -604,22 +645,19 @@ mod tests {
     fn scale_keypoint_from_level_sigma_is_absolute_not_rescaled() {
         // ScaleLevel::sigma is already in base-image pixels, so the level's
         // pixel distance must not multiply into it.
-        let coarse = ScaleKeypoint::from_level(
-            &level(4.0, (0.0, 0.0), 3.2),
-            CoordinateF64::new(0.0, 0.0),
-            1.0,
-        );
+        let coarse =
+            ScaleKeypoint::from_level(&level(4.0, (0.0, 0.0), 3.2), Point::new(0.0, 0.0), 1.0);
         assert_eq!(coarse.scale(), sigma!(3.2));
     }
 
     #[test]
     fn scale_keypoint_is_copy_and_comparable() {
-        let a = ScaleKeypoint::new(CoordinateF64::new(1.0, 1.0), 0.5, sigma!(1.0));
+        let a = ScaleKeypoint::<Pixels>::new(Point::new(1.0, 1.0), 0.5, sigma!(1.0));
         let b = a;
         assert_eq!(a, b);
         assert_ne!(
             a,
-            ScaleKeypoint::new(CoordinateF64::new(1.0, 1.0), 0.5, sigma!(2.0))
+            ScaleKeypoint::<Pixels>::new(Point::new(1.0, 1.0), 0.5, sigma!(2.0))
         );
     }
 
@@ -627,8 +665,8 @@ mod tests {
 
     #[test]
     fn ordering_puts_the_strongest_response_first() {
-        let strong = Corner::new(CoordinateF64::new(0.0, 9.0), 0.9);
-        let weak = Corner::new(CoordinateF64::new(0.0, 0.0), 0.1);
+        let strong = Corner::<Pixels>::new(Point::new(0.0, 9.0), 0.9);
+        let weak = Corner::<Pixels>::new(Point::new(0.0, 0.0), 0.1);
         assert_eq!(by_response_then_position(&strong, &weak), Ordering::Less);
         assert_eq!(by_response_then_position(&weak, &strong), Ordering::Greater);
     }
@@ -636,36 +674,36 @@ mod tests {
     #[test]
     fn ordering_breaks_response_ties_on_y_then_x() {
         let r = 0.5;
-        let upper = Corner::new(CoordinateF64::new(9.0, 1.0), r);
-        let lower = Corner::new(CoordinateF64::new(0.0, 2.0), r);
+        let upper = Corner::<Pixels>::new(Point::new(9.0, 1.0), r);
+        let lower = Corner::<Pixels>::new(Point::new(0.0, 2.0), r);
         // y dominates x.
         assert_eq!(by_response_then_position(&upper, &lower), Ordering::Less);
 
-        let left = Corner::new(CoordinateF64::new(1.0, 5.0), r);
-        let right = Corner::new(CoordinateF64::new(2.0, 5.0), r);
+        let left = Corner::<Pixels>::new(Point::new(1.0, 5.0), r);
+        let right = Corner::<Pixels>::new(Point::new(2.0, 5.0), r);
         assert_eq!(by_response_then_position(&left, &right), Ordering::Less);
     }
 
     #[test]
     fn ordering_is_equal_for_identical_keypoints() {
-        let a = Corner::new(CoordinateF64::new(3.0, 4.0), 0.5);
+        let a = Corner::<Pixels>::new(Point::new(3.0, 4.0), 0.5);
         assert_eq!(by_response_then_position(&a, &a), Ordering::Equal);
     }
 
     #[test]
     fn ordering_of_negative_responses_is_still_descending() {
         // Harris cornerness is signed; a less-negative value is stronger.
-        let better = Corner::new(CoordinateF64::new(0.0, 0.0), -0.1);
-        let worse = Corner::new(CoordinateF64::new(0.0, 0.0), -0.9);
+        let better = Corner::<Pixels>::new(Point::new(0.0, 0.0), -0.1);
+        let worse = Corner::<Pixels>::new(Point::new(0.0, 0.0), -0.9);
         assert_eq!(by_response_then_position(&better, &worse), Ordering::Less);
     }
 
     #[test]
     fn sort_by_response_orders_descending() {
         let mut corners = vec![
-            Corner::new(CoordinateF64::new(0.0, 0.0), 0.2),
-            Corner::new(CoordinateF64::new(1.0, 1.0), 0.9),
-            Corner::new(CoordinateF64::new(2.0, 2.0), 0.5),
+            Corner::<Pixels>::new(Point::new(0.0, 0.0), 0.2),
+            Corner::<Pixels>::new(Point::new(1.0, 1.0), 0.9),
+            Corner::<Pixels>::new(Point::new(2.0, 2.0), 0.5),
         ];
         sort_by_response(&mut corners);
         let responses: Vec<f32> = corners.iter().map(HasResponse::response).collect();
@@ -676,9 +714,9 @@ mod tests {
     fn sort_is_independent_of_input_order() {
         // The same set fed in two orders must come out identically — this is
         // the property that makes detector output testable.
-        let a = Corner::new(CoordinateF64::new(4.0, 1.0), 0.5);
-        let b = Corner::new(CoordinateF64::new(2.0, 1.0), 0.5);
-        let c = Corner::new(CoordinateF64::new(0.0, 7.0), 0.5);
+        let a = Corner::<Pixels>::new(Point::new(4.0, 1.0), 0.5);
+        let b = Corner::<Pixels>::new(Point::new(2.0, 1.0), 0.5);
+        let c = Corner::<Pixels>::new(Point::new(0.0, 7.0), 0.5);
 
         let mut forward = vec![a, b, c];
         let mut reverse = vec![c, b, a];
@@ -691,10 +729,10 @@ mod tests {
     #[test]
     fn sort_ranks_a_nan_response_last_whatever_its_sign() {
         let mut corners = vec![
-            Corner::new(CoordinateF64::new(0.0, 0.0), 0.5),
-            Corner::new(CoordinateF64::new(1.0, 1.0), f32::NAN),
-            Corner::new(CoordinateF64::new(2.0, 2.0), 0.1),
-            Corner::new(CoordinateF64::new(3.0, 3.0), -f32::NAN),
+            Corner::<Pixels>::new(Point::new(0.0, 0.0), 0.5),
+            Corner::<Pixels>::new(Point::new(1.0, 1.0), f32::NAN),
+            Corner::<Pixels>::new(Point::new(2.0, 2.0), 0.1),
+            Corner::<Pixels>::new(Point::new(3.0, 3.0), -f32::NAN),
         ];
         sort_by_response(&mut corners);
         // `total_cmp` alone would put the positive NaN first and the
@@ -709,9 +747,9 @@ mod tests {
     #[test]
     fn retain_top_n_cuts_a_nan_response_first() {
         let mut corners = vec![
-            Corner::new(CoordinateF64::new(0.0, 0.0), f32::NAN),
-            Corner::new(CoordinateF64::new(1.0, 1.0), 0.2),
-            Corner::new(CoordinateF64::new(2.0, 2.0), 0.1),
+            Corner::<Pixels>::new(Point::new(0.0, 0.0), f32::NAN),
+            Corner::<Pixels>::new(Point::new(1.0, 1.0), 0.2),
+            Corner::<Pixels>::new(Point::new(2.0, 2.0), 0.1),
         ];
         retain_top_n(&mut corners, 2);
         assert_eq!(corners[0].response(), 0.2);
@@ -720,9 +758,9 @@ mod tests {
 
     #[test]
     fn equal_responses_rank_a_nan_coordinate_last() {
-        let nan_y = Corner::new(CoordinateF64::new(0.0, -f64::NAN), 0.5);
-        let nan_x = Corner::new(CoordinateF64::new(f64::NAN, 4.0), 0.5);
-        let plain = Corner::new(CoordinateF64::new(9.0, 4.0), 0.5);
+        let nan_y = Corner::<Pixels>::new(Point::new(0.0, -f64::NAN), 0.5);
+        let nan_x = Corner::<Pixels>::new(Point::new(f64::NAN, 4.0), 0.5);
+        let plain = Corner::<Pixels>::new(Point::new(9.0, 4.0), 0.5);
         assert_eq!(by_response_then_position(&plain, &nan_y), Ordering::Less);
         assert_eq!(by_response_then_position(&nan_y, &plain), Ordering::Greater);
         assert_eq!(by_response_then_position(&plain, &nan_x), Ordering::Less);
@@ -734,7 +772,7 @@ mod tests {
         sort_by_response(&mut empty);
         assert!(empty.is_empty());
 
-        let mut one = vec![Corner::new(CoordinateF64::new(1.0, 2.0), 0.3)];
+        let mut one = vec![Corner::<Pixels>::new(Point::new(1.0, 2.0), 0.3)];
         sort_by_response(&mut one);
         assert_eq!(one.len(), 1);
     }
@@ -743,8 +781,8 @@ mod tests {
     fn sort_works_for_scale_keypoints_too() {
         // The ordering binds on the capabilities, not on a concrete type.
         let mut kps = vec![
-            ScaleKeypoint::new(CoordinateF64::new(0.0, 0.0), 0.1, sigma!(1.0)),
-            ScaleKeypoint::new(CoordinateF64::new(0.0, 0.0), 0.8, sigma!(2.0)),
+            ScaleKeypoint::<Pixels>::new(Point::new(0.0, 0.0), 0.1, sigma!(1.0)),
+            ScaleKeypoint::<Pixels>::new(Point::new(0.0, 0.0), 0.8, sigma!(2.0)),
         ];
         sort_by_response(&mut kps);
         assert_eq!(kps[0].scale(), sigma!(2.0));
@@ -754,8 +792,8 @@ mod tests {
     fn sort_is_stable_for_fully_tied_keypoints() {
         // Same response and same position, different scale: the detector's
         // order is preserved rather than being arbitrary.
-        let coarse = ScaleKeypoint::new(CoordinateF64::new(1.0, 1.0), 0.5, sigma!(3.2));
-        let fine = ScaleKeypoint::new(CoordinateF64::new(1.0, 1.0), 0.5, sigma!(1.6));
+        let coarse = ScaleKeypoint::<Pixels>::new(Point::new(1.0, 1.0), 0.5, sigma!(3.2));
+        let fine = ScaleKeypoint::<Pixels>::new(Point::new(1.0, 1.0), 0.5, sigma!(1.6));
         let mut kps = vec![coarse, fine];
         sort_by_response(&mut kps);
         assert_eq!(kps, vec![coarse, fine]);
@@ -766,9 +804,9 @@ mod tests {
     #[test]
     fn retain_top_n_keeps_the_strongest() {
         let mut corners = vec![
-            Corner::new(CoordinateF64::new(0.0, 0.0), 0.2),
-            Corner::new(CoordinateF64::new(1.0, 1.0), 0.9),
-            Corner::new(CoordinateF64::new(2.0, 2.0), 0.5),
+            Corner::<Pixels>::new(Point::new(0.0, 0.0), 0.2),
+            Corner::<Pixels>::new(Point::new(1.0, 1.0), 0.9),
+            Corner::<Pixels>::new(Point::new(2.0, 2.0), 0.5),
         ];
         retain_top_n(&mut corners, 2);
         let responses: Vec<f32> = corners.iter().map(HasResponse::response).collect();
@@ -778,9 +816,9 @@ mod tests {
     #[test]
     fn retain_top_n_resolves_a_tie_at_the_cut_deterministically() {
         let mut corners = vec![
-            Corner::new(CoordinateF64::new(9.0, 9.0), 0.1),
-            Corner::new(CoordinateF64::new(0.0, 5.0), 0.6),
-            Corner::new(CoordinateF64::new(0.0, 3.0), 0.6),
+            Corner::<Pixels>::new(Point::new(9.0, 9.0), 0.1),
+            Corner::<Pixels>::new(Point::new(0.0, 5.0), 0.6),
+            Corner::<Pixels>::new(Point::new(0.0, 3.0), 0.6),
         ];
         retain_top_n(&mut corners, 2);
         let ys: Vec<f64> = corners.iter().map(|c| c.position().y).collect();
@@ -790,8 +828,8 @@ mod tests {
     #[test]
     fn retain_top_n_with_n_over_length_keeps_everything_sorted() {
         let mut corners = vec![
-            Corner::new(CoordinateF64::new(0.0, 0.0), 0.2),
-            Corner::new(CoordinateF64::new(1.0, 1.0), 0.9),
+            Corner::<Pixels>::new(Point::new(0.0, 0.0), 0.2),
+            Corner::<Pixels>::new(Point::new(1.0, 1.0), 0.9),
         ];
         retain_top_n(&mut corners, 10);
         assert_eq!(corners.len(), 2);
@@ -800,7 +838,7 @@ mod tests {
 
     #[test]
     fn retain_top_n_with_zero_empties() {
-        let mut corners = vec![Corner::new(CoordinateF64::new(0.0, 0.0), 0.2)];
+        let mut corners = vec![Corner::<Pixels>::new(Point::new(0.0, 0.0), 0.2)];
         retain_top_n(&mut corners, 0);
         assert!(corners.is_empty());
     }
@@ -826,10 +864,21 @@ mod tests {
             3.0 * f64::from(kp.scale().get())
         }
 
-        let corner = Corner::new(CoordinateF64::new(2.0, 4.0), 0.5);
-        let kp = ScaleKeypoint::new(CoordinateF64::new(2.0, 4.0), 0.5, sigma!(2.0));
+        let corner = Corner::<Pixels>::new(Point::new(2.0, 4.0), 0.5);
+        let kp = ScaleKeypoint::<Pixels>::new(Point::new(2.0, 4.0), 0.5, sigma!(2.0));
         assert_eq!(patch_center(&corner), (2.0, 4.0));
         assert_eq!(patch_center(&kp), (2.0, 4.0));
         assert_eq!(patch_radius(&kp), 6.0);
+    }
+
+    #[test]
+    fn the_keypoint_traits_ask_nothing_of_the_space() {
+        let corner = Corner::<Pixels>::new(Point::new(1.0, 2.0), 0.5);
+        assert_eq!(Clone::clone(&corner), corner);
+        assert!(format!("{corner:?}").starts_with("Corner { at:"));
+        let kp = ScaleKeypoint::<Pixels>::new(Point::new(1.0, 2.0), 0.5, sigma!(1.6));
+        assert_eq!(Clone::clone(&kp), kp);
+        assert!(format!("{kp:?}").starts_with("ScaleKeypoint { at:"));
+        assert_eq!(kp.scale(), sigma!(1.6));
     }
 }

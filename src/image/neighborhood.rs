@@ -1,3 +1,4 @@
+use crate::geometry::Pixels;
 use crate::image::ImageView;
 use crate::image::sequential::private;
 use crate::image::sequential::{ContiguousImage, ImageArray};
@@ -111,7 +112,7 @@ pub struct Neighborhood<W: Copy, const KW: usize, const KH: usize>
 where
     private::Dim<W, KW, KH>: private::_Array2D<Pixel = W>,
 {
-    weights: ImageArray<W, KW, KH>,
+    weights: ImageArray<W, KW, KH, Pixels>,
     anchor: Coordinate,
 }
 
@@ -203,7 +204,7 @@ where
     /// assert_eq!(kernel.weights().size(), fovea::Size::new(3, 3));
     /// assert_eq!(kernel.weights().pixel_at(0, 0), 1.0);
     /// ```
-    pub fn weights(&self) -> &ImageArray<W, KW, KH> {
+    pub fn weights(&self) -> &ImageArray<W, KW, KH, Pixels> {
         &self.weights
     }
 
@@ -278,9 +279,9 @@ where
     private::Dim<W, KW, KH>: private::_Array2D<Pixel = W>,
 {
     type Weight = W;
-    type Weights = ImageArray<W, KW, KH>;
+    type Weights = ImageArray<W, KW, KH, Pixels>;
 
-    fn weights(&self) -> &ImageArray<W, KW, KH> {
+    fn weights(&self) -> &ImageArray<W, KW, KH, Pixels> {
         &self.weights
     }
 
@@ -371,7 +372,7 @@ pub struct PositionsIter<'a, W, const KW: usize, const KH: usize>
 where
     private::Dim<W, KW, KH>: private::_Array2D<Pixel = W>,
 {
-    weights: &'a ImageArray<W, KW, KH>,
+    weights: &'a ImageArray<W, KW, KH, Pixels>,
     anchor: Coordinate,
     x: usize,
     y: usize,

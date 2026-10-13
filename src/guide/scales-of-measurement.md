@@ -13,7 +13,8 @@ every such transformation is meaningful; what does not is an artefact of an
 arbitrary choice.
 
 This page describes three families of scales and how fovea's types map onto
-them.
+them, and then the same question asked of positions: in which space a value
+lies.
 
 ## 1. Linear scales
 
@@ -137,6 +138,30 @@ conversions `ComplexMagnitude` and `ComplexPhase` lead to the ratio and the
 circular scale. `RealPart` and `ImaginaryPart` are for the cases where the
 phase reference is fixed by construction, such as the real part of an
 analytic signal, which is the signal itself.
+
+## 4. Where a value lies: spaces
+
+The scales above say what a value admits. A position raises the same
+question about where it lies. fovea answers it with one rule: a space is a
+type when moving into it changes which operations are correct, and a step
+that changes only the bookkeeping is a mapping.
+
+The image as stored, `Pixels`, and the ideal image of a lens model,
+`IdealPixels`, differ in what is correct. Through a distorting lens a
+straight edge bends in `Pixels`, so a line fitted there is wrong; in
+`IdealPixels` it is straight. They are therefore different types, carried by
+images as `Image<P, S>` and by every position measured on them as
+`Point<S>`. A remap through the lens model is the step between them.
+Comparing a camera image with an undistorted one, or correcting a point
+twice, does not compile, and stating that two spaces may be compared is a
+named step, `as_space`.
+
+A region of interest, a pyramid level, a resized or flipped image and a
+second camera keep every operation as correct as before; only combining
+values from two of them is wrong. That is bookkeeping, carried by the
+mapping between them (an offset, `Decimated::to_base`, a calibration) and
+not by a type fovea defines. A caller who wants the compiler to keep two
+such spaces apart defines a marker of their own: `PixelSpace` is open.
 
 ## Summary
 

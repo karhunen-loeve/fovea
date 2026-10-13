@@ -69,7 +69,7 @@ use super::interpolate::{Bilinear, CatmullRom, KeysBicubic, Lanczos2, Lanczos3};
 /// Pixel-level constraints (e.g. `I::Pixel: Into<O::Pixel>` for nearest-neighbour,
 /// or `I::Pixel: LinearPixel + LinearSpace` for bilinear) belong in the `impl`
 /// blocks, not in the trait definition itself.
-pub trait ResizeMethod<I: ImageView, O: ImageViewMut> {
+pub trait ResizeMethod<I: ImageView, O: ImageViewMut<Space = I::Space>> {
     /// Resizes `img` into `out`, which must already have the desired target dimensions.
     fn resize_into(&self, img: &I, out: &mut O);
 }
@@ -87,7 +87,7 @@ pub struct NearestNeighbor;
 impl<I, O> ResizeMethod<I, O> for NearestNeighbor
 where
     I: ImageView,
-    O: ImageViewMut,
+    O: ImageViewMut<Space = I::Space>,
     I::Pixel: Into<O::Pixel> + Copy,
 {
     fn resize_into(&self, img: &I, out: &mut O) {
@@ -102,7 +102,7 @@ impl<K, I, O, Q> ResizeMethod<I, O> for K
 where
     K: InterpolationKernel,
     I: ImageView,
-    O: ImageViewMut,
+    O: ImageViewMut<Space = I::Space>,
     I::Pixel: LinearPixel<Accumulator = Q> + LinearSpace,
     Q: LinearPixel<Accumulator = Q>,
     O::Pixel: FromLinear<Q>,
@@ -117,7 +117,7 @@ impl<K, I, O, Q> ResizeMethod<I, O> for Antialiased<K>
 where
     K: InterpolationKernel,
     I: ImageView,
-    O: ImageViewMut,
+    O: ImageViewMut<Space = I::Space>,
     I::Pixel: LinearPixel<Accumulator = Q> + LinearSpace,
     Q: LinearPixel<Accumulator = Q>,
     O::Pixel: FromLinear<Q>,
@@ -193,7 +193,7 @@ where
 pub fn resize_into<I, O, M>(img: &I, out: &mut O, method: M) -> Result<(), Error>
 where
     I: ImageView,
-    O: ImageViewMut,
+    O: ImageViewMut<Space = I::Space>,
     M: ResizeMethod<I, O>,
 {
     if img.size().area() == 0 && out.size().area() > 0 {
@@ -230,16 +230,16 @@ where
 /// assert_eq!(dst.height(), 240);
 /// # Ok::<(), fovea::Error>(())
 /// ```
-pub fn resize<I, P, M>(img: &I, new_size: Size, method: M) -> Result<Image<P>, Error>
+pub fn resize<I, P, M>(img: &I, new_size: Size, method: M) -> Result<Image<P, I::Space>, Error>
 where
     I: ImageView,
     P: ZeroablePixel,
-    M: ResizeMethod<I, Image<P>>,
+    M: ResizeMethod<I, Image<P, I::Space>>,
 {
     if img.size().area() == 0 && new_size.area() > 0 {
         return Err(Error::EmptySource { target: new_size });
     }
-    let mut out = Image::<P>::zero(new_size.width, new_size.height);
+    let mut out = Image::<P, _>::zero_in(new_size.width, new_size.height);
     resize_into(img, &mut out, method)?;
     Ok(out)
 }
@@ -247,7 +247,7 @@ where
 fn resize_nearest_neighbor_into<I, O>(img: &I, out: &mut O)
 where
     I: ImageView,
-    O: ImageViewMut,
+    O: ImageViewMut<Space = I::Space>,
     I::Pixel: Into<O::Pixel> + Copy,
 {
     let (src, dst) = (img.size(), out.size());
@@ -285,7 +285,7 @@ fn resize_separable_into<K, I, O, Q>(kernel: &K, img: &I, out: &mut O, widen: bo
 where
     K: InterpolationKernel,
     I: ImageView,
-    O: ImageViewMut,
+    O: ImageViewMut<Space = I::Space>,
     I::Pixel: LinearPixel<Accumulator = Q>,
     Q: LinearPixel<Accumulator = Q>,
     O::Pixel: FromLinear<Q>,

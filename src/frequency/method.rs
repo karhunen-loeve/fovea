@@ -2,6 +2,7 @@
 
 use super::engine::{Axis, AxisTables, Bluestein as BluesteinTables, Radix2 as Radix2Tables};
 use super::spectrum::{Spectrum, SpectrumSource};
+use crate::geometry::PixelSpace;
 use crate::image::{Image, RasterImage};
 use crate::{Error, Size};
 
@@ -10,6 +11,7 @@ type Axes<C> = AxisTables<C>;
 
 mod sealed {
     use super::{Axes, DftMethod, Spectrum, SpectrumSource};
+    use crate::geometry::PixelSpace;
     use crate::image::RasterImage;
     use crate::{Error, Size};
 
@@ -21,11 +23,17 @@ mod sealed {
         /// The tables of both axes for a transform of `size`.
         fn tables(&self, size: Size) -> Result<Axes<P::Bin>, Error>;
 
-        fn transform<I: RasterImage<Pixel = P>>(&self, src: &I) -> <Self as DftMethod<P>>::Output
+        fn transform<I: RasterImage<Pixel = P>>(
+            &self,
+            src: &I,
+        ) -> <Self as DftMethod<P>>::Output<I::Space>
         where
             Self: DftMethod<P>;
 
-        fn invert(&self, spectrum: &Spectrum<P>) -> <Self as DftMethod<P>>::InverseOutput
+        fn invert<S: PixelSpace>(
+            &self,
+            spectrum: &Spectrum<P, S>,
+        ) -> <Self as DftMethod<P>>::InverseOutput<S>
         where
             Self: DftMethod<P>;
     }
@@ -40,12 +48,13 @@ mod sealed {
 /// a method can fail: [`Radix2`] returns a `Result`, [`Bluestein`] and
 /// [`Auto`] accept every size and return the value itself.
 pub trait DftMethod<P: SpectrumSource>: sealed::Method<P> {
-    /// What [`dft`] returns: a [`Spectrum<P>`], or a `Result` of one for a
-    /// method that does not accept every size.
-    type Output;
-    /// What [`Spectrum::inverse`] returns: an [`Image<P>`], or a `Result`
-    /// of one.
-    type InverseOutput;
+    /// What [`dft`] returns for an image in the space `S`: a
+    /// [`Spectrum<P, S>`](Spectrum), or a `Result` of one for a method that
+    /// does not accept every size.
+    type Output<S: PixelSpace>;
+    /// What [`Spectrum::inverse`] returns for a spectrum of an image in the
+    /// space `S`: an [`Image<P, S>`](Image), or a `Result` of one.
+    type InverseOutput<S: PixelSpace>;
 }
 
 /// The discrete Fourier transform of `src`, computed by `method`.
@@ -79,7 +88,7 @@ pub trait DftMethod<P: SpectrumSource>: sealed::Method<P> {
 /// # Ok::<(), fovea::Error>(())
 /// ```
 #[must_use]
-pub fn dft<P, I, M>(src: &I, method: M) -> M::Output
+pub fn dft<P, I, M>(src: &I, method: M) -> M::Output<I::Space>
 where
     P: SpectrumSource,
     I: RasterImage<Pixel = P>,
@@ -172,8 +181,8 @@ impl Radix2 {
 }
 
 impl<P: SpectrumSource> DftMethod<P> for Radix2 {
-    type Output = Result<Spectrum<P>, Error>;
-    type InverseOutput = Result<Image<P>, Error>;
+    type Output<S: PixelSpace> = Result<Spectrum<P, S>, Error>;
+    type InverseOutput<S: PixelSpace> = Result<Image<P, S>, Error>;
 }
 
 impl<P: SpectrumSource> sealed::Method<P> for Radix2 {
@@ -185,7 +194,10 @@ impl<P: SpectrumSource> sealed::Method<P> for Radix2 {
         self.axes::<P>(size)
     }
 
-    fn transform<I: RasterImage<Pixel = P>>(&self, src: &I) -> <Self as DftMethod<P>>::Output {
+    fn transform<I: RasterImage<Pixel = P>>(
+        &self,
+        src: &I,
+    ) -> <Self as DftMethod<P>>::Output<I::Space> {
         let AxisTables {
             x: along_x,
             y: along_y,
@@ -193,7 +205,10 @@ impl<P: SpectrumSource> sealed::Method<P> for Radix2 {
         Ok(Spectrum::forward(src, &along_x, &along_y))
     }
 
-    fn invert(&self, spectrum: &Spectrum<P>) -> <Self as DftMethod<P>>::InverseOutput {
+    fn invert<S: PixelSpace>(
+        &self,
+        spectrum: &Spectrum<P, S>,
+    ) -> <Self as DftMethod<P>>::InverseOutput<S> {
         let AxisTables {
             x: along_x,
             y: along_y,
@@ -252,8 +267,8 @@ impl Bluestein {
 }
 
 impl<P: SpectrumSource> DftMethod<P> for Bluestein {
-    type Output = Spectrum<P>;
-    type InverseOutput = Image<P>;
+    type Output<S: PixelSpace> = Spectrum<P, S>;
+    type InverseOutput<S: PixelSpace> = Image<P, S>;
 }
 
 impl<P: SpectrumSource> sealed::Method<P> for Bluestein {
@@ -268,7 +283,10 @@ impl<P: SpectrumSource> sealed::Method<P> for Bluestein {
         ))
     }
 
-    fn transform<I: RasterImage<Pixel = P>>(&self, src: &I) -> <Self as DftMethod<P>>::Output {
+    fn transform<I: RasterImage<Pixel = P>>(
+        &self,
+        src: &I,
+    ) -> <Self as DftMethod<P>>::Output<I::Space> {
         let Size { width, height } = src.size();
         Spectrum::forward(
             src,
@@ -277,7 +295,10 @@ impl<P: SpectrumSource> sealed::Method<P> for Bluestein {
         )
     }
 
-    fn invert(&self, spectrum: &Spectrum<P>) -> <Self as DftMethod<P>>::InverseOutput {
+    fn invert<S: PixelSpace>(
+        &self,
+        spectrum: &Spectrum<P, S>,
+    ) -> <Self as DftMethod<P>>::InverseOutput<S> {
         let Size { width, height } = spectrum.source_size();
         spectrum.invert(
             &Axis::Bluestein(BluesteinTables::new(width)),
@@ -334,8 +355,8 @@ impl Auto {
 }
 
 impl<P: SpectrumSource> DftMethod<P> for Auto {
-    type Output = Spectrum<P>;
-    type InverseOutput = Image<P>;
+    type Output<S: PixelSpace> = Spectrum<P, S>;
+    type InverseOutput<S: PixelSpace> = Image<P, S>;
 }
 
 impl<P: SpectrumSource> sealed::Method<P> for Auto {
@@ -350,12 +371,18 @@ impl<P: SpectrumSource> sealed::Method<P> for Auto {
         ))
     }
 
-    fn transform<I: RasterImage<Pixel = P>>(&self, src: &I) -> <Self as DftMethod<P>>::Output {
+    fn transform<I: RasterImage<Pixel = P>>(
+        &self,
+        src: &I,
+    ) -> <Self as DftMethod<P>>::Output<I::Space> {
         let Size { width, height } = src.size();
         Spectrum::forward(src, &Self::axis::<P>(width), &Self::axis::<P>(height))
     }
 
-    fn invert(&self, spectrum: &Spectrum<P>) -> <Self as DftMethod<P>>::InverseOutput {
+    fn invert<S: PixelSpace>(
+        &self,
+        spectrum: &Spectrum<P, S>,
+    ) -> <Self as DftMethod<P>>::InverseOutput<S> {
         let Size { width, height } = spectrum.source_size();
         spectrum.invert(&Self::axis::<P>(width), &Self::axis::<P>(height))
     }

@@ -96,13 +96,14 @@
 use core::ops::Add;
 
 use crate::border::Clamp;
+use crate::geometry::Point;
 use crate::image::{BinaryImage, Image, RasterImage};
 use crate::pixel::{ChannelwiseMath, FromLinear, LinearPixel, SingleChannel, ZeroablePixel};
 use crate::transform::{
     MagnitudeChannel, gaussian_blur, gradient_magnitude, non_maximum_suppression_from_gradients,
     scharr_x, scharr_y,
 };
-use crate::{Coordinate, CoordinateF64, Error, Sigma};
+use crate::{Coordinate, Error, Sigma};
 
 use crate::analyze::peak::interpolate_ridge_points;
 use crate::analyze::threshold::{HysteresisThresholds, hysteresis_threshold};
@@ -180,7 +181,7 @@ pub fn canny<I, P, Acc>(
     image: &I,
     thresholds: HysteresisThresholds<f32>,
     sigma: Sigma,
-) -> BinaryImage
+) -> BinaryImage<I::Space>
 where
     I: RasterImage<Pixel = P>,
     P: Copy + LinearPixel<f32, Accumulator = Acc>,
@@ -195,7 +196,7 @@ where
     Acc::Channel: PartialOrd + Copy + core::fmt::Debug + From<f32> + MagnitudeChannel,
     f64: From<Acc::Channel>,
 {
-    let blurred: Image<Acc> = gaussian_blur(image, sigma, &Clamp);
+    let blurred: Image<Acc, I::Space> = gaussian_blur(image, sigma, &Clamp);
     let gx = scharr_x(&blurred, &Clamp);
     let gy = scharr_y(&blurred, &Clamp);
 
@@ -294,12 +295,12 @@ pub fn interpolate_edge_points<IB, IM, IX, IY, P>(
     magnitude: &IM,
     gx: &IX,
     gy: &IY,
-) -> Result<Vec<CoordinateF64>, Error>
+) -> Result<Vec<Point<IM::Space>>, Error>
 where
-    IB: RasterImage<Pixel = bool>,
+    IB: RasterImage<Pixel = bool, Space = IM::Space>,
     IM: RasterImage<Pixel = P>,
-    IX: RasterImage<Pixel = P>,
-    IY: RasterImage<Pixel = P>,
+    IX: RasterImage<Pixel = P, Space = IM::Space>,
+    IY: RasterImage<Pixel = P, Space = IM::Space>,
     P: SingleChannel,
     f64: From<P::Channel>,
 {
@@ -484,10 +485,10 @@ mod tests {
 
     // ── interpolate_edge_points ──────────────────────────────────────────
 
-    use crate::CoordinateF64;
     use crate::border::Clamp;
     use crate::error::Error;
     use crate::transform::{gaussian_blur, gradient_magnitude, scharr_x, scharr_y};
+    use crate::{Pixels, Point};
 
     /// The mask, magnitude and gradient pair `interpolate_edge_points`
     /// takes, for a vertical step between columns `edge_x - 1` and
@@ -567,7 +568,7 @@ mod tests {
         let (_, magnitude, gx, gy) = step_edge_stages(12, 6, 6);
         let empty = Image::fill(12, 6, false);
         let points = interpolate_edge_points(&empty, &magnitude, &gx, &gy).unwrap();
-        assert_eq!(points, Vec::<CoordinateF64>::new());
+        assert_eq!(points, Vec::<Point<Pixels>>::new());
     }
 
     #[test]

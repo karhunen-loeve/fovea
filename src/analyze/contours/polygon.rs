@@ -5,7 +5,8 @@
 //! so they serve both traced [`Contour`](super::Contour) point chains and
 //! the simplified vertex lists produced by [`approximate_polygon`].
 
-use crate::{Coordinate, CoordinateF64, Tolerance};
+use crate::geometry::{PixelSpace, Point};
+use crate::{Coordinate, Tolerance};
 
 /// Twice the signed shoelace area, exact in integers.
 ///
@@ -110,7 +111,7 @@ pub fn polygon_perimeter(points: &[Coordinate]) -> f64 {
 /// # Examples
 ///
 /// ```
-/// use fovea::Coordinate;
+/// use fovea::{Coordinate, Pixels, Point};
 /// use fovea::analyze::contours::polygon_centroid;
 ///
 /// let square = [
@@ -119,11 +120,13 @@ pub fn polygon_perimeter(points: &[Coordinate]) -> f64 {
 ///     Coordinate::new(4, 4),
 ///     Coordinate::new(0, 4),
 /// ];
-/// let c = polygon_centroid(&square).unwrap();
+/// // Integer vertices carry no space; the result takes the one it is
+/// // used in, here named.
+/// let c: Point<Pixels> = polygon_centroid(&square).unwrap();
 /// assert_eq!((c.x, c.y), (2.0, 2.0));
 /// ```
 #[must_use]
-pub fn polygon_centroid(points: &[Coordinate]) -> Option<CoordinateF64> {
+pub fn polygon_centroid<S: PixelSpace>(points: &[Coordinate]) -> Option<Point<S>> {
     if points.len() < 3 {
         return None;
     }
@@ -141,7 +144,7 @@ pub fn polygon_centroid(points: &[Coordinate]) -> Option<CoordinateF64> {
     }
     // centroid = Σ(a+b)·cross / (6·A_signed), with 2·A_signed = doubled.
     let denom = 3.0 * doubled as f64;
-    Some(CoordinateF64::new(cx as f64 / denom, cy as f64 / denom))
+    Some(Point::new(cx as f64 / denom, cy as f64 / denom))
 }
 
 /// Cross product `(a − o) × (b − o)`, exact in integers.
@@ -323,6 +326,7 @@ fn simplify_open(points: &[Coordinate], epsilon: f64, out: &mut Vec<Coordinate>)
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Pixels;
     use crate::tolerance;
 
     fn c(x: usize, y: usize) -> Coordinate {
@@ -357,17 +361,17 @@ mod tests {
     #[test]
     fn centroid_of_square_and_of_degenerate() {
         let sq = [c(1, 1), c(5, 1), c(5, 5), c(1, 5)];
-        let ctr = polygon_centroid(&sq).unwrap();
+        let ctr = polygon_centroid::<Pixels>(&sq).unwrap();
         assert_eq!((ctr.x, ctr.y), (3.0, 3.0));
-        assert!(polygon_centroid(&[c(0, 0), c(2, 0), c(4, 0)]).is_none());
-        assert!(polygon_centroid(&[c(0, 0)]).is_none());
+        assert!(polygon_centroid::<Pixels>(&[c(0, 0), c(2, 0), c(4, 0)]).is_none());
+        assert!(polygon_centroid::<Pixels>(&[c(0, 0)]).is_none());
     }
 
     #[test]
     fn centroid_is_area_weighted_not_vertex_mean() {
         // An L-shape whose vertex mean differs from its region centroid.
         let l = [c(0, 0), c(4, 0), c(4, 2), c(2, 2), c(2, 6), c(0, 6)];
-        let ctr = polygon_centroid(&l).unwrap();
+        let ctr = polygon_centroid::<Pixels>(&l).unwrap();
         // Region = 4×2 rectangle (centroid (2,1), area 8) + 2×4 rectangle
         // (centroid (1,4), area 8) → combined (1.5, 2.5).
         assert!((ctr.x - 1.5).abs() < 1e-12, "cx = {}", ctr.x);

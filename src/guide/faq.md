@@ -209,7 +209,7 @@ use fovea::pixel::Label32;
 let mask: BinaryImage =
     Image::generate(16, 16, |x, y| (4..12).contains(&x) && (6..10).contains(&y));
 let (labeling, stats) =
-    connected_components_with_stats::<Label32, Connectivity4>(&mask).unwrap();
+    connected_components_with_stats::<Label32, Connectivity4, _>(&mask).unwrap();
 assert_eq!(labeling.label_count, 1);
 assert_eq!(stats[0].area, 8 * 4);
 # Ok::<(), fovea::Error>(())

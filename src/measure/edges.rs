@@ -7,7 +7,7 @@ use crate::Error;
 use crate::Sigma;
 use crate::analyze::peak::{Extremum, parabola_vertex};
 use crate::error::{ParameterError, Requirement, Value};
-use crate::geometry::{Length, Pixels, Point};
+use crate::geometry::{Length, PixelSpace, Pixels, Point};
 
 /// The direction of an edge, read along the caliper's path.
 ///
@@ -40,7 +40,7 @@ impl Polarity {
         }
     }
 
-    fn admits(self, edge: &Edge) -> bool {
+    fn admits<S>(self, edge: &Edge<S>) -> bool {
         match self {
             Polarity::DarkToLight => edge.contrast > 0.0,
             Polarity::LightToDark => edge.contrast < 0.0,
@@ -138,30 +138,136 @@ macro_rules! min_contrast {
 
 /// An edge found on a profile.
 ///
-/// `contrast` is signed: positive where the intensity rises along the
-/// path, negative where it falls. Its magnitude is the height of an ideal
-/// step, in the pixel's units; an edge blurred by the optics reads lower.
+/// The [`contrast`](Edge::contrast) is signed: positive where the intensity
+/// rises along the path, negative where it falls. Its magnitude is the
+/// height of an ideal step, in the pixel's units; an edge blurred by the
+/// optics reads lower.
+///
+/// `S` is the space of the image the profile was read from: an edge found
+/// on an image remapped through a lens model lies in
+/// [`IdealPixels`](crate::IdealPixels).
+///
+/// The fields are private, so that an edge can carry more about how it was
+/// found without a breaking change; [`Edge::new`] builds one from its three
+/// values.
 ///
 /// # Example
 ///
 /// ```
-/// use fovea::{Length, Point};
+/// use fovea::{Length, Pixels, Point};
 /// use fovea::measure::{Edge, Polarity};
 ///
-/// let e = Edge { position: Point::new(20.3, 16.0), along: Length::new(10.3), contrast: -180.0 };
+/// let e: Edge<Pixels> = Edge::new(Point::new(20.3, 16.0), Length::new(10.3), -180.0);
 /// assert_eq!(e.polarity(), Polarity::LightToDark);
+/// assert_eq!(e.contrast(), -180.0);
 /// ```
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Edge {
-    /// The edge's position in the image, on the caliper's path.
-    pub position: Point<Pixels>,
-    /// The distance from the start of the path along it.
-    pub along: Length<Pixels>,
-    /// The signed contrast, the step height for an ideal step.
-    pub contrast: f64,
+pub struct Edge<S = Pixels> {
+    position: Point<S>,
+    along: Length<S>,
+    contrast: f64,
 }
 
-impl Edge {
+// Written by hand rather than derived: a derive would require `S: Clone`,
+// `S: Debug` and `S: PartialEq` of a marker that is never instantiated.
+impl<S> Clone for Edge<S> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<S> Copy for Edge<S> {}
+
+impl<S> PartialEq for Edge<S> {
+    fn eq(&self, other: &Self) -> bool {
+        self.position == other.position
+            && self.along == other.along
+            && self.contrast == other.contrast
+    }
+}
+
+impl<S> core::fmt::Debug for Edge<S> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Edge")
+            .field("position", &self.position)
+            .field("along", &self.along)
+            .field("contrast", &self.contrast)
+            .finish()
+    }
+}
+
+impl<S> Edge<S> {
+    /// The edge at `position`, `along` the path from its start, with the
+    /// signed `contrast`. Total: every value is accepted, as a profile
+    /// produces it.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use fovea::{Length, Pixels, Point};
+    /// use fovea::measure::Edge;
+    ///
+    /// let e: Edge<Pixels> = Edge::new(Point::new(4.0, 2.0), Length::new(3.0), 90.0);
+    /// assert_eq!(e.position(), Point::new(4.0, 2.0));
+    /// assert_eq!(e.along().get(), 3.0);
+    /// ```
+    #[must_use]
+    pub const fn new(position: Point<S>, along: Length<S>, contrast: f64) -> Self {
+        Self {
+            position,
+            along,
+            contrast,
+        }
+    }
+
+    /// The edge's position in the image, on the caliper's path.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use fovea::{Length, Pixels, Point};
+    /// use fovea::measure::Edge;
+    ///
+    /// let e: Edge<Pixels> = Edge::new(Point::new(4.0, 2.0), Length::new(3.0), 90.0);
+    /// assert_eq!(e.position().x, 4.0);
+    /// ```
+    #[must_use]
+    pub const fn position(&self) -> Point<S> {
+        self.position
+    }
+
+    /// The distance from the start of the path along it; on an arc, the arc
+    /// length.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use fovea::{Length, Pixels, Point};
+    /// use fovea::measure::Edge;
+    ///
+    /// let e: Edge<Pixels> = Edge::new(Point::new(4.0, 2.0), Length::new(3.0), 90.0);
+    /// assert_eq!(e.along().get(), 3.0);
+    /// ```
+    #[must_use]
+    pub const fn along(&self) -> Length<S> {
+        self.along
+    }
+
+    /// The signed contrast, the step height for an ideal step.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use fovea::{Length, Pixels, Point};
+    /// use fovea::measure::Edge;
+    ///
+    /// let e: Edge<Pixels> = Edge::new(Point::new(4.0, 2.0), Length::new(3.0), -90.0);
+    /// assert_eq!(e.contrast(), -90.0);
+    /// ```
+    #[must_use]
+    pub const fn contrast(&self) -> f64 {
+        self.contrast
+    }
+
     /// `DarkToLight` for a positive contrast, `LightToDark` otherwise.
     #[must_use]
     pub fn polarity(&self) -> Polarity {
@@ -201,18 +307,43 @@ impl Edge {
 ///     .edges(Polarity::Either, fovea::sigma!(1.5), fovea::min_contrast!(50.0));
 /// assert_eq!(edges.len(), 1);
 /// let edge = edges.first().unwrap();
-/// assert!((edge.position.x - 20.5).abs() < 1e-6);
-/// assert!(edge.contrast > 190.0);
+/// assert!((edge.position().x - 20.5).abs() < 1e-6);
+/// assert!(edge.contrast() > 190.0);
 /// # Ok::<(), fovea::Error>(())
 /// ```
-#[derive(Clone, Debug, PartialEq, Default)]
-pub struct Edges {
-    edges: Vec<Edge>,
+pub struct Edges<S = Pixels> {
+    edges: Vec<Edge<S>>,
+}
+
+impl<S> Clone for Edges<S> {
+    fn clone(&self) -> Self {
+        Self {
+            edges: self.edges.clone(),
+        }
+    }
+}
+
+impl<S> PartialEq for Edges<S> {
+    fn eq(&self, other: &Self) -> bool {
+        self.edges == other.edges
+    }
+}
+
+impl<S> core::fmt::Debug for Edges<S> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Edges").field("edges", &self.edges).finish()
+    }
+}
+
+impl<S> Default for Edges<S> {
+    fn default() -> Self {
+        Self { edges: Vec::new() }
+    }
 }
 
 /// The index of the strongest of `edges` by contrast magnitude: the first
 /// of several equal ones, and never one with a NaN contrast.
-fn strongest_index(edges: &[Edge]) -> Option<usize> {
+fn strongest_index<S>(edges: &[Edge<S>]) -> Option<usize> {
     let mut best: Option<(usize, f64)> = None;
     for (i, e) in edges.iter().enumerate() {
         let m = e.contrast.abs();
@@ -226,10 +357,10 @@ fn strongest_index(edges: &[Edge]) -> Option<usize> {
     best.map(|(i, _)| i)
 }
 
-impl Edges {
+impl<S: PixelSpace> Edges<S> {
     /// The edges, sorted along the path.
     #[must_use]
-    pub fn as_slice(&self) -> &[Edge] {
+    pub fn as_slice(&self) -> &[Edge<S>] {
         &self.edges
     }
 
@@ -246,34 +377,34 @@ impl Edges {
     }
 
     /// An iterator over the edges, along the path.
-    pub fn iter(&self) -> core::slice::Iter<'_, Edge> {
+    pub fn iter(&self) -> core::slice::Iter<'_, Edge<S>> {
         self.edges.iter()
     }
 
     /// The edge nearest the start of the path.
     #[must_use]
-    pub fn first(&self) -> Option<Edge> {
+    pub fn first(&self) -> Option<Edge<S>> {
         self.edges.first().copied()
     }
 
     /// The edge nearest the end of the path.
     #[must_use]
-    pub fn last(&self) -> Option<Edge> {
+    pub fn last(&self) -> Option<Edge<S>> {
         self.edges.last().copied()
     }
 
     /// The edge of the largest contrast magnitude; of several equal ones,
     /// the earliest.
     #[must_use]
-    pub fn strongest(&self) -> Option<Edge> {
+    pub fn strongest(&self) -> Option<Edge<S>> {
         strongest_index(&self.edges).map(|i| self.edges[i])
     }
 
     /// The edge nearest the distance `along` from the start of the path; of
     /// two equally near, the earlier.
     #[must_use]
-    pub fn nearest_to(&self, along: Length<Pixels>) -> Option<Edge> {
-        let mut best: Option<(Edge, f64)> = None;
+    pub fn nearest_to(&self, along: Length<S>) -> Option<Edge<S>> {
+        let mut best: Option<(Edge<S>, f64)> = None;
         for e in &self.edges {
             let d = (e.along.get() - along.get()).abs();
             if d.is_nan() {
@@ -299,9 +430,7 @@ impl Edges {
     /// use fovea::{Length, Point};
     /// use fovea::measure::{Edge, Neighbors, PairRule, Polarity};
     ///
-    /// let at = |s: f64, c: f64| Edge {
-    ///     position: Point::new(s, 0.0), along: Length::new(s), contrast: c,
-    /// };
+    /// let at = |s: f64, c: f64| -> Edge { Edge::new(Point::new(s, 0.0), Length::new(s), c) };
     /// // A light bar from 10 to 25 with an inner step at 14.
     /// let edges = [at(10.0, 60.0), at(14.0, 120.0), at(25.0, -180.0)];
     /// let pairs = Neighbors.pairs(&edges, Polarity::DarkToLight);
@@ -309,52 +438,76 @@ impl Edges {
     /// assert_eq!(pairs[0].width().get(), 11.0);
     /// ```
     #[must_use]
-    pub fn pairs(&self, first: Polarity, rule: impl PairRule) -> Vec<EdgePair> {
+    pub fn pairs(&self, first: Polarity, rule: impl PairRule) -> Vec<EdgePair<S>> {
         rule.pairs(&self.edges, first)
     }
 
     /// The edges as a vector, sorted along the path.
     #[must_use]
-    pub fn into_vec(self) -> Vec<Edge> {
+    pub fn into_vec(self) -> Vec<Edge<S>> {
         self.edges
     }
 }
 
-impl<'a> IntoIterator for &'a Edges {
-    type Item = &'a Edge;
-    type IntoIter = core::slice::Iter<'a, Edge>;
+impl<'a, S> IntoIterator for &'a Edges<S> {
+    type Item = &'a Edge<S>;
+    type IntoIter = core::slice::Iter<'a, Edge<S>>;
     fn into_iter(self) -> Self::IntoIter {
         self.edges.iter()
     }
 }
 
-impl IntoIterator for Edges {
-    type Item = Edge;
-    type IntoIter = std::vec::IntoIter<Edge>;
+impl<S> IntoIterator for Edges<S> {
+    type Item = Edge<S>;
+    type IntoIter = std::vec::IntoIter<Edge<S>>;
     fn into_iter(self) -> Self::IntoIter {
         self.edges.into_iter()
     }
 }
 
 /// Two edges that bound a feature: a bar, a gap, a slot.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct EdgePair {
+pub struct EdgePair<S = Pixels> {
     /// The edge nearer the start of the path.
-    pub first: Edge,
+    pub first: Edge<S>,
     /// The edge nearer its end.
-    pub second: Edge,
+    pub second: Edge<S>,
 }
 
-impl EdgePair {
+// Written by hand rather than derived: a derive would require `S: Clone`,
+// `S: Debug` and `S: PartialEq` of a marker that is never instantiated.
+impl<S> Clone for EdgePair<S> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<S> Copy for EdgePair<S> {}
+
+impl<S> PartialEq for EdgePair<S> {
+    fn eq(&self, other: &Self) -> bool {
+        self.first == other.first && self.second == other.second
+    }
+}
+
+impl<S> core::fmt::Debug for EdgePair<S> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("EdgePair")
+            .field("first", &self.first)
+            .field("second", &self.second)
+            .finish()
+    }
+}
+
+impl<S: PixelSpace> EdgePair<S> {
     /// The distance between the two edges along the path: on an arc, the
     /// arc length.
     ///
     /// The straight distance between the two positions is
-    /// `first.position.distance(second.position)`. Only that one converts to
+    /// `first.position().distance(second.position())`. Only that one converts to
     /// world units under every mapping, by converting the two positions; a
     /// width along the path converts under a conformal mapping.
     #[must_use]
-    pub fn width(&self) -> Length<Pixels> {
+    pub fn width(&self) -> Length<S> {
         self.second.along - self.first.along
     }
 }
@@ -369,12 +522,13 @@ impl EdgePair {
 ///
 /// ```
 /// use fovea::{Length, Point};
+/// use fovea::geometry::PixelSpace;
 /// use fovea::measure::{Edge, EdgePair, PairRule, Polarity};
 ///
 /// /// The outermost pair: the first edge and the last.
 /// struct Outermost;
 /// impl PairRule for Outermost {
-///     fn pairs(&self, edges: &[Edge], _first: Polarity) -> Vec<EdgePair> {
+///     fn pairs<S: PixelSpace>(&self, edges: &[Edge<S>], _first: Polarity) -> Vec<EdgePair<S>> {
 ///         match (edges.first(), edges.last()) {
 ///             (Some(&first), Some(&second)) if edges.len() > 1 => vec![EdgePair { first, second }],
 ///             _ => Vec::new(),
@@ -382,16 +536,14 @@ impl EdgePair {
 ///     }
 /// }
 ///
-/// let at = |s: f64, c: f64| Edge {
-///     position: Point::new(s, 0.0), along: Length::new(s), contrast: c,
-/// };
+/// let at = |s: f64, c: f64| -> Edge { Edge::new(Point::new(s, 0.0), Length::new(s), c) };
 /// let pairs = Outermost.pairs(&[at(2.0, 50.0), at(5.0, 70.0), at(9.0, -90.0)], Polarity::Either);
 /// assert_eq!(pairs[0].width().get(), 7.0);
 /// ```
 pub trait PairRule {
     /// The pairs formed from `edges`, each starting with an edge of
     /// polarity `first`.
-    fn pairs(&self, edges: &[Edge], first: Polarity) -> Vec<EdgePair>;
+    fn pairs<S: PixelSpace>(&self, edges: &[Edge<S>], first: Polarity) -> Vec<EdgePair<S>>;
 }
 
 /// Pairs two edges that are adjacent along the path, the first of the
@@ -413,14 +565,14 @@ pub struct Neighbors;
 pub struct StrongestOfRun;
 
 /// `first`, with `Either` resolved by the first edge on the path.
-fn resolve(first: Polarity, edges: &[Edge]) -> Option<Polarity> {
+fn resolve<S>(first: Polarity, edges: &[Edge<S>]) -> Option<Polarity> {
     match first {
         Polarity::Either => edges.first().map(Edge::polarity),
         p => Some(p),
     }
 }
 
-fn neighbour_pairs(edges: &[Edge], first: Polarity) -> Vec<EdgePair> {
+fn neighbour_pairs<S>(edges: &[Edge<S>], first: Polarity) -> Vec<EdgePair<S>> {
     let Some(first) = resolve(first, edges) else {
         return Vec::new();
     };
@@ -442,14 +594,14 @@ fn neighbour_pairs(edges: &[Edge], first: Polarity) -> Vec<EdgePair> {
 }
 
 impl PairRule for Neighbors {
-    fn pairs(&self, edges: &[Edge], first: Polarity) -> Vec<EdgePair> {
+    fn pairs<S: PixelSpace>(&self, edges: &[Edge<S>], first: Polarity) -> Vec<EdgePair<S>> {
         neighbour_pairs(edges, first)
     }
 }
 
 impl PairRule for StrongestOfRun {
-    fn pairs(&self, edges: &[Edge], first: Polarity) -> Vec<EdgePair> {
-        let strongest: Vec<Edge> = edges
+    fn pairs<S: PixelSpace>(&self, edges: &[Edge<S>], first: Polarity) -> Vec<EdgePair<S>> {
+        let strongest: Vec<Edge<S>> = edges
             .chunk_by(|a, b| a.polarity() == b.polarity())
             .filter_map(|run| strongest_index(run).map(|i| run[i]))
             .collect();
@@ -474,7 +626,7 @@ fn derivative_kernel(sigma: f64, radius: usize) -> Vec<f64> {
     raw.iter().map(|w| w / norm).collect()
 }
 
-impl Profile {
+impl<S: PixelSpace> Profile<S> {
     /// The edges of the given polarity whose contrast reaches
     /// `min_contrast`, sorted along the path.
     ///
@@ -498,7 +650,7 @@ impl Profile {
     ///
     /// See [`Edges`] for an example.
     #[must_use]
-    pub fn edges(&self, polarity: Polarity, sigma: Sigma, min_contrast: MinContrast) -> Edges {
+    pub fn edges(&self, polarity: Polarity, sigma: Sigma, min_contrast: MinContrast) -> Edges<S> {
         let caliper = self.caliper();
         let step = caliper.step().get();
         let values = self.values();
@@ -773,7 +925,7 @@ mod tests {
         let either = Neighbors.pairs(&edges, Polarity::Either);
         assert_eq!(either.len(), 2);
         assert_eq!(either[0].first.contrast, -100.0);
-        assert!(Neighbors.pairs(&[], Polarity::Either).is_empty());
+        assert!(Neighbors.pairs::<Pixels>(&[], Polarity::Either).is_empty());
     }
 
     #[test]
@@ -794,7 +946,7 @@ mod tests {
         assert_eq!(edges.iter().count(), 4);
         assert_eq!((&edges).into_iter().count(), 4);
         assert_eq!(edges.clone().into_vec().len(), 4);
-        assert!(Edges::default().strongest().is_none());
+        assert!(Edges::<Pixels>::default().strongest().is_none());
     }
 
     #[test]
@@ -818,5 +970,73 @@ mod tests {
         assert!((slope - 1.0).abs() < 1e-12);
         let flat: f64 = k.iter().sum();
         assert!(flat.abs() < 1e-12);
+    }
+
+    // ── The space ──────────────────────────────────────────────────────
+
+    #[test]
+    fn edges_on_an_ideal_image_lie_in_it_and_calibrate_from_it() {
+        use crate::geometry::{AffineMap, Length, Point, UniformScale};
+        use crate::{IdealPixels, Millimeter};
+        let step = |x: usize, _: usize| MonoF32::new(if x <= 20 { 30.0 } else { 230.0 });
+        let raw = Image::generate(48, 16, step);
+        let ideal: Image<MonoF32, IdealPixels> = Image::generate(48, 16, step).into_space();
+
+        // The caliper takes its space from the profile it is read with.
+        let cal = Caliper::try_segment(
+            Point::new(4.0, 8.0),
+            Point::new(40.0, 8.0),
+            Length::new(4.0),
+            Length::new(0.25),
+        )
+        .unwrap();
+        let edges: Edges<IdealPixels> = profile(&ideal, &cal, CatmullRom, &Skip).unwrap().edges(
+            Polarity::Either,
+            sigma!(1.5),
+            crate::min_contrast!(50.0),
+        );
+        let edge = edges.first().unwrap();
+
+        // The same numbers as on the camera image: the space is a type, not
+        // a change of the measurement.
+        let raw_cal: Caliper = Caliper::try_segment(
+            Point::new(4.0, 8.0),
+            Point::new(40.0, 8.0),
+            Length::new(4.0),
+            Length::new(0.25),
+        )
+        .unwrap();
+        let raw_edge = profile(&raw, &raw_cal, CatmullRom, &Skip)
+            .unwrap()
+            .edges(Polarity::Either, sigma!(1.5), crate::min_contrast!(50.0))
+            .first()
+            .unwrap();
+        assert_eq!(edge.position().x, raw_edge.position().x);
+
+        let mm: UniformScale<IdealPixels, Millimeter> = crate::uniform_scale!(0.05);
+        let at = mm.map_point(edge.position());
+        assert!((at.x - 20.5 * 0.05).abs() < 1e-6, "{at:?}");
+    }
+
+    #[test]
+    fn the_edge_traits_ask_nothing_of_the_space() {
+        use crate::geometry::{Length, Point};
+        let rise: Edge = Edge::new(Point::new(4.0, 2.0), Length::new(3.0), 90.0);
+        let fall: Edge = Edge::new(Point::new(9.0, 2.0), Length::new(8.0), -60.0);
+        assert_eq!(Clone::clone(&rise), rise);
+        assert_ne!(rise, fall);
+        assert_eq!((rise.along().get(), fall.contrast()), (3.0, -60.0));
+        assert!(format!("{rise:?}").starts_with("Edge { position:"));
+
+        let edges = Edges {
+            edges: vec![rise, fall],
+        };
+        assert_eq!(edges.clone(), edges);
+        assert_ne!(edges, Edges::default());
+        assert!(format!("{edges:?}").starts_with("Edges { edges:"));
+
+        let pair = edges.pairs(Polarity::DarkToLight, Neighbors)[0];
+        assert_eq!(Clone::clone(&pair), pair);
+        assert!(format!("{pair:?}").starts_with("EdgePair { first:"));
     }
 }

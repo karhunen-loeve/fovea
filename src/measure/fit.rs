@@ -637,6 +637,20 @@ impl<U: LengthUnit> Fit<Line<U>> {
     /// assert!((in_mm.peak_to_valley().get() - fit.peak_to_valley().get() * 0.025).abs() < 1e-15);
     /// # Ok::<(), fovea::Error>(())
     /// ```
+    ///
+    /// A calibration starts in the space it was made in. Points measured on
+    /// the camera image do not convert through one made on the ideal image:
+    ///
+    /// ```compile_fail
+    /// use fovea::{IdealPixels, Millimeter, Pixels, Point};
+    /// use fovea::geometry::UniformScale;
+    /// use fovea::measure::{AllPoints, TotalLeastSquares, try_fit};
+    ///
+    /// let points: [Point<Pixels>; 3] = [Point::new(0.0, 0.0), Point::new(40.0, 1.0), Point::new(80.0, 0.0)];
+    /// let fit = try_fit(&points, TotalLeastSquares, AllPoints).unwrap();
+    /// let scale: UniformScale<IdealPixels, Millimeter> = fovea::uniform_scale!(0.025);
+    /// let _ = fit.map(&scale);
+    /// ```
     #[must_use]
     pub fn map<M: ConformalMap<Domain = U>>(&self, mapping: &M) -> Fit<Line<M::Codomain>> {
         self.mapped(mapping.map_line(self.element), mapping.factor())

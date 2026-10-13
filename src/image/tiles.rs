@@ -1,5 +1,6 @@
 use std::marker::PhantomData;
 
+use crate::geometry::{PixelSpace, Pixels};
 use crate::image::ImageRefMut;
 use crate::image::sequential::ContiguousImageMut;
 use crate::image::{ImageView, ImageViewMut};
@@ -11,7 +12,7 @@ use crate::{Coordinate, Rectangle, Size, Stride};
 /// and tiling iterators
 pub trait SubView: ImageView {
     /// The immutable sub-view type returned by [`roi`](SubView::roi) and the tile/window iterators.
-    type Sub<'a>: ImageView<Pixel = Self::Pixel>
+    type Sub<'a>: ImageView<Pixel = Self::Pixel, Space = Self::Space>
     where
         Self: 'a;
 
@@ -91,7 +92,7 @@ pub trait SubView: ImageView {
 /// and tiling iterators
 pub trait SubViewMut: SubView + ImageViewMut {
     /// The mutable sub-view type returned by [`roi_mut`](SubViewMut::roi_mut).
-    type SubMut<'a>: ImageViewMut<Pixel = Self::Pixel>
+    type SubMut<'a>: ImageViewMut<Pixel = Self::Pixel, Space = Self::Space>
     where
         Self: 'a;
 
@@ -173,7 +174,7 @@ where
 {
     /// The immutable sub-view type returned by
     /// [`aligned_bayer_roi`](BayerSubView::aligned_bayer_roi).
-    type Sub<'a>: ImageView<Pixel = Self::Pixel>
+    type Sub<'a>: ImageView<Pixel = Self::Pixel, Space = Self::Space>
     where
         Self: 'a;
 
@@ -215,7 +216,7 @@ where
 {
     /// The mutable sub-view type returned by
     /// [`aligned_bayer_roi_mut`](BayerSubViewMut::aligned_bayer_roi_mut).
-    type SubMut<'a>: ImageViewMut<Pixel = Self::Pixel>
+    type SubMut<'a>: ImageViewMut<Pixel = Self::Pixel, Space = Self::Space>
     where
         Self: 'a;
 
@@ -579,24 +580,26 @@ impl<'a, T> ExactSizeIterator for EnumeratePositions<'a, T> where T: SubView {}
 ///
 /// [`IntoTilesMut`]: crate::image::IntoTilesMut
 /// [`IntoTilesMut::into_tiles_mut`]: crate::image::IntoTilesMut::into_tiles_mut
-pub struct TileIterMut<'a, T> {
+pub struct TileIterMut<'a, T, S = Pixels> {
     data: *mut T,
     len: usize,
     image_size: Size,
     tile_size: Size,
     current: Coordinate,
     _marker: PhantomData<&'a mut T>,
+    space: PhantomData<fn() -> S>,
 }
 
 // SAFETY: TileIterMut has exclusive access to the pixel buffer for lifetime 'a.
 // Sending it to another thread is safe when T is Send (same as &'a mut [T]).
-unsafe impl<T: Send> Send for TileIterMut<'_, T> {}
+// The space is a marker behind `fn() -> S`, which is `Send` for every `S`.
+unsafe impl<T: Send, S> Send for TileIterMut<'_, T, S> {}
 
 // SAFETY: Shared access (&TileIterMut) does not expose &T directly, but even if
 // it did, Sync where T: Sync matches the guarantees of &'a mut [T].
-unsafe impl<T: Sync> Sync for TileIterMut<'_, T> {}
+unsafe impl<T: Sync, S> Sync for TileIterMut<'_, T, S> {}
 
-impl<'a, T> TileIterMut<'a, T> {
+impl<'a, T, S> TileIterMut<'a, T, S> {
     /// Creates a new mutable tile iterator.
     ///
     /// # Safety
@@ -628,12 +631,13 @@ impl<'a, T> TileIterMut<'a, T> {
             tile_size,
             current: Coordinate::new(0, 0),
             _marker: PhantomData,
+            space: PhantomData,
         }
     }
 }
 
-impl<'a, T> Iterator for TileIterMut<'a, T> {
-    type Item = ImageRefMut<'a, T>;
+impl<'a, T, S> Iterator for TileIterMut<'a, T, S> {
+    type Item = ImageRefMut<'a, T, S>;
 
     fn next(&mut self) -> Option<Self::Item> {
         // If the current position is past the image, the iterator is exhausted.
@@ -722,8 +726,10 @@ mod sealed {
 pub trait IntoTilesMut<'a>: sealed::Sealed {
     /// The pixel type of the tiles.
     type Pixel;
+    /// The space of the tiles, the image's.
+    type Space: PixelSpace;
     /// The mutable tile view type yielded by the iterator.
-    type TileMut<'b>: ImageViewMut<Pixel = Self::Pixel>
+    type TileMut<'b>: ImageViewMut<Pixel = Self::Pixel, Space = Self::Space>
     where
         Self: 'b;
     /// The iterator type over mutable tiles.
@@ -747,12 +753,13 @@ where
     I: ContiguousImageMut,
 {
     type Pixel = <I as ImageView>::Pixel;
+    type Space = <I as ImageView>::Space;
     type TileMut<'b>
-        = ImageRefMut<'b, Self::Pixel>
+        = ImageRefMut<'b, Self::Pixel, Self::Space>
     where
         Self: 'b;
     type TilesIterMut<'b>
-        = TileIterMut<'b, Self::Pixel>
+        = TileIterMut<'b, Self::Pixel, Self::Space>
     where
         Self: 'b;
 
@@ -1486,7 +1493,8 @@ mod tests {
         let len = slice.len();
         let ptr = slice.as_mut_ptr();
         let tiles: Vec<_> =
-            unsafe { TileIterMut::new(ptr, len, Size::new(8, 8), Size::new(4, 4)) }.collect();
+            unsafe { TileIterMut::<_, Pixels>::new(ptr, len, Size::new(8, 8), Size::new(4, 4)) }
+                .collect();
         assert_eq!(tiles.len(), 4);
         assert_eq!(tiles[0].size(), Size::new(4, 4));
         assert_eq!(tiles[0].get(0, 0), Some(0));

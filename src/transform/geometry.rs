@@ -90,7 +90,7 @@ use crate::pixel::ZeroablePixel;
 pub fn flip_h_into<I, O>(img: &I, out: &mut O)
 where
     I: RasterImage,
-    O: RasterImageMut<Pixel = I::Pixel>,
+    O: RasterImageMut<Pixel = I::Pixel, Space = I::Space>,
 {
     assert_eq!(
         img.size(),
@@ -125,12 +125,12 @@ where
 /// assert_eq!(dst.pixel_at(0, 0), Mono8::new(2));
 /// ```
 #[must_use]
-pub fn flip_h<I>(img: &I) -> Image<I::Pixel>
+pub fn flip_h<I>(img: &I) -> Image<I::Pixel, I::Space>
 where
     I: RasterImage,
     I::Pixel: ZeroablePixel,
 {
-    let mut out = Image::<I::Pixel>::zero(img.width(), img.height());
+    let mut out = Image::<I::Pixel, _>::zero_in(img.width(), img.height());
     flip_h_into(img, &mut out);
     out
 }
@@ -162,7 +162,7 @@ where
 pub fn flip_v_into<I, O>(img: &I, out: &mut O)
 where
     I: RasterImage,
-    O: RasterImageMut<Pixel = I::Pixel>,
+    O: RasterImageMut<Pixel = I::Pixel, Space = I::Space>,
 {
     assert_eq!(
         img.size(),
@@ -195,12 +195,12 @@ where
 /// assert_eq!(dst.pixel_at(0, 0), Mono8::new(2));
 /// ```
 #[must_use]
-pub fn flip_v<I>(img: &I) -> Image<I::Pixel>
+pub fn flip_v<I>(img: &I) -> Image<I::Pixel, I::Space>
 where
     I: RasterImage,
     I::Pixel: ZeroablePixel,
 {
-    let mut out = Image::<I::Pixel>::zero(img.width(), img.height());
+    let mut out = Image::<I::Pixel, _>::zero_in(img.width(), img.height());
     flip_v_into(img, &mut out);
     out
 }
@@ -235,7 +235,7 @@ where
 pub fn rotate_90_into<I, O>(img: &I, out: &mut O)
 where
     I: RasterImage,
-    O: RasterImageMut<Pixel = I::Pixel>,
+    O: RasterImageMut<Pixel = I::Pixel, Space = I::Space>,
 {
     let expected = Size::new(img.height(), img.width());
     assert_eq!(
@@ -274,12 +274,12 @@ where
 /// assert_eq!(dst.height(), 2);
 /// ```
 #[must_use]
-pub fn rotate_90<I>(img: &I) -> Image<I::Pixel>
+pub fn rotate_90<I>(img: &I) -> Image<I::Pixel, I::Space>
 where
     I: RasterImage,
     I::Pixel: ZeroablePixel,
 {
-    let mut out = Image::<I::Pixel>::zero(img.height(), img.width());
+    let mut out = Image::<I::Pixel, _>::zero_in(img.height(), img.width());
     rotate_90_into(img, &mut out);
     out
 }
@@ -310,7 +310,7 @@ where
 pub fn rotate_180_into<I, O>(img: &I, out: &mut O)
 where
     I: RasterImage,
-    O: RasterImageMut<Pixel = I::Pixel>,
+    O: RasterImageMut<Pixel = I::Pixel, Space = I::Space>,
 {
     assert_eq!(
         img.size(),
@@ -344,12 +344,12 @@ where
 /// assert_eq!(dst.pixel_at(0, 0), Mono8::new(2));
 /// ```
 #[must_use]
-pub fn rotate_180<I>(img: &I) -> Image<I::Pixel>
+pub fn rotate_180<I>(img: &I) -> Image<I::Pixel, I::Space>
 where
     I: RasterImage,
     I::Pixel: ZeroablePixel,
 {
-    let mut out = Image::<I::Pixel>::zero(img.width(), img.height());
+    let mut out = Image::<I::Pixel, _>::zero_in(img.width(), img.height());
     rotate_180_into(img, &mut out);
     out
 }
@@ -384,7 +384,7 @@ where
 pub fn rotate_270_into<I, O>(img: &I, out: &mut O)
 where
     I: RasterImage,
-    O: RasterImageMut<Pixel = I::Pixel>,
+    O: RasterImageMut<Pixel = I::Pixel, Space = I::Space>,
 {
     let expected = Size::new(img.height(), img.width());
     assert_eq!(
@@ -423,12 +423,12 @@ where
 /// assert_eq!(dst.height(), 2);
 /// ```
 #[must_use]
-pub fn rotate_270<I>(img: &I) -> Image<I::Pixel>
+pub fn rotate_270<I>(img: &I) -> Image<I::Pixel, I::Space>
 where
     I: RasterImage,
     I::Pixel: ZeroablePixel,
 {
-    let mut out = Image::<I::Pixel>::zero(img.height(), img.width());
+    let mut out = Image::<I::Pixel, _>::zero_in(img.height(), img.width());
     rotate_270_into(img, &mut out);
     out
 }
@@ -462,7 +462,7 @@ where
 pub fn transpose_into<I, O>(img: &I, out: &mut O)
 where
     I: RasterImage,
-    O: RasterImageMut<Pixel = I::Pixel>,
+    O: RasterImageMut<Pixel = I::Pixel, Space = I::Space>,
 {
     let expected = Size::new(img.height(), img.width());
     assert_eq!(
@@ -514,12 +514,12 @@ const TRANSPOSE_BLOCK: usize = 32;
 /// assert_eq!(dst.height(), 2);
 /// ```
 #[must_use]
-pub fn transpose<I>(img: &I) -> Image<I::Pixel>
+pub fn transpose<I>(img: &I) -> Image<I::Pixel, I::Space>
 where
     I: RasterImage,
     I::Pixel: ZeroablePixel,
 {
-    let mut out = Image::<I::Pixel>::zero(img.height(), img.width());
+    let mut out = Image::<I::Pixel, _>::zero_in(img.height(), img.width());
     transpose_into(img, &mut out);
     out
 }

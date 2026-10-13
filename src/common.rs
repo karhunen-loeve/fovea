@@ -170,47 +170,12 @@ impl From<(usize, usize)> for Coordinate {
     }
 }
 
-/// A sub-pixel coordinate in 2D space with `f64` `x` and `y`.
-///
-/// The floating-point companion to [`Coordinate`], for quantities that
-/// fall between pixel centres — a component centroid, a refined feature
-/// location, an interpolated sample point.
-///
-/// # Example
-/// ```
-/// # use fovea::CoordinateF64;
-/// let c = CoordinateF64::new(2.5, 4.0);
-/// assert_eq!(c.x, 2.5);
-/// assert_eq!(c.y, 4.0);
-/// ```
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct CoordinateF64 {
-    /// Horizontal position.
-    pub x: f64,
-    /// Vertical position.
-    pub y: f64,
-}
-impl CoordinateF64 {
-    /// Creates a `CoordinateF64` at the given `(x, y)` position.
-    #[inline]
-    pub fn new(x: f64, y: f64) -> Self {
-        Self { x, y }
-    }
-}
-
-impl From<(f64, f64)> for CoordinateF64 {
-    #[inline]
-    fn from(value: (f64, f64)) -> Self {
-        Self::new(value.0, value.1)
-    }
-}
-
 /// A **signed** pixel position: a point on the pixel grid that may
 /// legitimately lie outside the frame on any side.
 ///
 /// The third member of the coordinate family. [`Coordinate`] addresses
-/// pixels that can exist, so it is unsigned; [`CoordinateF64`] carries
-/// sub-pixel positions; `SignedCoordinate` names whole-pixel positions
+/// pixels that can exist, so it is unsigned; [`Point`](crate::Point)
+/// carries sub-pixel positions, in the space of the image they lie in; `SignedCoordinate` names whole-pixel positions
 /// anywhere on the grid. Three places need one: a neighbourhood that
 /// reaches past the image edge (what a
 /// [`BorderPolicy`](crate::border::BorderPolicy) resolves), a shape that
@@ -337,13 +302,6 @@ impl TryFrom<Coordinate> for SignedCoordinate {
             x: isize::try_from(value.x)?,
             y: isize::try_from(value.y)?,
         })
-    }
-}
-
-impl From<Coordinate> for CoordinateF64 {
-    #[inline]
-    fn from(value: Coordinate) -> Self {
-        Self::new(value.x as f64, value.y as f64)
     }
 }
 

@@ -186,7 +186,7 @@ pub use morphology::{
 };
 pub use pad::{Margins, PadGeometry, pad};
 pub use pyramid::{Gaussian, PyramidMethod, ScaledGaussian, pyr_down, pyr_up};
-pub use remap::{DestToSourceTable, remap};
+pub use remap::{DestToSourceTable, RemapMethod, remap};
 pub use resize::{NearestNeighbor, ResizeMethod, resize, resize_into};
 pub use template_match::{
     MatchMethod, NCC, SAD, SSD, ScorePolarity, match_template, match_template_into,

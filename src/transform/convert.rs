@@ -3187,7 +3187,7 @@ impl<T: Sized> ConvertPixelExt for T {}
 pub fn convert_image_into<I, O, T, P, M>(img: &I, out: &mut O, method: M)
 where
     I: RasterImage<Pixel = T>,
-    O: RasterImageMut<Pixel = P>,
+    O: RasterImageMut<Pixel = P, Space = I::Space>,
     M: ConvertPixel<T, P>,
 {
     assert_eq!(
@@ -3218,13 +3218,13 @@ where
 /// let out: Image<Mono16> = convert_image(&img, FullRange);
 /// ```
 #[must_use]
-pub fn convert_image<I, T, P, M>(img: &I, method: M) -> Image<P>
+pub fn convert_image<I, T, P, M>(img: &I, method: M) -> Image<P, I::Space>
 where
     I: RasterImage<Pixel = T>,
     P: ZeroablePixel,
     M: ConvertPixel<T, P>,
 {
-    let mut out = Image::<P>::zero(img.width(), img.height());
+    let mut out = Image::<P, _>::zero_in(img.width(), img.height());
     convert_image_into(img, &mut out, method);
     out
 }

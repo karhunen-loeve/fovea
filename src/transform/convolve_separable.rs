@@ -39,6 +39,7 @@
 
 use crate::Coordinate;
 use crate::border::BorderPolicy;
+use crate::geometry::Pixels;
 use crate::image::{
     Image, ImageRef, ImageRefMut, ImageView, RasterImage, RasterImageMut, SeparableWeights,
 };
@@ -217,8 +218,8 @@ pub fn convolve_separable_into<I, B, K, O, P, Acc, Out>(
         + ZeroablePixel
         + LinearPixel<f32, Accumulator = Acc>
         + std::ops::Add<Output = Acc>,
-    B: BorderPolicy<I> + BorderPolicy<Image<Acc>>,
-    O: RasterImageMut<Pixel = Out>,
+    B: BorderPolicy<I> + BorderPolicy<Image<Acc, I::Space>>,
+    O: RasterImageMut<Pixel = Out, Space = I::Space>,
     Out: FromLinear<Acc>,
 {
     // True convolution = correlation with the 180°-flipped kernel.
@@ -247,7 +248,9 @@ pub fn convolve_separable_into<I, B, K, O, P, Acc, Out>(
 /// an empty axis or an out-of-bounds anchor is reported here by trait and
 /// method name, instead of underflowing the interior-region arithmetic
 /// several frames deeper in a panic that names neither.
-fn weight_views<K: SeparableWeights>(kernel: &K) -> (ImageRef<'_, f32>, ImageRef<'_, f32>) {
+fn weight_views<K: SeparableWeights>(
+    kernel: &K,
+) -> (ImageRef<'_, f32, Pixels>, ImageRef<'_, f32, Pixels>) {
     let h_weights = kernel.h_weights();
     let v_weights = kernel.v_weights();
     assert!(
@@ -298,7 +301,11 @@ fn weight_views<K: SeparableWeights>(kernel: &K) -> (ImageRef<'_, f32>, ImageRef
 /// }
 /// ```
 #[must_use]
-pub fn convolve_separable<I, B, K, P, Acc, Out>(image: &I, kernel: &K, border: &B) -> Image<Out>
+pub fn convolve_separable<I, B, K, P, Acc, Out>(
+    image: &I,
+    kernel: &K,
+    border: &B,
+) -> Image<Out, I::Space>
 where
     I: RasterImage<Pixel = P>,
     K: SeparableWeights,
@@ -308,7 +315,7 @@ where
         + ZeroablePixel
         + LinearPixel<f32, Accumulator = Acc>
         + std::ops::Add<Output = Acc>,
-    B: BorderPolicy<I> + BorderPolicy<Image<Acc>>,
+    B: BorderPolicy<I> + BorderPolicy<Image<Acc, I::Space>>,
     Out: ZeroablePixel + FromLinear<Acc>,
 {
     // Flip on the stack, borrow the weights as `ImageRef` views, correlate.
@@ -463,8 +470,8 @@ where
         I: RasterImage<Pixel = P>,
         K: SeparableWeights,
         P: Copy + LinearPixel<f32, Accumulator = Acc>,
-        B: BorderPolicy<I> + for<'r> BorderPolicy<ImageRef<'r, Acc>>,
-        O: RasterImageMut<Pixel = Out>,
+        B: BorderPolicy<I> + for<'r> BorderPolicy<ImageRef<'r, Acc, I::Space>>,
+        O: RasterImageMut<Pixel = Out, Space = I::Space>,
         Out: FromLinear<Acc>,
     {
         // True convolution = correlation with the 180°-flipped kernel; the
@@ -519,12 +526,12 @@ pub(crate) fn correlate_separable_raw_into<I, HW, VW, B, O, P, Acc, Out>(
         + std::ops::Add<Output = Acc>,
     HW: ImageView<Pixel = f32>,
     VW: ImageView<Pixel = f32>,
-    B: BorderPolicy<I> + BorderPolicy<Image<Acc>>,
-    O: RasterImageMut<Pixel = Out>,
+    B: BorderPolicy<I> + BorderPolicy<Image<Acc, I::Space>>,
+    O: RasterImageMut<Pixel = Out, Space = I::Space>,
     Out: FromLinear<Acc>,
 {
     // ── Pass 1: horizontal correlation (weights used directly) ───────────
-    let intermediate: Image<Acc> = fold_neighborhood(
+    let intermediate: Image<Acc, I::Space> = fold_neighborhood(
         image,
         h_weights,
         Coordinate::new(h_anchor, 0),
@@ -577,8 +584,8 @@ where
         P: Copy + LinearPixel<f32, Accumulator = Acc>,
         HW: ImageView<Pixel = f32>,
         VW: ImageView<Pixel = f32>,
-        B: BorderPolicy<I> + for<'r> BorderPolicy<ImageRef<'r, Acc>>,
-        O: RasterImageMut<Pixel = Out>,
+        B: BorderPolicy<I> + for<'r> BorderPolicy<ImageRef<'r, Acc, I::Space>>,
+        O: RasterImageMut<Pixel = Out, Space = I::Space>,
         Out: FromLinear<Acc>,
     {
         let (h_weights, h_anchor) = h;
@@ -611,7 +618,8 @@ where
         // ── Pass 1: horizontal correlation into the borrowed intermediate ─
         {
             let mut mid_view = ImageRefMut::new(mid.width, mid.height, &mut intermediate[..area])
-                .expect("intermediate view: len == area");
+                .expect("intermediate view: len == area")
+                .into_space::<I::Space>();
             fold_neighborhood_into_with_scratch(
                 image,
                 h_weights,
@@ -625,7 +633,8 @@ where
 
         // ── Pass 2: vertical correlation ──────────────────────────────────
         let mid_view = ImageRef::new(mid.width, mid.height, &intermediate[..area])
-            .expect("intermediate view: len == area");
+            .expect("intermediate view: len == area")
+            .into_space::<I::Space>();
         fold_neighborhood_into_with_scratch(
             &mid_view,
             v_weights,
@@ -649,7 +658,7 @@ pub(crate) fn correlate_separable_raw<I, HW, VW, B, P, Acc, Out>(
     v_weights: &VW,
     v_anchor: usize,
     border: &B,
-) -> Image<Out>
+) -> Image<Out, I::Space>
 where
     I: RasterImage<Pixel = P>,
     P: Copy + LinearPixel<f32, Accumulator = Acc>,
@@ -660,7 +669,7 @@ where
         + std::ops::Add<Output = Acc>,
     HW: ImageView<Pixel = f32>,
     VW: ImageView<Pixel = f32>,
-    B: BorderPolicy<I> + BorderPolicy<Image<Acc>>,
+    B: BorderPolicy<I> + BorderPolicy<Image<Acc, I::Space>>,
     Out: ZeroablePixel + FromLinear<Acc>,
 {
     let intermediate_region = <B as BorderPolicy<I>>::output_region(
@@ -669,14 +678,14 @@ where
         h_weights.size(),
         Coordinate::new(h_anchor, 0),
     );
-    let output_region = <B as BorderPolicy<Image<Acc>>>::output_region(
+    let output_region = <B as BorderPolicy<Image<Acc, I::Space>>>::output_region(
         border,
         intermediate_region.size,
         v_weights.size(),
         Coordinate::new(0, v_anchor),
     );
 
-    let mut out = Image::<Out>::zero(output_region.size.width, output_region.size.height);
+    let mut out = Image::<Out, _>::zero_in(output_region.size.width, output_region.size.height);
     correlate_separable_raw_into(
         image, h_weights, h_anchor, v_weights, v_anchor, border, &mut out,
     );

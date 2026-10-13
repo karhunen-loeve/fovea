@@ -4,8 +4,7 @@ use core::fmt;
 use core::marker::PhantomData;
 use core::ops::{Add, Mul, Neg, Sub};
 
-use super::units::{LengthUnit, Meter, Pixels, Prefix, rescale};
-use crate::CoordinateF64;
+use super::units::{LengthUnit, Meter, Prefix, rescale};
 
 /// A position in the plane, in the unit `U`.
 ///
@@ -14,9 +13,8 @@ use crate::CoordinateF64;
 /// other is expected, does not compile. The fields are public for reading
 /// and writing; construction goes through [`Point::new`].
 ///
-/// Points are not validated, as [`CoordinateF64`] is not: a point is any
-/// pair of numbers, NaN included, and a length computed from a NaN point is
-/// NaN.
+/// Points are not validated: a point is any pair of numbers, NaN included,
+/// and a length computed from a NaN point is NaN.
 ///
 /// The arithmetic is that of positions. The difference of two points is a
 /// [`Vector`], a point plus a vector is a point, and the sum of two points
@@ -254,22 +252,6 @@ impl<P: Prefix> Length<Meter<P>> {
     }
 }
 
-// ── Bridges to the pixel coordinate family ──────────────────────────────────
-
-impl From<CoordinateF64> for Point<Pixels> {
-    #[inline]
-    fn from(c: CoordinateF64) -> Self {
-        Point::new(c.x, c.y)
-    }
-}
-
-impl From<Point<Pixels>> for CoordinateF64 {
-    #[inline]
-    fn from(p: Point<Pixels>) -> Self {
-        CoordinateF64::new(p.x, p.y)
-    }
-}
-
 // ── Arithmetic ───────────────────────────────────────────────────────────────
 
 impl<U: LengthUnit> Sub for Point<U> {
@@ -429,6 +411,7 @@ impl<U> fmt::Debug for Length<U> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Pixels;
     use crate::geometry::{Micro, Micrometer, Milli, Millimeter, Unit};
 
     fn mm(x: f64, y: f64) -> Point<Millimeter> {
@@ -491,15 +474,6 @@ mod tests {
 
         let l: Length<Millimeter> = Length::new(1500.0);
         assert_eq!(l.convert::<Unit>().get(), 1.5);
-    }
-
-    #[test]
-    fn coordinates_bridge_both_ways() {
-        let c = CoordinateF64::new(3.25, 7.5);
-        let p: Point<Pixels> = c.into();
-        assert_eq!((p.x, p.y), (3.25, 7.5));
-        let back: CoordinateF64 = p.into();
-        assert_eq!(back, c);
     }
 
     #[test]

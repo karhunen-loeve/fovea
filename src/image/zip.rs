@@ -133,7 +133,7 @@ where
 pub fn zip_pixels<'a, A, B>(a: &'a A, b: &'a B) -> Result<ZipPixelsIter<'a, A, B>, Error>
 where
     A: ImageView,
-    B: ImageView,
+    B: ImageView<Space = A::Space>,
 {
     if a.size() != b.size() {
         return Err(Error::SizeMismatch {

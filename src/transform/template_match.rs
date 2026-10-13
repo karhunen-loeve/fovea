@@ -123,7 +123,9 @@ pub trait ScorePolarity {
 /// pattern as [`ResizeMethod`](crate::transform::ResizeMethod). The
 /// [`ScorePolarity`] supertrait makes every implementor state where its
 /// score map marks the best match.
-pub trait MatchMethod<I: ImageView, T: ImageView, O: ImageViewMut>: ScorePolarity {
+pub trait MatchMethod<I: ImageView, T: ImageView, O: ImageViewMut<Space = I::Space>>:
+    ScorePolarity
+{
     /// Compute the per-position similarity score map.
     ///
     /// # Errors
@@ -209,7 +211,7 @@ pub fn match_template_into<I, T, O, M>(
 where
     I: ImageView,
     T: ImageView,
-    O: ImageViewMut,
+    O: ImageViewMut<Space = I::Space>,
     M: MatchMethod<I, T, O>,
 {
     match_template_preflight(image, template)?;
@@ -242,18 +244,22 @@ where
 /// assert_eq!(result.width(), 8);
 /// assert_eq!(result.height(), 8);
 /// ```
-pub fn match_template<I, T, S, M>(image: &I, template: &T, method: M) -> Result<Image<S>, Error>
+pub fn match_template<I, T, S, M>(
+    image: &I,
+    template: &T,
+    method: M,
+) -> Result<Image<S, I::Space>, Error>
 where
     I: ImageView,
     T: ImageView,
     S: ZeroablePixel,
-    M: MatchMethod<I, T, Image<S>>,
+    M: MatchMethod<I, T, Image<S, I::Space>>,
 {
     match_template_preflight(image, template)?;
 
     let out_w = image.width() - template.width() + 1;
     let out_h = image.height() - template.height() + 1;
-    let mut output = Image::<S>::zero(out_w, out_h);
+    let mut output = Image::<S, _>::zero_in(out_w, out_h);
     // SAFETY (Tier 3): out_w/out_h are computed from the same image and
     // template sizes, so the size check inside match_template_into cannot
     // fail. We unwrap to surface any internal regression as a panic.
@@ -415,7 +421,7 @@ impl<I, T, O> MatchMethod<I, T, O> for SAD
 where
     I: RasterImage,
     T: ImageView<Pixel = I::Pixel>,
-    O: RasterImageMut<Pixel = MonoF32>,
+    O: RasterImageMut<Pixel = MonoF32, Space = I::Space>,
     I::Pixel: ChannelwiseMath,
     <I::Pixel as HomogeneousPixel>::Channel: PartialOrd
         + StdSub<Output = <I::Pixel as HomogeneousPixel>::Channel>
@@ -496,7 +502,7 @@ impl<I, T, O> MatchMethod<I, T, O> for SSD
 where
     I: RasterImage,
     T: ImageView<Pixel = I::Pixel>,
-    O: RasterImageMut<Pixel = MonoF32>,
+    O: RasterImageMut<Pixel = MonoF32, Space = I::Space>,
     I::Pixel: ChannelwiseMath,
     <I::Pixel as HomogeneousPixel>::Channel:
         PartialOrd + StdSub<Output = <I::Pixel as HomogeneousPixel>::Channel> + LinearChannel<f32>,
@@ -692,7 +698,7 @@ impl<I, T, O> MatchMethod<I, T, O> for NCC
 where
     I: RasterImage,
     T: ImageView<Pixel = I::Pixel>,
-    O: RasterImageMut<Pixel = MonoF32>,
+    O: RasterImageMut<Pixel = MonoF32, Space = I::Space>,
     I::Pixel: ChannelwiseMath,
     <I::Pixel as HomogeneousPixel>::Channel: LinearChannel<f32>,
     <<I::Pixel as HomogeneousPixel>::Channel as LinearChannel<f32>>::Accumulator: Into<f64>,

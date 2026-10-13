@@ -73,10 +73,11 @@
 //! ```
 
 use crate::error::Error;
+use crate::geometry::Point;
 use crate::image::RasterImage;
 use crate::pixel::SingleChannel;
 use crate::transform::{nms_sector, nms_sector_from_gradient};
-use crate::{Coordinate, CoordinateF64, Offset, Orientation};
+use crate::{Coordinate, Offset, Orientation};
 
 pub use crate::common::Extremum;
 
@@ -221,7 +222,11 @@ pub fn parabola_vertex(before: f64, at: f64, after: f64, kind: Extremum) -> Opti
 /// assert!(interpolate_peak(&scores, Coordinate::new(2, 2), Extremum::Maximum).is_none());
 /// ```
 #[must_use]
-pub fn interpolate_peak<I, P>(surface: &I, at: Coordinate, kind: Extremum) -> Option<CoordinateF64>
+pub fn interpolate_peak<I, P>(
+    surface: &I,
+    at: Coordinate,
+    kind: Extremum,
+) -> Option<Point<I::Space>>
 where
     I: RasterImage<Pixel = P>,
     P: SingleChannel,
@@ -247,7 +252,7 @@ where
     }
 
     let (dx, dy) = quadratic_vertex(&s, kind)?;
-    Some(CoordinateF64::new(at.x as f64 + dx, at.y as f64 + dy))
+    Some(Point::new(at.x as f64 + dx, at.y as f64 + dy))
 }
 
 /// Vertex of the quadratic through a 3x3 sample block, as an offset from
@@ -371,7 +376,7 @@ pub fn interpolate_peak_along<I, P>(
     magnitude: &I,
     at: Coordinate,
     gradient: Orientation,
-) -> Option<CoordinateF64>
+) -> Option<Point<I::Space>>
 where
     I: RasterImage<Pixel = P>,
     P: SingleChannel,
@@ -449,11 +454,11 @@ pub fn interpolate_ridge_points<IM, IX, IY, P>(
     magnitude: &IM,
     gx: &IX,
     gy: &IY,
-) -> Result<Vec<Option<CoordinateF64>>, Error>
+) -> Result<Vec<Option<Point<IM::Space>>>, Error>
 where
     IM: RasterImage<Pixel = P>,
-    IX: RasterImage<Pixel = P>,
-    IY: RasterImage<Pixel = P>,
+    IX: RasterImage<Pixel = P, Space = IM::Space>,
+    IY: RasterImage<Pixel = P, Space = IM::Space>,
     P: SingleChannel,
     f64: From<P::Channel>,
 {
@@ -497,7 +502,7 @@ where
 /// from. `step` is a signed pixel displacement; the offset the fit returns
 /// is in units of it, so a diagonal step scales the reported displacement
 /// by the square root of two without any special case here.
-fn fit_along_step<I, P>(magnitude: &I, at: Coordinate, step: Offset) -> Option<CoordinateF64>
+fn fit_along_step<I, P>(magnitude: &I, at: Coordinate, step: Offset) -> Option<Point<I::Space>>
 where
     I: RasterImage<Pixel = P>,
     P: SingleChannel,
@@ -523,7 +528,7 @@ where
     let after = sample(1)?;
     let centre = f64::from(magnitude.row(at.y)[at.x].channel(0));
     let offset = parabola_vertex(before, centre, after, Extremum::Maximum)?;
-    Some(CoordinateF64::new(
+    Some(Point::new(
         at.x as f64 + offset * step.dx as f64,
         at.y as f64 + offset * step.dy as f64,
     ))
@@ -892,7 +897,7 @@ mod tests {
         let thinned = column_ridge([0.0, 0.0, 2.0, 0.0, 0.0]);
         let across = Orientation::from_atan2(0.0, 1.0);
         let at = interpolate_peak_along(&thinned, Coordinate::new(2, 1), across).unwrap();
-        assert_eq!(at, CoordinateF64::new(2.0, 1.0));
+        assert_eq!(at, Point::new(2.0, 1.0));
 
         // The same site on the unthinned magnitude does move.
         let magnitude = column_ridge([0.0, 1.0, 2.0, 1.5, 0.0]);
@@ -983,7 +988,7 @@ mod tests {
         let gy = scharr_y(&blurred, &Clamp);
         let magnitude = gradient_magnitude(&gx, &gy).unwrap();
 
-        let (_, hierarchy) = extract_contours::<Label32, Connectivity8>(&mask).unwrap();
+        let (_, hierarchy) = extract_contours::<Label32, Connectivity8, _>(&mask).unwrap();
         let contour = hierarchy.components()[0].outer();
         let vertices = contour.points();
         let points =

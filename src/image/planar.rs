@@ -1,3 +1,4 @@
+use crate::geometry::{PixelSpace, Pixels};
 use crate::image::{Image, ImageView};
 use crate::{
     Size,
@@ -44,12 +45,16 @@ use std::mem::size_of;
 /// assert_eq!(result.pixel_at(0, 0).b, original.pixel_at(0, 0).b);
 /// # Ok::<(), fovea::Error>(())
 /// ```
-pub struct ImagePlanes<P: HomogeneousPixel> {
+///
+/// `S` is the space of the planes, one for all of them: planes built from
+/// numbers are in [`Pixels`], and planes split from an image keep its
+/// space.
+pub struct ImagePlanes<P: HomogeneousPixel, S = Pixels> {
     size: Size,
-    planes: <P::Channels as Array<P::Channel>>::Map<Image<P::Channel>>,
+    planes: <P::Channels as Array<P::Channel>>::Map<Image<P::Channel, S>>,
 }
 
-impl<P: HomogeneousPixel> ImagePlanes<P> {
+impl<P: HomogeneousPixel, S: PixelSpace> ImagePlanes<P, S> {
     // Accessors
 
     /// Returns the size of the image.
@@ -76,44 +81,10 @@ impl<P: HomogeneousPixel> ImagePlanes<P> {
         P::CHANNEL_COUNT
     }
 
-    // Creators
-
-    /// Generates an `ImagePlanes` by calling `f(x, y)` for each pixel position,
-    /// then decomposing the returned pixel into its channel planes.
-    ///
-    /// This signature matches `Image::generate`, making it easy to switch between
-    /// interleaved and planar storage.
-    ///
-    /// # Example
-    /// ```
-    /// # use fovea::image::ImagePlanes;
-    /// # use fovea::pixel::Rgb8;
-    /// // Create a gradient image
-    /// let planes: ImagePlanes<Rgb8> = ImagePlanes::generate(4, 4, |x, y| {
-    ///     Rgb8::new((x * 64) as u8, (y * 64) as u8, 128)
-    /// });
-    /// ```
-    pub fn generate(width: usize, height: usize, f: impl Fn(usize, usize) -> P) -> Self {
-        let size = Size::new(width, height);
-        // First generate all pixels, then transpose into planes
-        let mut pixels = Vec::with_capacity(size.area());
-        for y in 0..height {
-            for x in 0..width {
-                pixels.push(f(x, y));
-            }
-        }
-
-        let planes = <P::Channels as Array<P::Channel>>::Map::from_fn(|channel_index| {
-            let data: Vec<_> = pixels.iter().map(|p| p.channel(channel_index)).collect();
-            Image::from_vec(width, height, data).expect("data length matches size")
-        });
-        Self { size, planes }
-    }
-
     // Plane accessors
 
     /// Returns an immutable reference to the plane at `index`, or `None` if out of bounds.
-    pub fn plane(&self, index: usize) -> Option<&Image<P::Channel>> {
+    pub fn plane(&self, index: usize) -> Option<&Image<P::Channel, S>> {
         if index < P::CHANNEL_COUNT {
             Some(&self.planes.as_ref()[index])
         } else {
@@ -122,7 +93,7 @@ impl<P: HomogeneousPixel> ImagePlanes<P> {
     }
 
     /// Returns a mutable reference to the plane at `index`, or `None` if out of bounds.
-    pub fn plane_mut(&mut self, index: usize) -> Option<&mut Image<P::Channel>> {
+    pub fn plane_mut(&mut self, index: usize) -> Option<&mut Image<P::Channel, S>> {
         if index < P::CHANNEL_COUNT {
             Some(&mut self.planes.as_mut()[index])
         } else {
@@ -131,12 +102,12 @@ impl<P: HomogeneousPixel> ImagePlanes<P> {
     }
 
     /// Returns an iterator over immutable references to each plane.
-    pub fn planes(&self) -> impl Iterator<Item = &Image<P::Channel>> {
+    pub fn planes(&self) -> impl Iterator<Item = &Image<P::Channel, S>> {
         self.planes.as_ref().iter()
     }
 
     /// Returns an iterator over mutable references to each plane.
-    pub fn planes_mut(&mut self) -> impl Iterator<Item = &mut Image<P::Channel>> {
+    pub fn planes_mut(&mut self) -> impl Iterator<Item = &mut Image<P::Channel, S>> {
         self.planes.as_mut().iter_mut()
     }
 
@@ -169,8 +140,8 @@ impl<P: HomogeneousPixel> ImagePlanes<P> {
     pub fn replace_plane(
         &mut self,
         index: usize,
-        new_plane: Image<P::Channel>,
-    ) -> Result<Image<P::Channel>, Error> {
+        new_plane: Image<P::Channel, S>,
+    ) -> Result<Image<P::Channel, S>, Error> {
         assert!(
             index < P::CHANNEL_COUNT,
             "plane index {index} out of bounds for {} channels",
@@ -206,7 +177,9 @@ impl<P: HomogeneousPixel> ImagePlanes<P> {
     /// let planes = ImagePlanes::<Rgb8>::from_planes([r, g, b]);
     /// assert_eq!(planes.plane(0).unwrap().pixel_at(0, 0), Saturating(255u8));
     /// ```
-    pub fn from_planes(planes: <P::Channels as Array<P::Channel>>::Map<Image<P::Channel>>) -> Self {
+    pub fn from_planes(
+        planes: <P::Channels as Array<P::Channel>>::Map<Image<P::Channel, S>>,
+    ) -> Self {
         let slices = planes.as_ref();
         assert!(!slices.is_empty(), "pixel type has zero channels");
         let size = slices[0].size();
@@ -248,7 +221,7 @@ impl<P: HomogeneousPixel> ImagePlanes<P> {
     /// assert_eq!(planes.plane(0).unwrap().pixel_at(0, 0), Saturating(255u8));
     /// ```
     pub fn try_from_array(
-        planes: <P::Channels as Array<P::Channel>>::Map<Image<P::Channel>>,
+        planes: <P::Channels as Array<P::Channel>>::Map<Image<P::Channel, S>>,
     ) -> Result<Self, Error> {
         let slices = planes.as_ref();
         assert!(!slices.is_empty(), "pixel type has zero channels");
@@ -283,7 +256,7 @@ impl<P: HomogeneousPixel> ImagePlanes<P> {
     /// let planes = ImagePlanes::<Rgb8>::try_from_planes(planes_vec).unwrap();
     /// assert_eq!(planes.channel_count(), 3);
     /// ```
-    pub fn try_from_planes(planes_vec: Vec<Image<P::Channel>>) -> Result<Self, Error> {
+    pub fn try_from_planes(planes_vec: Vec<Image<P::Channel, S>>) -> Result<Self, Error> {
         if planes_vec.len() != P::CHANNEL_COUNT {
             return Err(Error::ChannelCountMismatch {
                 expected: P::CHANNEL_COUNT,
@@ -307,18 +280,21 @@ impl<P: HomogeneousPixel> ImagePlanes<P> {
     // Conversions
 
     /// Creates an `ImagePlanes` from an interleaved `Image` by splitting pixels into planes.
-    pub fn from_interleaved(image: &impl ImageView<Pixel = P>) -> Self {
+    ///
+    /// The planes keep the image's space.
+    pub fn from_interleaved(image: &impl ImageView<Pixel = P, Space = S>) -> Self {
         let size = image.size();
         let planes = <P::Channels as Array<P::Channel>>::Map::from_fn(|channel_index| {
-            Image::generate(size.width, size.height, |x, y| {
+            Image::generate_in(size.width, size.height, |x, y| {
                 image.pixel_at(x, y).channel(channel_index)
             })
         });
         Self { size, planes }
     }
 
-    /// Converts this `ImagePlanes` back to an interleaved `Image`.
-    pub fn to_interleaved(&self) -> Image<P> {
+    /// Converts this `ImagePlanes` back to an interleaved `Image`, in the
+    /// planes' space.
+    pub fn to_interleaved(&self) -> Image<P, S> {
         // Assert once outside the hot loop.
         assert!(
             size_of::<P>() <= MAX_PIXEL_SIZE,
@@ -327,7 +303,7 @@ impl<P: HomogeneousPixel> ImagePlanes<P> {
             MAX_PIXEL_SIZE
         );
         let planes_ref = self.planes.as_ref();
-        Image::generate(self.size.width, self.size.height, |x, y| {
+        Image::generate_in(self.size.width, self.size.height, |x, y| {
             let mut buf = [0u8; MAX_PIXEL_SIZE];
             let bytes = &mut buf[..size_of::<P>()];
             let channel_size = size_of::<P::Channel>();
@@ -342,7 +318,43 @@ impl<P: HomogeneousPixel> ImagePlanes<P> {
     }
 }
 
-impl<P: HomogeneousPixel> ImagePlanes<P>
+impl<P: HomogeneousPixel> ImagePlanes<P, Pixels> {
+    // Creators
+
+    /// Generates an `ImagePlanes` by calling `f(x, y)` for each pixel position,
+    /// then decomposing the returned pixel into its channel planes.
+    ///
+    /// This signature matches `Image::generate`, making it easy to switch between
+    /// interleaved and planar storage.
+    ///
+    /// # Example
+    /// ```
+    /// # use fovea::image::ImagePlanes;
+    /// # use fovea::pixel::Rgb8;
+    /// // Create a gradient image
+    /// let planes: ImagePlanes<Rgb8> = ImagePlanes::generate(4, 4, |x, y| {
+    ///     Rgb8::new((x * 64) as u8, (y * 64) as u8, 128)
+    /// });
+    /// ```
+    pub fn generate(width: usize, height: usize, f: impl Fn(usize, usize) -> P) -> Self {
+        let size = Size::new(width, height);
+        // First generate all pixels, then transpose into planes
+        let mut pixels = Vec::with_capacity(size.area());
+        for y in 0..height {
+            for x in 0..width {
+                pixels.push(f(x, y));
+            }
+        }
+
+        let planes = <P::Channels as Array<P::Channel>>::Map::from_fn(|channel_index| {
+            let data: Vec<_> = pixels.iter().map(|p| p.channel(channel_index)).collect();
+            Image::from_vec(width, height, data).expect("data length matches size")
+        });
+        Self { size, planes }
+    }
+}
+
+impl<P: HomogeneousPixel> ImagePlanes<P, Pixels>
 where
     P::Channel: ZeroablePixel,
 {
@@ -371,12 +383,12 @@ where
 // ===========================================
 
 /// Iterator that consumes `ImagePlanes` and yields `Image<P::Channel>` for each plane.
-pub struct IntoPlanesIter<P: HomogeneousPixel> {
-    iter: std::vec::IntoIter<Image<P::Channel>>,
+pub struct IntoPlanesIter<P: HomogeneousPixel, S = Pixels> {
+    iter: std::vec::IntoIter<Image<P::Channel, S>>,
 }
 
-impl<P: HomogeneousPixel> Iterator for IntoPlanesIter<P> {
-    type Item = Image<P::Channel>;
+impl<P: HomogeneousPixel, S> Iterator for IntoPlanesIter<P, S> {
+    type Item = Image<P::Channel, S>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.iter.next()
@@ -387,18 +399,18 @@ impl<P: HomogeneousPixel> Iterator for IntoPlanesIter<P> {
     }
 }
 
-impl<P: HomogeneousPixel> ExactSizeIterator for IntoPlanesIter<P> {}
+impl<P: HomogeneousPixel, S> ExactSizeIterator for IntoPlanesIter<P, S> {}
 
 /// Consumes `ImagePlanes` and yields `Image<P::Channel>` for each plane.
-impl<P: HomogeneousPixel> IntoIterator for ImagePlanes<P> {
-    type Item = Image<P::Channel>;
-    type IntoIter = IntoPlanesIter<P>;
+impl<P: HomogeneousPixel, S: PixelSpace> IntoIterator for ImagePlanes<P, S> {
+    type Item = Image<P::Channel, S>;
+    type IntoIter = IntoPlanesIter<P, S>;
 
     fn into_iter(self) -> Self::IntoIter {
         let mut planes = self.planes;
         let mut vec = Vec::with_capacity(P::CHANNEL_COUNT);
         for slot in planes.as_mut().iter_mut() {
-            let dummy = Image::from_vec(0, 0, vec![]).expect("empty image is valid");
+            let dummy = Image::from_vec_in(0, 0, vec![]).expect("empty image is valid");
             vec.push(std::mem::replace(slot, dummy));
         }
         IntoPlanesIter {
@@ -408,12 +420,12 @@ impl<P: HomogeneousPixel> IntoIterator for ImagePlanes<P> {
 }
 
 /// Iterator over `&ImagePlanes` that yields `&Image<P::Channel>` for each plane.
-pub struct PlanesIter<'a, P: HomogeneousPixel> {
-    iter: std::slice::Iter<'a, Image<P::Channel>>,
+pub struct PlanesIter<'a, P: HomogeneousPixel, S = Pixels> {
+    iter: std::slice::Iter<'a, Image<P::Channel, S>>,
 }
 
-impl<'a, P: HomogeneousPixel> Iterator for PlanesIter<'a, P> {
-    type Item = &'a Image<P::Channel>;
+impl<'a, P: HomogeneousPixel, S> Iterator for PlanesIter<'a, P, S> {
+    type Item = &'a Image<P::Channel, S>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.iter.next()
@@ -424,12 +436,12 @@ impl<'a, P: HomogeneousPixel> Iterator for PlanesIter<'a, P> {
     }
 }
 
-impl<P: HomogeneousPixel> ExactSizeIterator for PlanesIter<'_, P> {}
+impl<P: HomogeneousPixel, S> ExactSizeIterator for PlanesIter<'_, P, S> {}
 
 /// Borrows `&ImagePlanes` and yields `&Image<P::Channel>` for each plane.
-impl<'a, P: HomogeneousPixel> IntoIterator for &'a ImagePlanes<P> {
-    type Item = &'a Image<P::Channel>;
-    type IntoIter = PlanesIter<'a, P>;
+impl<'a, P: HomogeneousPixel, S: PixelSpace> IntoIterator for &'a ImagePlanes<P, S> {
+    type Item = &'a Image<P::Channel, S>;
+    type IntoIter = PlanesIter<'a, P, S>;
 
     fn into_iter(self) -> Self::IntoIter {
         PlanesIter {
@@ -439,12 +451,12 @@ impl<'a, P: HomogeneousPixel> IntoIterator for &'a ImagePlanes<P> {
 }
 
 /// Iterator over `&mut ImagePlanes` that yields `&mut Image<P::Channel>` for each plane.
-pub struct PlanesIterMut<'a, P: HomogeneousPixel> {
-    iter: std::slice::IterMut<'a, Image<P::Channel>>,
+pub struct PlanesIterMut<'a, P: HomogeneousPixel, S = Pixels> {
+    iter: std::slice::IterMut<'a, Image<P::Channel, S>>,
 }
 
-impl<'a, P: HomogeneousPixel> Iterator for PlanesIterMut<'a, P> {
-    type Item = &'a mut Image<P::Channel>;
+impl<'a, P: HomogeneousPixel, S> Iterator for PlanesIterMut<'a, P, S> {
+    type Item = &'a mut Image<P::Channel, S>;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.iter.next()
@@ -455,12 +467,12 @@ impl<'a, P: HomogeneousPixel> Iterator for PlanesIterMut<'a, P> {
     }
 }
 
-impl<P: HomogeneousPixel> ExactSizeIterator for PlanesIterMut<'_, P> {}
+impl<P: HomogeneousPixel, S> ExactSizeIterator for PlanesIterMut<'_, P, S> {}
 
 /// Mutably borrows `&mut ImagePlanes` and yields `&mut Image<P::Channel>` for each plane.
-impl<'a, P: HomogeneousPixel> IntoIterator for &'a mut ImagePlanes<P> {
-    type Item = &'a mut Image<P::Channel>;
-    type IntoIter = PlanesIterMut<'a, P>;
+impl<'a, P: HomogeneousPixel, S: PixelSpace> IntoIterator for &'a mut ImagePlanes<P, S> {
+    type Item = &'a mut Image<P::Channel, S>;
+    type IntoIter = PlanesIterMut<'a, P, S>;
 
     fn into_iter(self) -> Self::IntoIter {
         PlanesIterMut {

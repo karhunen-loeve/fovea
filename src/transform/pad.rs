@@ -118,7 +118,7 @@ pub struct Margins {
 /// // ERROR: `Skip: FullFrameBorder<_>` is not satisfied.
 /// let _ = pad(&img, Size::new(4, 4), &Skip)?;
 /// ```
-pub fn pad<I, G, B>(img: &I, geometry: G, border: &B) -> Result<Image<I::Pixel>, Error>
+pub fn pad<I, G, B>(img: &I, geometry: G, border: &B) -> Result<Image<I::Pixel, I::Space>, Error>
 where
     I: ImageView,
     I::Pixel: Copy,
@@ -130,9 +130,9 @@ where
         let value = border
             .value_without_image()
             .ok_or(Error::EmptySource { target: size })?;
-        return Ok(Image::generate(size.width, size.height, |_, _| value));
+        return Ok(Image::generate_in(size.width, size.height, |_, _| value));
     }
-    Ok(Image::generate(size.width, size.height, |x, y| {
+    Ok(Image::generate_in(size.width, size.height, |x, y| {
         border.pixel_at(
             img,
             SignedCoordinate::new(x as isize - left as isize, y as isize - top as isize),

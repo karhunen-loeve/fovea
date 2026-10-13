@@ -83,7 +83,7 @@ use crate::{SignedCoordinate, Size};
 /// assert!((through_dft.pixel_at(20, 15).0 - direct.pixel_at(20, 15).0).abs() < 1e-5);
 /// ```
 #[must_use]
-pub fn convolve<I, K, B, P, M>(image: &I, kernel: &K, border: &B, method: M) -> Image<P>
+pub fn convolve<I, K, B, P, M>(image: &I, kernel: &K, border: &B, method: M) -> Image<P, I::Space>
 where
     I: RasterImage<Pixel = P>,
     P: SpectrumSource,
@@ -102,7 +102,7 @@ where
         height: rh,
     } = region.size;
     if rw == 0 || rh == 0 {
-        return Image::from_vec(rw, rh, Vec::new()).expect("an empty image holds no pixel");
+        return Image::from_vec_in(rw, rh, Vec::new()).expect("an empty image holds no pixel");
     }
 
     // Output pixel x of the region reads the input at region.x + x + i − anchor.x
@@ -146,7 +146,7 @@ where
         .multiply(&Spectrum::forward(&placed, along_x, along_y))
         .expect("both images have the same size");
     let full = spectrum.invert(along_x, along_y);
-    Image::generate(rw, rh, |x, y| full.pixel_at(x + anchor.x, y + anchor.y))
+    Image::generate_in(rw, rh, |x, y| full.pixel_at(x + anchor.x, y + anchor.y))
 }
 
 #[cfg(test)]

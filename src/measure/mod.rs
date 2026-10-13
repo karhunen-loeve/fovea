@@ -18,17 +18,37 @@
 //! shaped it, and the maximum residual and the form deviation over all
 //! points, so a defect the outlier rule rejected still shows.
 //!
-//! Through a lens that distorts, measure on the camera image as it is and
-//! correct the points with
-//! [`BrownConrady::undistort_point`](crate::geometry::BrownConrady::undistort_point)
-//! before fitting: resampling the image first adds an interpolation error to
-//! every edge.
+//! Through a lens that distorts there are two paths, and the types keep
+//! them apart:
 //!
-//! Positions are [`Point<Pixels>`](crate::Point) in the image, and widths
-//! [`Length<Pixels>`](crate::Length). A width converts to world units
-//! through a [`ConformalMap`](crate::geometry::ConformalMap); under any
-//! other calibration, convert the two edge positions and take their
-//! distance.
+//! - **Measure on the camera image, then correct the points.** The edges
+//!   are [`Point<Pixels>`](crate::Point), and
+//!   [`BrownConrady::undistort_point`](crate::geometry::BrownConrady::undistort_point)
+//!   turns each into a point of the ideal image,
+//!   [`IdealPixels`](crate::IdealPixels), before fitting. This is the
+//!   recommended path.
+//! - **Remap the image through the lens model, then measure.** The
+//!   [`remap`](crate::transform::remap) returns the image in `IdealPixels`,
+//!   and a caliper on it reports its edges there. The remap interpolates
+//!   the image once before the caliper interpolates it again, moves each
+//!   edge by a fraction of a pixel that depends on where it lies, and
+//!   rounds and clips into the output pixel type unless that is a float
+//!   type.
+//!
+//! Either way the points end in the ideal image, where a calibration made
+//! on the ideal image takes them. A point corrected twice, or a camera
+//! position put through such a calibration, does not compile.
+//!
+//! A caliper lies in the space of the image it reads: its constructors take
+//! the space of their points, and [`profile`](crate::measure::profile)
+//! requires the image's. A caliper planned in world units is converted into
+//! the space the calibration starts from: its points through the inverse
+//! mapping, its width and step through a
+//! [`ConformalMap`](crate::geometry::ConformalMap), the only class that
+//! converts lengths. Widths along the path are [`Length`](crate::Length)s in
+//! the caliper's space. A width converts to world units through a conformal
+//! map; under any other calibration, convert the two edge positions and
+//! take their distance.
 //!
 //! # Example
 //!

@@ -3,6 +3,9 @@
 use super::engine::{Axis, Cplx, transpose};
 use super::method::DftMethod;
 use super::units::{Frequency, FrequencyIndex, FrequencyUnit, canonical, convert, frequency_in};
+use core::marker::PhantomData;
+
+use crate::geometry::{PixelSpace, Pixels};
 use crate::image::{Image, RasterImage};
 use crate::pixel::{ComplexF32, ComplexF64, MonoF32, MonoF64};
 use crate::{Error, Size};
@@ -26,6 +29,11 @@ pub(super) mod sealed {
 pub trait SpectrumSource: sealed::Source {
     /// The type of one frequency bin.
     type Bin: Cplx;
+
+    /// The real pixel type of the same precision: what a magnitude, a
+    /// power or a phase is. [`MonoF32`] for `MonoF32`, [`MonoF64`] for
+    /// `MonoF64`.
+    type Real: SpectrumSource;
 }
 
 impl sealed::Source for MonoF32 {
@@ -41,6 +49,7 @@ impl sealed::Source for MonoF32 {
 
 impl SpectrumSource for MonoF32 {
     type Bin = ComplexF32;
+    type Real = MonoF32;
 }
 
 impl sealed::Source for MonoF64 {
@@ -56,6 +65,7 @@ impl sealed::Source for MonoF64 {
 
 impl SpectrumSource for MonoF64 {
     type Bin = ComplexF64;
+    type Real = MonoF64;
 }
 
 /// The discrete Fourier transform of an image of pixel type `P`.
@@ -100,12 +110,39 @@ impl SpectrumSource for MonoF64 {
 /// assert!((back.pixel_at(5, 3).0 - 15.0).abs() < 1e-5);
 /// # Ok::<(), fovea::Error>(())
 /// ```
-#[derive(Clone, Debug, PartialEq)]
-pub struct Spectrum<P: SpectrumSource> {
+pub struct Spectrum<P: SpectrumSource, S = Pixels> {
     source_size: Size,
     /// `height` rows of `half_width(width)` bins, the frequencies
     /// `0..=width/2` along x for every frequency along y.
     bins: Vec<P::Bin>,
+    space: PhantomData<fn() -> S>,
+}
+
+// Written by hand rather than derived: a derive would require `S: Clone`,
+// `S: Debug` and `S: PartialEq` of a marker that is never instantiated.
+impl<P: SpectrumSource, S> Clone for Spectrum<P, S> {
+    fn clone(&self) -> Self {
+        Self {
+            source_size: self.source_size,
+            bins: self.bins.clone(),
+            space: PhantomData,
+        }
+    }
+}
+
+impl<P: SpectrumSource, S> core::fmt::Debug for Spectrum<P, S> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Spectrum")
+            .field("source_size", &self.source_size)
+            .field("bins", &self.bins)
+            .finish()
+    }
+}
+
+impl<P: SpectrumSource, S> PartialEq for Spectrum<P, S> {
+    fn eq(&self, other: &Self) -> bool {
+        self.source_size == other.source_size && self.bins == other.bins
+    }
 }
 
 /// How many columns of bins the half spectrum of an image `width` wide
@@ -114,7 +151,7 @@ fn half_width(width: usize) -> usize {
     if width == 0 { 0 } else { width / 2 + 1 }
 }
 
-impl<P: SpectrumSource> Spectrum<P> {
+impl<P: SpectrumSource, S: PixelSpace> Spectrum<P, S> {
     /// The size of the image this is the spectrum of, and of the image the
     /// inverse returns.
     #[must_use]
@@ -141,7 +178,7 @@ impl<P: SpectrumSource> Spectrum<P> {
     /// assert!((back.pixel_at(4, 3).0 - 34.0).abs() < 1e-12);
     /// ```
     #[must_use]
-    pub fn inverse<M: DftMethod<P>>(&self, method: M) -> M::InverseOutput {
+    pub fn inverse<M: DftMethod<P>>(&self, method: M) -> M::InverseOutput<S> {
         method.invert(self)
     }
 
@@ -177,7 +214,7 @@ impl<P: SpectrumSource> Spectrum<P> {
     /// assert!((moved.pixel_at(3, 0).0 - 2.0).abs() < 1e-12);
     /// # Ok::<(), fovea::Error>(())
     /// ```
-    pub fn multiply(&mut self, other: &Spectrum<P>) -> Result<(), Error> {
+    pub fn multiply(&mut self, other: &Spectrum<P, S>) -> Result<(), Error> {
         self.combine(other, |a, b| a * b)
     }
 
@@ -207,13 +244,13 @@ impl<P: SpectrumSource> Spectrum<P> {
     /// assert_eq!(power.at(FrequencyIndex::new(1, 1)).map(|b| b.im), Some(0.0));
     /// # Ok::<(), fovea::Error>(())
     /// ```
-    pub fn multiply_conjugate(&mut self, other: &Spectrum<P>) -> Result<(), Error> {
+    pub fn multiply_conjugate(&mut self, other: &Spectrum<P, S>) -> Result<(), Error> {
         self.combine(other, |a, b| a * b.conj())
     }
 
     fn combine(
         &mut self,
-        other: &Spectrum<P>,
+        other: &Spectrum<P, S>,
         op: impl Fn(P::Bin, P::Bin) -> P::Bin,
     ) -> Result<(), Error> {
         if self.source_size != other.source_size {
@@ -421,10 +458,10 @@ impl<P: SpectrumSource> Spectrum<P> {
     /// assert_eq!(shown.pixel_at(2, 2), ComplexF32::new(20.0, 0.0));
     /// ```
     #[must_use]
-    pub fn centered(&self) -> Image<P::Bin> {
+    pub fn centered(&self) -> Image<P::Bin, S> {
         let Size { width, height } = self.source_size;
         let (cx, cy) = ((width / 2) as isize, (height / 2) as isize);
-        Image::generate(width, height, |x, y| {
+        Image::generate_in(width, height, |x, y| {
             self.bin(FrequencyIndex::new(x as isize - cx, y as isize - cy))
         })
     }
@@ -449,7 +486,7 @@ impl<P: SpectrumSource> Spectrum<P> {
     /// assert_eq!(magnitude.pixel_at(0, 4), MonoF32::new(64.0));
     /// ```
     #[must_use]
-    pub fn magnitude(&self) -> Image<P> {
+    pub fn magnitude(&self) -> Image<P::Real, S> {
         self.centered_map(f64::hypot)
     }
 
@@ -472,7 +509,7 @@ impl<P: SpectrumSource> Spectrum<P> {
     /// assert_eq!(power.pixel_at(2, 2), MonoF64::new(64.0));
     /// ```
     #[must_use]
-    pub fn power(&self) -> Image<P> {
+    pub fn power(&self) -> Image<P::Real, S> {
         self.centered_map(|re, im| re * re + im * im)
     }
 
@@ -497,19 +534,19 @@ impl<P: SpectrumSource> Spectrum<P> {
     /// assert!((phase.pixel_at(5, 0).0 - step).abs() < 1e-15);
     /// ```
     #[must_use]
-    pub fn phase(&self) -> Image<P> {
+    pub fn phase(&self) -> Image<P::Real, S> {
         self.centered_map(|re, im| im.atan2(re))
     }
 
     /// `value(re, im)` of every bin, in the layout of `centered`.
-    fn centered_map(&self, value: impl Fn(f64, f64) -> f64) -> Image<P> {
+    fn centered_map(&self, value: impl Fn(f64, f64) -> f64) -> Image<P::Real, S> {
         let Size { width, height } = self.source_size;
         let (cx, cy) = ((width / 2) as isize, (height / 2) as isize);
-        Image::generate(width, height, |x, y| {
+        Image::generate_in(width, height, |x, y| {
             let (re, im) = self
                 .bin(FrequencyIndex::new(x as isize - cx, y as isize - cy))
                 .to_f64();
-            P::from_f64(value(re, im))
+            <P::Real as sealed::Source>::from_f64(value(re, im))
         })
     }
 
@@ -543,7 +580,7 @@ impl<P: SpectrumSource> Spectrum<P> {
     /// The spectrum of `src`, along x by `along_x` and along y by `along_y`.
     pub(crate) fn forward<I>(src: &I, along_x: &Axis<P::Bin>, along_y: &Axis<P::Bin>) -> Self
     where
-        I: RasterImage<Pixel = P>,
+        I: RasterImage<Pixel = P, Space = S>,
     {
         let Size { width, height } = src.size();
         let half = half_width(width);
@@ -568,6 +605,7 @@ impl<P: SpectrumSource> Spectrum<P> {
         let mut spectrum = Self {
             source_size: src.size(),
             bins,
+            space: PhantomData,
         };
         spectrum.symmetrize();
         spectrum
@@ -608,7 +646,7 @@ impl<P: SpectrumSource> Spectrum<P> {
 
     /// The image this is the spectrum of, along x by `along_x` and along y
     /// by `along_y`.
-    pub(crate) fn invert(&self, along_x: &Axis<P::Bin>, along_y: &Axis<P::Bin>) -> Image<P> {
+    pub(crate) fn invert(&self, along_x: &Axis<P::Bin>, along_y: &Axis<P::Bin>) -> Image<P, S> {
         let Size { width, height } = self.source_size;
         let half = half_width(width);
         let mut pixels = Vec::with_capacity(width * height);
@@ -639,7 +677,7 @@ impl<P: SpectrumSource> Spectrum<P> {
                 );
             }
         }
-        Image::from_vec(width, height, pixels).expect("rows fill width * height exactly")
+        Image::from_vec_in(width, height, pixels).expect("rows fill width * height exactly")
     }
 
     /// The stored bins, `height` rows of `half_width(width)`.
@@ -935,5 +973,45 @@ mod tests {
         let spectrum = dft(&Image::<MonoF64>::zero(4, 0), Auto);
         let none: Option<Frequency<Bins>> = spectrum.convert(Frequency::cycles_per_pixel(0.1, 0.1));
         assert!(none.is_none());
+    }
+
+    // ── The space ──────────────────────────────────────────────────────
+
+    #[test]
+    fn a_round_trip_keeps_the_space() {
+        use crate::IdealPixels;
+        let ideal: Image<MonoF64, IdealPixels> =
+            Image::generate(6, 5, |x, y| MonoF64::new((x * 3 + y) as f64)).into_space();
+        let spectrum: Spectrum<MonoF64, IdealPixels> = dft(&ideal, Auto);
+        let back: Image<MonoF64, IdealPixels> = spectrum.inverse(Auto);
+        for y in 0..5 {
+            for x in 0..6 {
+                assert!((back.pixel_at(x, y).0 - ideal.pixel_at(x, y).0).abs() < 1e-12);
+            }
+        }
+        let back: Result<Image<MonoF64, IdealPixels>, Error> = spectrum.inverse(Radix2);
+        assert!(back.is_err(), "6 x 5 is no power of two");
+        let centered: Image<ComplexF64, IdealPixels> = spectrum.centered();
+        assert_eq!(centered.size(), ideal.size());
+    }
+
+    #[test]
+    fn the_real_views_have_the_real_type_of_the_source() {
+        use crate::IdealPixels;
+        let ideal: Image<MonoF32, IdealPixels> = Image::fill(4, 4, MonoF32::new(1.0)).into_space();
+        let spectrum = dft(&ideal, Auto);
+        let magnitude: Image<<MonoF32 as SpectrumSource>::Real, IdealPixels> = spectrum.magnitude();
+        let power: Image<MonoF32, IdealPixels> = spectrum.power();
+        let phase: Image<MonoF32, IdealPixels> = spectrum.phase();
+        assert_eq!(magnitude.pixel_at(2, 2), MonoF32::new(16.0));
+        assert_eq!(power.pixel_at(2, 2), MonoF32::new(256.0));
+        assert_eq!(phase.pixel_at(2, 2), MonoF32::new(0.0));
+    }
+
+    #[test]
+    fn the_spectrum_traits_ask_nothing_of_the_space() {
+        let spectrum = dft(&Image::fill(2, 2, MonoF32::new(1.0)), Auto);
+        assert_eq!(spectrum.clone(), spectrum);
+        assert!(format!("{spectrum:?}").starts_with("Spectrum { source_size:"));
     }
 }

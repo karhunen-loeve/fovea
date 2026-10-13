@@ -59,7 +59,7 @@ use crate::{Offset, Sigma};
 /// }
 /// ```
 #[must_use]
-pub fn box_blur_3x3<I, B, P, Acc, Out>(image: &I, border: &B) -> Image<Out>
+pub fn box_blur_3x3<I, B, P, Acc, Out>(image: &I, border: &B) -> Image<Out, I::Space>
 where
     I: RasterImage<Pixel = P>,
     P: Copy + LinearPixel<f32, Accumulator = Acc>,
@@ -68,7 +68,7 @@ where
         + ZeroablePixel
         + LinearPixel<f32, Accumulator = Acc>
         + std::ops::Add<Output = Acc>,
-    B: BorderPolicy<I> + BorderPolicy<Image<Acc>>,
+    B: BorderPolicy<I> + BorderPolicy<Image<Acc, I::Space>>,
     Out: ZeroablePixel + FromLinear<Acc>,
 {
     convolve_separable(image, &SeparableKernel::box_blur_3(), border)
@@ -101,7 +101,7 @@ where
 /// }
 /// ```
 #[must_use]
-pub fn box_blur_5x5<I, B, P, Acc, Out>(image: &I, border: &B) -> Image<Out>
+pub fn box_blur_5x5<I, B, P, Acc, Out>(image: &I, border: &B) -> Image<Out, I::Space>
 where
     I: RasterImage<Pixel = P>,
     P: Copy + LinearPixel<f32, Accumulator = Acc>,
@@ -110,7 +110,7 @@ where
         + ZeroablePixel
         + LinearPixel<f32, Accumulator = Acc>
         + std::ops::Add<Output = Acc>,
-    B: BorderPolicy<I> + BorderPolicy<Image<Acc>>,
+    B: BorderPolicy<I> + BorderPolicy<Image<Acc, I::Space>>,
     Out: ZeroablePixel + FromLinear<Acc>,
 {
     convolve_separable(image, &SeparableKernel::box_blur_5(), border)
@@ -154,7 +154,7 @@ where
 /// }
 /// ```
 #[must_use]
-pub fn gaussian_blur_3x3<I, B, P, Acc, Out>(image: &I, border: &B) -> Image<Out>
+pub fn gaussian_blur_3x3<I, B, P, Acc, Out>(image: &I, border: &B) -> Image<Out, I::Space>
 where
     I: RasterImage<Pixel = P>,
     P: Copy + LinearPixel<f32, Accumulator = Acc>,
@@ -163,7 +163,7 @@ where
         + ZeroablePixel
         + LinearPixel<f32, Accumulator = Acc>
         + std::ops::Add<Output = Acc>,
-    B: BorderPolicy<I> + BorderPolicy<Image<Acc>>,
+    B: BorderPolicy<I> + BorderPolicy<Image<Acc, I::Space>>,
     Out: ZeroablePixel + FromLinear<Acc>,
 {
     convolve_separable(image, &SeparableKernel::gaussian_3(), border)
@@ -205,7 +205,7 @@ where
 /// }
 /// ```
 #[must_use]
-pub fn gaussian_blur_5x5<I, B, P, Acc, Out>(image: &I, border: &B) -> Image<Out>
+pub fn gaussian_blur_5x5<I, B, P, Acc, Out>(image: &I, border: &B) -> Image<Out, I::Space>
 where
     I: RasterImage<Pixel = P>,
     P: Copy + LinearPixel<f32, Accumulator = Acc>,
@@ -214,7 +214,7 @@ where
         + ZeroablePixel
         + LinearPixel<f32, Accumulator = Acc>
         + std::ops::Add<Output = Acc>,
-    B: BorderPolicy<I> + BorderPolicy<Image<Acc>>,
+    B: BorderPolicy<I> + BorderPolicy<Image<Acc, I::Space>>,
     Out: ZeroablePixel + FromLinear<Acc>,
 {
     convolve_separable(image, &SeparableKernel::gaussian_5(), border)
@@ -278,7 +278,7 @@ pub const DEFAULT_TRUNCATE: f32 = 4.0;
 /// }
 /// ```
 #[must_use]
-pub fn gaussian_blur<I, B, P, Acc, Out>(image: &I, sigma: Sigma, border: &B) -> Image<Out>
+pub fn gaussian_blur<I, B, P, Acc, Out>(image: &I, sigma: Sigma, border: &B) -> Image<Out, I::Space>
 where
     I: RasterImage<Pixel = P>,
     P: Copy + LinearPixel<f32, Accumulator = Acc>,
@@ -287,7 +287,7 @@ where
         + ZeroablePixel
         + LinearPixel<f32, Accumulator = Acc>
         + std::ops::Add<Output = Acc>,
-    B: BorderPolicy<I> + BorderPolicy<Image<Acc>>,
+    B: BorderPolicy<I> + BorderPolicy<Image<Acc, I::Space>>,
     Out: ZeroablePixel + FromLinear<Acc>,
 {
     convolve_separable(image, &gaussian_kernel_1d(sigma, DEFAULT_TRUNCATE), border)
@@ -311,8 +311,8 @@ where
         + ZeroablePixel
         + LinearPixel<f32, Accumulator = Acc>
         + std::ops::Add<Output = Acc>,
-    B: BorderPolicy<I> + BorderPolicy<Image<Acc>>,
-    O: RasterImageMut<Pixel = Out>,
+    B: BorderPolicy<I> + BorderPolicy<Image<Acc, I::Space>>,
+    O: RasterImageMut<Pixel = Out, Space = I::Space>,
     Out: FromLinear<Acc>,
 {
     convolve_separable_into(
@@ -379,8 +379,8 @@ where
     ) where
         I: RasterImage<Pixel = P>,
         P: Copy + LinearPixel<f32, Accumulator = Acc>,
-        B: BorderPolicy<I> + for<'r> BorderPolicy<ImageRef<'r, Acc>>,
-        O: RasterImageMut<Pixel = Out>,
+        B: BorderPolicy<I> + for<'r> BorderPolicy<ImageRef<'r, Acc, I::Space>>,
+        O: RasterImageMut<Pixel = Out, Space = I::Space>,
         Out: FromLinear<Acc>,
     {
         // A σ blur is a separable convolution with the σ-derived kernel —
@@ -425,7 +425,10 @@ where
 /// }
 /// ```
 #[must_use]
-pub fn sobel_x<I, B, P>(image: &I, border: &B) -> Image<<P as LinearPixel<f32>>::Accumulator>
+pub fn sobel_x<I, B, P>(
+    image: &I,
+    border: &B,
+) -> Image<<P as LinearPixel<f32>>::Accumulator, I::Space>
 where
     I: RasterImage<Pixel = P>,
     P: Copy + LinearPixel<f32>,
@@ -463,7 +466,10 @@ where
 /// }
 /// ```
 #[must_use]
-pub fn sobel_y<I, B, P>(image: &I, border: &B) -> Image<<P as LinearPixel<f32>>::Accumulator>
+pub fn sobel_y<I, B, P>(
+    image: &I,
+    border: &B,
+) -> Image<<P as LinearPixel<f32>>::Accumulator, I::Space>
 where
     I: RasterImage<Pixel = P>,
     P: Copy + LinearPixel<f32>,
@@ -498,7 +504,10 @@ where
 /// }
 /// ```
 #[must_use]
-pub fn scharr_x<I, B, P>(image: &I, border: &B) -> Image<<P as LinearPixel<f32>>::Accumulator>
+pub fn scharr_x<I, B, P>(
+    image: &I,
+    border: &B,
+) -> Image<<P as LinearPixel<f32>>::Accumulator, I::Space>
 where
     I: RasterImage<Pixel = P>,
     P: Copy + LinearPixel<f32>,
@@ -531,7 +540,10 @@ where
 /// }
 /// ```
 #[must_use]
-pub fn scharr_y<I, B, P>(image: &I, border: &B) -> Image<<P as LinearPixel<f32>>::Accumulator>
+pub fn scharr_y<I, B, P>(
+    image: &I,
+    border: &B,
+) -> Image<<P as LinearPixel<f32>>::Accumulator, I::Space>
 where
     I: RasterImage<Pixel = P>,
     P: Copy + LinearPixel<f32>,
@@ -566,7 +578,10 @@ where
 /// }
 /// ```
 #[must_use]
-pub fn prewitt_x<I, B, P>(image: &I, border: &B) -> Image<<P as LinearPixel<f32>>::Accumulator>
+pub fn prewitt_x<I, B, P>(
+    image: &I,
+    border: &B,
+) -> Image<<P as LinearPixel<f32>>::Accumulator, I::Space>
 where
     I: RasterImage<Pixel = P>,
     P: Copy + LinearPixel<f32>,
@@ -599,7 +614,10 @@ where
 /// }
 /// ```
 #[must_use]
-pub fn prewitt_y<I, B, P>(image: &I, border: &B) -> Image<<P as LinearPixel<f32>>::Accumulator>
+pub fn prewitt_y<I, B, P>(
+    image: &I,
+    border: &B,
+) -> Image<<P as LinearPixel<f32>>::Accumulator, I::Space>
 where
     I: RasterImage<Pixel = P>,
     P: Copy + LinearPixel<f32>,
@@ -642,7 +660,10 @@ where
 /// }
 /// ```
 #[must_use]
-pub fn laplacian<I, B, P>(image: &I, border: &B) -> Image<<P as LinearPixel<f32>>::Accumulator>
+pub fn laplacian<I, B, P>(
+    image: &I,
+    border: &B,
+) -> Image<<P as LinearPixel<f32>>::Accumulator, I::Space>
 where
     I: RasterImage<Pixel = P>,
     P: Copy + LinearPixel<f32>,
@@ -682,7 +703,10 @@ where
 /// }
 /// ```
 #[must_use]
-pub fn laplacian_8<I, B, P>(image: &I, border: &B) -> Image<<P as LinearPixel<f32>>::Accumulator>
+pub fn laplacian_8<I, B, P>(
+    image: &I,
+    border: &B,
+) -> Image<<P as LinearPixel<f32>>::Accumulator, I::Space>
 where
     I: RasterImage<Pixel = P>,
     P: Copy + LinearPixel<f32>,
@@ -725,7 +749,7 @@ where
 /// }
 /// ```
 #[must_use]
-pub fn sharpen<I, B, P, Out>(image: &I, border: &B) -> Image<Out>
+pub fn sharpen<I, B, P, Out>(image: &I, border: &B) -> Image<Out, I::Space>
 where
     I: RasterImage<Pixel = P>,
     P: Copy + LinearPixel<f32>,
@@ -771,7 +795,10 @@ where
 /// }
 /// ```
 #[must_use]
-pub fn emboss<I, B, P>(image: &I, border: &B) -> Image<<P as LinearPixel<f32>>::Accumulator>
+pub fn emboss<I, B, P>(
+    image: &I,
+    border: &B,
+) -> Image<<P as LinearPixel<f32>>::Accumulator, I::Space>
 where
     I: RasterImage<Pixel = P>,
     P: Copy + LinearPixel<f32>,
@@ -818,10 +845,10 @@ where
 /// let mag = gradient_magnitude(&gx, &gy).unwrap();
 /// assert!((mag.pixel_at(0, 0).value() - 5.0).abs() < 1e-5);
 /// ```
-pub fn gradient_magnitude<IA, IB, P>(gx: &IA, gy: &IB) -> Result<Image<P>, Error>
+pub fn gradient_magnitude<IA, IB, P>(gx: &IA, gy: &IB) -> Result<Image<P, IA::Space>, Error>
 where
     IA: RasterImage<Pixel = P>,
-    IB: RasterImage<Pixel = P>,
+    IB: RasterImage<Pixel = P, Space = IA::Space>,
     P: ChannelwiseMath + ZeroablePixel,
     P::Channel: MagnitudeChannel,
 {
@@ -857,10 +884,10 @@ where
 /// let dir = gradient_direction(&gx, &gy).unwrap();
 /// assert!((dir.pixel_at(0, 0).value() - FRAC_PI_2).abs() < 1e-6);
 /// ```
-pub fn gradient_direction<IA, IB, P>(gx: &IA, gy: &IB) -> Result<Image<P>, Error>
+pub fn gradient_direction<IA, IB, P>(gx: &IA, gy: &IB) -> Result<Image<P, IA::Space>, Error>
 where
     IA: RasterImage<Pixel = P>,
-    IB: RasterImage<Pixel = P>,
+    IB: RasterImage<Pixel = P, Space = IA::Space>,
     P: ChannelwiseMath + ZeroablePixel,
     P::Channel: DirectionChannel,
 {
@@ -1038,10 +1065,13 @@ where
 /// assert_eq!(thin.pixel_at(2, 0).value(), 0.0); // right border → suppressed
 /// # Ok::<(), fovea::Error>(())
 /// ```
-pub fn non_maximum_suppression<IM, IA, P>(magnitude: &IM, direction: &IA) -> Result<Image<P>, Error>
+pub fn non_maximum_suppression<IM, IA, P>(
+    magnitude: &IM,
+    direction: &IA,
+) -> Result<Image<P, IM::Space>, Error>
 where
     IM: RasterImage<Pixel = P>,
-    IA: RasterImage<Pixel = P>,
+    IA: RasterImage<Pixel = P, Space = IM::Space>,
     P: ChannelwiseMath + ZeroablePixel,
     P::Channel: PartialOrd,
     f64: From<P::Channel>,
@@ -1054,7 +1084,7 @@ where
     }
 
     let (w, h) = (magnitude.width(), magnitude.height());
-    let mut out = Image::fill(w, h, P::zero());
+    let mut out = Image::fill_in(w, h, P::zero());
     for y in 0..h {
         let cur = magnitude.row(y);
         let prev = (y > 0).then(|| magnitude.row(y - 1));
@@ -1089,11 +1119,11 @@ pub(crate) fn non_maximum_suppression_from_gradients<IM, IX, IY, P>(
     magnitude: &IM,
     gx: &IX,
     gy: &IY,
-) -> Image<P>
+) -> Image<P, IM::Space>
 where
     IM: RasterImage<Pixel = P>,
-    IX: RasterImage<Pixel = P>,
-    IY: RasterImage<Pixel = P>,
+    IX: RasterImage<Pixel = P, Space = IM::Space>,
+    IY: RasterImage<Pixel = P, Space = IM::Space>,
     P: HomogeneousPixel + ZeroablePixel,
     P::Channel: PartialOrd,
     f64: From<P::Channel>,
@@ -1104,7 +1134,7 @@ where
     );
 
     let (w, h) = (magnitude.width(), magnitude.height());
-    let mut out = Image::fill(w, h, P::zero());
+    let mut out = Image::fill_in(w, h, P::zero());
     for y in 0..h {
         let cur = magnitude.row(y);
         let prev = (y > 0).then(|| magnitude.row(y - 1));

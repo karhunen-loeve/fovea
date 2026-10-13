@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Images carry their space.** `ImageView::Space` names the space an
+  image's grid lies in, bounded by the new open marker trait
+  `geometry::PixelSpace` for spaces measured in pixels: `Pixels`, the
+  image as the camera delivered it, and the new `IdealPixels`, the ideal
+  image of a lens model, where straight lines are straight. Both are at
+  the crate root. `Image<T, S = Pixels>`, `ImageRef`, `ImageRefMut`,
+  `ImageArray`, `BinaryImage` and the other image types carry it with
+  `Pixels` as the default, so `Image<Mono8>` means what it did. Every
+  constructor builds in `Pixels`; every operation passes its input's
+  space through, a filter, a resize or a region of interest alike, and a
+  position found on an image lies in its space. A unit of the world is no
+  pixel space, and the compiler says so: "`Meter<Milli>` is not a space
+  measured in pixels".
+- **The named relabelling, `into_space`, `as_space` and `as_space_mut`.**
+  `image.into_space::<IdealPixels>()` states that an image lies in another
+  space, `ideal.as_space::<Pixels>()` borrows it so, without a copy and
+  without changing a pixel: `abs_diff(&raw, &ideal.as_space::<Pixels>())`
+  compares a camera image with an undistorted one where `abs_diff(&raw,
+  &ideal)` does not compile. `ImageRef`, `ImageRefMut` and `ImageArray`
+  have `into_space` too.
 - **`pixel::ChannelwiseMath`, a marker for pixels whose channels are
   quantities.** It states that every channel is a scalar quantity on its own,
   so a scalar operation applied per channel means something.
@@ -71,8 +91,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   by more than about two averages the source instead of aliasing fine
   detail into false patterns; when enlarging it equals the bare kernel.
 - **Point sampling, `analyze::sampling::sample`.** The value at a sub-pixel
-  position, `sample(&img, CoordinateF64::new(x, y), kernel, &border)`, as the
-  pixel type's accumulator so the fraction survives. The border policy has
+  position, `sample(&img, Point::new(x, y), kernel, &border)`, as the
+  pixel type's accumulator so the fraction survives. The position is a
+  `Point` in the image's space. The border policy has
   no default: `Skip` returns `None` when the kernel's taps leave the image,
   the other policies always answer. Positions follow the pixel-centre
   convention, `(0.0, 0.0)` being the centre of pixel `(0, 0)`. Kernels up to
@@ -84,8 +105,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of two points does not compile (their difference is a `Vector`), and a
   prefix changes through an explicit `convert`, which multiplies or
   divides by an exact power of ten. `Point`, `Length` and the unit markers
-  are also at the crate root, and `From` bridges `CoordinateF64` and
-  `Point<Pixels>` in both directions.
+  are also at the crate root.
 - **Calibrations as mappings of the plane.** `UniformScale` (square
   pixels), `AxisScale` (a factor per axis, for line-scan cameras and binned
   sensors), `Similarity` (a camera at an angle) and `Affine`, each from one
@@ -115,7 +135,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `strongest` and `nearest_to`, and `pairs(first, rule)` forms edge pairs
   by a rule the caller names, `Neighbors` or `StrongestOfRun`, or one of
   their own through the `PairRule` trait. A pair's `width` is measured
-  along the path, the arc length on an arc.
+  along the path, the arc length on an arc. The caliper, its profile and
+  its edges lie in the space of the image they are read from: a caliper's
+  constructors take the space of their points, `profile` requires the
+  image's, and an edge on an image remapped through a lens model is in
+  `IdealPixels`. A caliper whose space nothing pins is written
+  `let cal: Caliper = ...`, the default `Pixels`. `Edge` has private
+  fields, read through `position()`, `along()` and `contrast()` and built
+  by the total `Edge::new(position, along, contrast)`, so an edge can carry
+  more later without a breaking change; `EdgePair` keeps its public
+  fields. `PairRule::pairs` is generic over the space.
 - **Breaking:** `Error::CaliperOutsideImage { sample }`, returned by
   `profile` under `Skip` when the caliper's footprint leaves the image.
   `Error` gained a variant, so an exhaustive `match` on it needs an arm.
@@ -173,24 +202,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   { k1, k2, k3 }, tangential: Tangential { p1, p2 } })`, every coefficient
   by name; `BrownConrady::from_opencv(camera, &coeffs)` takes OpenCV's
   order `(k1, k2, p1, p2[, k3])` and accepts a longer array only if every
-  further coefficient is zero. As a mapping the lens sends an ideal pixel
-  to where the camera sees it. `undistort_point` corrects a measured point
-  by Newton's method to 10⁻⁹ px, accepts only a point where the model is
+  further coefficient is zero. As a mapping the lens sends a pixel of the
+  ideal image, `IdealPixels`, to where the camera sees it, `Pixels`.
+  `undistort_point` corrects a point measured on the camera image into the
+  ideal image, `Point<Pixels>` to `Point<IdealPixels>`, so correcting a
+  point twice does not compile. It works by Newton's method to 10⁻⁹ px, accepts only a point where the model is
   one-to-one, and reports `Error::DidNotConverge` otherwise; OpenCV's
   default of five fixed-point steps leaves up to half a pixel in the
   corner of a strong lens.
 - **Direction types and composition.** `DestToSource(map)` and
   `SourceToDest::new(map)` say which way a mapping runs; `SourceToDest`
   accepts an `Invertible` mapping (the affine family and the homography),
-  not a lens model. `PlaneMap::then` chains any mapping that ends in
-  pixels with a lens model into a `Chain`, so undistorting and rectifying
-  is one remap.
-- **`transform::remap`** remaps an image through a direction type with an
-  interpolation kernel and a border policy that gives every pixel a value
-  (`Skip` does not compile), into an image of the given size and the
-  input's pixel type. `DestToSourceTable::new(&lookup, size)` computes the
-  sources once, as `f32` displacements from each destination pixel, and
-  `table.remap(&frame, kernel, &border)` applies it to every frame.
+  not a lens model. Each names the space of its destination and of its
+  source (`SourceLookup::Dest`, `SourceLookup::Source`), both spaces
+  measured in pixels, so a remap through a calibration into world units
+  does not compile. `PlaneMap::then` chains any mapping that ends in the
+  ideal image with a lens model into a `Chain`, so undistorting and
+  rectifying is one remap.
+- **`transform::remap`** remaps an image through a direction type with a
+  method and a border policy that gives every pixel a value (`Skip` does
+  not compile), into an image of the given size. The image must lie in the
+  lookup's source space, and the result lies in its destination space: a
+  remap through a lens model returns the ideal image, in `IdealPixels`.
+  The method is a `RemapMethod`, the shape of `ResizeMethod`: every
+  interpolation kernel, on pixels in a linear space, or `NearestNeighbor`,
+  which copies the pixel whose extent holds the position and so remaps
+  masks, label images and sRGB images. The output pixel type is the
+  caller's to name, as for `resize`, so an 8-bit frame can be remapped
+  into `MonoF32` without rounding. `RemapMethod` is sealed; a kernel of
+  one's own joins through `InterpolationKernel`.
+  `DestToSourceTable::new(&lookup, size)` computes the sources once, as
+  `f32` displacements from each destination pixel, carries the lookup's
+  two spaces, and `table.remap(&frame, method, &border)` applies it to
+  every frame.
 - `error::Requirement::Zero` and `error::Requirement::OneOf`, for a
   coefficient the model does not use and for an array length.
 - **Breaking:** `Error::DidNotConverge { steps }`, returned by
@@ -198,9 +242,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it needs an arm.
 
 - **The discrete Fourier transform, `fovea::frequency`.**
-  `dft(&img, method)` returns the `Spectrum<P>` of a `MonoF32` or
-  `MonoF64` image, and `spectrum.inverse(method)` the image again, at the
-  source's size and with no factor to apply. The values are the textbook
+  `dft(&img, method)` returns the `Spectrum<P, S>` of a `MonoF32` or
+  `MonoF64` image in the space `S`, and `spectrum.inverse(method)` the
+  image again, at the source's size, in the same space and with no factor
+  to apply. The values are the textbook
   transform, unscaled and with the negative exponent, as numpy, OpenCV and
   FFTW compute it by default; only the half that a real image's symmetry
   leaves independent is stored, and `dft` makes the bins that a real
@@ -231,7 +276,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Showing a spectrum.** `spectrum.centered()` is the full spectrum as a
   complex image with the zero frequency in the middle, and
   `magnitude()`, `power()` (the squared magnitude) and `phase()` are real
-  images in the same layout.
+  images in the same layout, of the source's real type
+  `SpectrumSource::Real`, so a later complex source adds without changing
+  them. All four are in the spectrum's space.
 - **Filters in the frequency domain.** `spectrum.filter(&transfer)`
   multiplies every bin by the real gain of a transfer function, a value
   of the open trait `TransferFunction`: `LowPass`, `HighPass`,
@@ -265,8 +312,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   image. `transform::convolve` is unchanged.
 - **Phase correlation, `frequency::phase_correlate(&reference, &moving,
   radius, method)`**, the translation between two images of one size.
-  `Ok(Some(found))` carries `found.shift()`, a `Vector<Pixels>` saying
-  where the content of `moving` lies, so a point `p` of the reference is
+  `Ok(Some(found))` carries `found.shift()`, a `Vector` in the images'
+  space saying where the content of `moving` lies, so a point `p` of the reference is
   at `p + shift`, and `found.peak()`, 1 for identical images. The phase
   of the cross-power spectrum is weighted by a Gaussian of a mandatory
   radius, a `CorrelationRadius` strictly between 0 and 0.5 cycles per
@@ -279,8 +326,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on one's own images. A radius not exceeding 3 frequency bins of the
   shorter side is an `Error::InvalidParameter` naming the smallest one
   allowed, images of different sizes an `Error::SizeMismatch`, and an
-  image without structure or with a NaN gives `Ok(None)`.
-  `PhaseReference` prepares one reference for many images.
+  image without structure or with a NaN gives `Ok(None)`. Both images
+  lie in one space. `PhaseReference` prepares one reference for many
+  images.
 - **`transform::pad`**, which enlarges an image and fills the new pixels by
   a border policy: `pad(&img, Size::new(2048, 1024), &Mirror)?` to a target
   size with the image at the origin, or `pad(&img, Margins { left, right,
@@ -334,6 +382,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** `ImageView` gained the associated type `Space`, which an
+  implementor must name; `type Space = Pixels;` keeps the old meaning.
+  Generic code that returns `Image<I::Pixel>` from an `ImageView` input
+  keeps compiling but returns its image in `Pixels`; write
+  `Image<I::Pixel, I::Space>`. Every `_into` function requires its output
+  in the input's space, and so do `ResizeMethod` and `MatchMethod`, so
+  generic code that passes its own output type adds `Space = I::Space` to
+  its bound. Every function that reads two images of one scene (the
+  combine family, `zip_pixels`, the gradients, `non_maximum_suppression`,
+  `squared_error`, `ssim`, `phase_correlate`) requires them in one space.
+  `PyramidMethod::Output` takes the space, `type Output<S: PixelSpace>`;
+  `IntoTilesMut` and `HasPosition` gained `Space` as well. The image
+  holders `ImagePlanes`, `PlacedImage`, `ScaledImage`, `StructureTensor`
+  and `Labeling` carry the space with `Pixels` as the default. A kernel,
+  a neighbourhood's weights and a template carry no constraint: they are
+  patterns, matched in any space. `IntegralImage` stays in `Pixels`, its
+  table being one cell larger than the image on each axis.
+- **Breaking:** every position the older analysis functions report is a
+  `Point` in the image's space, where it was a `CoordinateF64`:
+  `interpolate_peak`, `interpolate_peak_along`, `interpolate_ridge_points`,
+  `interpolate_edge_points`, the centroids of `BlobMeasurements`,
+  `ComponentStats`, `Contour` and `ImageMoments`, `polygon_centroid`
+  (whose integer vertices carry no space, so the result takes the one it
+  is used in), `Corner::at` and `ScaleKeypoint::at`, `HasPosition::position`,
+  `Decimated::origin_offset`, `to_base` and `to_local`, and
+  `OriginOffset::get`. `Corner`, `ScaleKeypoint`, `OriginOffset`,
+  `ComponentStats`, `BlobMeasurements`, `Contour`, `ComponentContour`,
+  `ContourHierarchy` and `ImageMoments` carry the space with `Pixels` as
+  the default. A corner found on an ideal image is a `Corner<IdealPixels>`,
+  and passing its position to `undistort_point` does not compile.
+  Migration: `CoordinateF64::new(x, y)` becomes `Point::new(x, y)`; a
+  corner built from literals with nothing else to pin its space is written
+  `let c: Corner = Corner::new(Point::new(x, y), r);`; an implementor of
+  `HasPosition` adds `type Space = Pixels;` and returns a `Point<Pixels>`.
+  `ComponentStats`, `BlobMeasurements` and `ImageMoments` keep their public
+  fields but can no longer be built by a struct literal.
+- **Breaking:** `CoordinateF64` and its `From` bridges with `Point<Pixels>`
+  are removed; `Point<Pixels>` is the sub-pixel position. There is no
+  deprecated alias.
+- **Breaking:** `connected_components`, `connected_components_into`,
+  `connected_components_with_stats`, `connected_components_with_measurements`
+  and `extract_contours` take the image as a named type parameter, so
+  that their results can carry its space. A call with a turbofish names
+  it with `_`: `connected_components::<Label32, Connectivity4, _>(&img)`.
+- **In results:** the `Debug` output of `Image` names its space, and
+  `ImageRef` is `Copy` and `Clone` for every pixel type.
 - **Breaking:** `resize`, `resize_into`, `remap` and
   `DestToSourceTable::remap` return a `Result`. An image without pixels
   resized or remapped to a target that has some is an

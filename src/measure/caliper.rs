@@ -1,13 +1,13 @@
 //! The caliper's description and the intensity profile along it.
 
 use core::f64::consts::TAU;
+use core::marker::PhantomData;
 
-use crate::CoordinateF64;
 use crate::Error;
 use crate::analyze::sampling::sample;
 use crate::border::BorderPolicy;
 use crate::error::{ParameterError, Requirement, Value};
-use crate::geometry::{Length, Pixels, Point};
+use crate::geometry::{Length, PixelSpace, Pixels, Point};
 use crate::image::ImageView;
 use crate::pixel::{HomogeneousPixel, LinearPixel, LinearSpace, SingleChannel};
 use crate::transform::InterpolationKernel;
@@ -55,8 +55,10 @@ enum Path {
 /// use fovea::{Length, Pixels, Point};
 /// use fovea::measure::Caliper;
 ///
-/// // 40 px long, averaging 5 px across, a sample every quarter pixel.
-/// let cal = Caliper::try_segment(
+/// // 40 px long, averaging 5 px across, a sample every quarter pixel. A
+/// // caliper takes the space of its points; nothing here pins one, so the
+/// // annotation names the default, `Pixels`.
+/// let cal: Caliper = Caliper::try_segment(
 ///     Point::new(10.0, 16.0),
 ///     Point::new(50.0, 16.0),
 ///     Length::new(5.0),
@@ -67,16 +69,48 @@ enum Path {
 /// assert_eq!(cal.point_at(Length::new(8.0)), Point::new(18.0, 16.0));
 /// # Ok::<(), fovea::Error>(())
 /// ```
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Caliper {
+pub struct Caliper<S = Pixels> {
     path: Path,
     width: f64,
     step: f64,
     samples: usize,
     lines: usize,
+    space: PhantomData<fn() -> S>,
 }
 
-fn finite_point(name: &'static str, p: Point<Pixels>) -> Result<[f64; 2], Error> {
+// Written by hand rather than derived: a derive would require `S: Clone`,
+// `S: Debug` and `S: PartialEq` of a marker that is never instantiated.
+impl<S> Clone for Caliper<S> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<S> Copy for Caliper<S> {}
+
+impl<S> PartialEq for Caliper<S> {
+    fn eq(&self, other: &Self) -> bool {
+        self.path == other.path
+            && self.width == other.width
+            && self.step == other.step
+            && self.samples == other.samples
+            && self.lines == other.lines
+    }
+}
+
+impl<S> core::fmt::Debug for Caliper<S> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Caliper")
+            .field("path", &self.path)
+            .field("width", &self.width)
+            .field("step", &self.step)
+            .field("samples", &self.samples)
+            .field("lines", &self.lines)
+            .finish()
+    }
+}
+
+fn finite_point<S: PixelSpace>(name: &'static str, p: Point<S>) -> Result<[f64; 2], Error> {
     if p.x.is_finite() && p.y.is_finite() {
         Ok([p.x, p.y])
     } else {
@@ -112,7 +146,7 @@ fn sample_count(name: &'static str, extent: f64, step: f64) -> Result<usize, Err
     Ok(count as usize)
 }
 
-fn width_and_step(width: Length<Pixels>, step: Length<Pixels>) -> Result<(f64, f64), Error> {
+fn width_and_step<S: PixelSpace>(width: Length<S>, step: Length<S>) -> Result<(f64, f64), Error> {
     let (w, s) = (width.get(), step.get());
     check(
         w.is_finite() && w >= 0.0,
@@ -129,7 +163,7 @@ fn width_and_step(width: Length<Pixels>, step: Length<Pixels>) -> Result<(f64, f
     Ok((w, s))
 }
 
-impl Caliper {
+impl<S: PixelSpace> Caliper<S> {
     /// A caliper along the segment from `start` to `end`.
     ///
     /// # Errors
@@ -139,10 +173,10 @@ impl Caliper {
     /// finite and positive, or more than [`MAX_CALIPER_SAMPLES`] samples
     /// would be taken along or across the path.
     pub fn try_segment(
-        start: Point<Pixels>,
-        end: Point<Pixels>,
-        width: Length<Pixels>,
-        step: Length<Pixels>,
+        start: Point<S>,
+        end: Point<S>,
+        width: Length<S>,
+        step: Length<S>,
     ) -> Result<Self, Error> {
         let a = finite_point("start", start)?;
         let b = finite_point("end", end)?;
@@ -185,7 +219,7 @@ impl Caliper {
     /// use fovea::measure::Caliper;
     ///
     /// // A quarter circle of radius 20 px about (32, 32), starting at +x.
-    /// let cal = Caliper::try_arc(
+    /// let cal: Caliper = Caliper::try_arc(
     ///     Point::new(32.0, 32.0),
     ///     Length::new(20.0),
     ///     0.0,
@@ -199,12 +233,12 @@ impl Caliper {
     /// # Ok::<(), fovea::Error>(())
     /// ```
     pub fn try_arc(
-        centre: Point<Pixels>,
-        radius: Length<Pixels>,
+        centre: Point<S>,
+        radius: Length<S>,
         start_angle: f64,
         sweep: f64,
-        width: Length<Pixels>,
-        step: Length<Pixels>,
+        width: Length<S>,
+        step: Length<S>,
     ) -> Result<Self, Error> {
         let c = finite_point("centre", centre)?;
         let (width, step) = width_and_step(width, step)?;
@@ -261,12 +295,13 @@ impl Caliper {
             step,
             samples,
             lines: 2 * half_lines + 1,
+            space: PhantomData,
         })
     }
 
     /// The length of the path: the segment's length, or the arc's.
     #[must_use]
-    pub fn length(&self) -> Length<Pixels> {
+    pub fn length(&self) -> Length<S> {
         Length::new(match self.path {
             Path::Segment { length, .. } => length,
             Path::Arc { radius, sweep, .. } => radius * sweep.abs(),
@@ -275,13 +310,13 @@ impl Caliper {
 
     /// The width averaged across the path.
     #[must_use]
-    pub fn width(&self) -> Length<Pixels> {
+    pub fn width(&self) -> Length<S> {
         Length::new(self.width)
     }
 
     /// The sampling step, along the path and across it.
     #[must_use]
-    pub fn step(&self) -> Length<Pixels> {
+    pub fn step(&self) -> Length<S> {
         Length::new(self.step)
     }
 
@@ -299,7 +334,7 @@ impl Caliper {
 
     /// The point on the path at distance `along` from its start.
     #[must_use]
-    pub fn point_at(&self, along: Length<Pixels>) -> Point<Pixels> {
+    pub fn point_at(&self, along: Length<S>) -> Point<S> {
         let [x, y] = self.position(along.get(), 0.0);
         Point::new(x, y)
     }
@@ -358,13 +393,36 @@ impl Caliper {
 /// assert_eq!(prof.values(), &[8.0, 9.0, 10.0, 11.0, 12.0]);
 /// # Ok::<(), fovea::Error>(())
 /// ```
-#[derive(Clone, Debug, PartialEq)]
-pub struct Profile {
-    caliper: Caliper,
+pub struct Profile<S = Pixels> {
+    caliper: Caliper<S>,
     values: Vec<f64>,
 }
 
-impl Profile {
+impl<S> Clone for Profile<S> {
+    fn clone(&self) -> Self {
+        Self {
+            caliper: self.caliper,
+            values: self.values.clone(),
+        }
+    }
+}
+
+impl<S> PartialEq for Profile<S> {
+    fn eq(&self, other: &Self) -> bool {
+        self.caliper == other.caliper && self.values == other.values
+    }
+}
+
+impl<S> core::fmt::Debug for Profile<S> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Profile")
+            .field("caliper", &self.caliper)
+            .field("values", &self.values)
+            .finish()
+    }
+}
+
+impl<S> Profile<S> {
     /// The averaged value at each position along the path.
     #[must_use]
     pub fn values(&self) -> &[f64] {
@@ -373,7 +431,7 @@ impl Profile {
 
     /// The caliper the profile was read along.
     #[must_use]
-    pub fn caliper(&self) -> &Caliper {
+    pub fn caliper(&self) -> &Caliper<S> {
         &self.caliper
     }
 }
@@ -425,10 +483,10 @@ impl Profile {
 /// ```
 pub fn profile<I, K, B, Q>(
     image: &I,
-    caliper: &Caliper,
+    caliper: &Caliper<I::Space>,
     kernel: K,
     border: &B,
-) -> Result<Profile, Error>
+) -> Result<Profile<I::Space>, Error>
 where
     I: ImageView,
     I::Pixel: SingleChannel + LinearPixel<Accumulator = Q> + LinearSpace,
@@ -445,7 +503,7 @@ where
         for k in 0..caliper.lines {
             let offset = (k as f64 - half) * caliper.step;
             let [x, y] = caliper.position(s, offset);
-            match sample(image, CoordinateF64::new(x, y), kernel, border) {
+            match sample(image, Point::new(x, y), kernel, border) {
                 Some(q) => sum += q.channel(0).into(),
                 None => return Err(Error::CaliperOutsideImage { sample: i }),
             }
@@ -590,5 +648,22 @@ mod tests {
         );
         let clamped = profile(&img, &cal, CatmullRom, &Clamp).unwrap();
         assert!(clamped.values().iter().all(|&v| (v - 50.0).abs() < 1e-4));
+    }
+
+    #[test]
+    fn the_caliper_traits_ask_nothing_of_the_space() {
+        let cal: Caliper = Caliper::try_segment(
+            Point::new(2.0, 4.0),
+            Point::new(12.0, 4.0),
+            Length::new(1.0),
+            Length::new(0.5),
+        )
+        .unwrap();
+        assert_eq!(Clone::clone(&cal), cal);
+        assert!(format!("{cal:?}").starts_with("Caliper { path:"));
+        let img = Image::fill(16, 8, MonoF32::new(5.0));
+        let prof = profile(&img, &cal, Bilinear, &Skip).unwrap();
+        assert_eq!(prof.clone(), prof);
+        assert!(format!("{prof:?}").starts_with("Profile { caliper:"));
     }
 }

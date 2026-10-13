@@ -8,7 +8,7 @@ use super::units::{CyclesPerPixel, Frequency, canonical};
 use crate::analyze::peak::parabola_vertex;
 use crate::common::Extremum;
 use crate::error::{ParameterError, Requirement, Value};
-use crate::geometry::{Pixels, Vector};
+use crate::geometry::{PixelSpace, Pixels, Vector};
 use crate::image::{Image, RasterImage};
 use crate::{Error, Size};
 use std::f64::consts::PI;
@@ -137,13 +137,37 @@ macro_rules! correlation_radius {
 /// assert!((found.peak() - 1.0).abs() < 1e-12);
 /// # Ok::<(), fovea::Error>(())
 /// ```
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct PhaseCorrelation {
-    shift: Vector<Pixels>,
+pub struct PhaseCorrelation<S = Pixels> {
+    shift: Vector<S>,
     peak: f64,
 }
 
-impl PhaseCorrelation {
+// Written by hand rather than derived: a derive would require `S: Clone`,
+// `S: Debug` and `S: PartialEq` of a marker that is never instantiated.
+impl<S> Clone for PhaseCorrelation<S> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<S> Copy for PhaseCorrelation<S> {}
+
+impl<S> PartialEq for PhaseCorrelation<S> {
+    fn eq(&self, other: &Self) -> bool {
+        self.shift == other.shift && self.peak == other.peak
+    }
+}
+
+impl<S> core::fmt::Debug for PhaseCorrelation<S> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("PhaseCorrelation")
+            .field("shift", &self.shift)
+            .field("peak", &self.peak)
+            .finish()
+    }
+}
+
+impl<S> PhaseCorrelation<S> {
     /// Where the content of the moving image lies relative to the
     /// reference: a point `p` of the reference is found at `p + shift` in
     /// the moving image.
@@ -153,7 +177,7 @@ impl PhaseCorrelation {
     /// than half the image cannot be told from its wrap, so +70 px on an
     /// image 128 px wide reads as −58 px.
     #[must_use]
-    pub fn shift(&self) -> Vector<Pixels> {
+    pub fn shift(&self) -> Vector<S> {
         self.shift
     }
 
@@ -201,8 +225,7 @@ impl PhaseCorrelation {
 /// assert!(PhaseReference::new(&reference, fovea::correlation_radius!(0.04), Auto).is_err());
 /// # Ok::<(), fovea::Error>(())
 /// ```
-#[derive(Clone, Debug)]
-pub struct PhaseReference<P: SpectrumSource> {
+pub struct PhaseReference<P: SpectrumSource, S = Pixels> {
     /// The size of the reference, and of every image it is compared with.
     size: Size,
     /// The size the transforms run at: the method's next size.
@@ -211,17 +234,49 @@ pub struct PhaseReference<P: SpectrumSource> {
     tables: AxisTables<P::Bin>,
     /// The reference, which the second pass windows over the part both
     /// images share.
-    reference: Image<P>,
+    reference: Image<P, S>,
     /// The spectrum of the reference under the whole window, for the first
     /// pass.
-    spectrum: Spectrum<P>,
+    spectrum: Spectrum<P, S>,
     /// The peak's height for two identical images.
     perfect: f64,
     /// Whether every pixel of the reference is the same.
     flat: bool,
 }
 
-impl<P: SpectrumSource> PhaseReference<P> {
+// Written by hand rather than derived: a derive would require `S: Clone`
+// and `S: Debug` of a marker that is never instantiated.
+impl<P: SpectrumSource, S> Clone for PhaseReference<P, S> {
+    fn clone(&self) -> Self {
+        Self {
+            size: self.size,
+            transform: self.transform,
+            radius: self.radius,
+            tables: self.tables.clone(),
+            reference: self.reference.clone(),
+            spectrum: self.spectrum.clone(),
+            perfect: self.perfect,
+            flat: self.flat,
+        }
+    }
+}
+
+impl<P: SpectrumSource, S> core::fmt::Debug for PhaseReference<P, S> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("PhaseReference")
+            .field("size", &self.size)
+            .field("transform", &self.transform)
+            .field("radius", &self.radius)
+            .field("tables", &self.tables)
+            .field("reference", &self.reference)
+            .field("spectrum", &self.spectrum)
+            .field("perfect", &self.perfect)
+            .field("flat", &self.flat)
+            .finish()
+    }
+}
+
+impl<P: SpectrumSource, S: PixelSpace> PhaseReference<P, S> {
     /// The reference `reference` prepared for phase correlation at
     /// `radius`, with transforms by `method`.
     ///
@@ -233,7 +288,7 @@ impl<P: SpectrumSource> PhaseReference<P> {
     /// is large enough for an image with a side under 7 pixels, or none.
     pub fn new<I, M>(reference: &I, radius: CorrelationRadius, method: M) -> Result<Self, Error>
     where
-        I: RasterImage<Pixel = P>,
+        I: RasterImage<Pixel = P, Space = S>,
         M: DftMethod<P>,
     {
         let size = reference.size();
@@ -259,7 +314,7 @@ impl<P: SpectrumSource> PhaseReference<P> {
         let tables = method
             .tables(transform)
             .expect("a method accepts the size it fits to");
-        let reference = Image::from_vec(
+        let reference = Image::from_vec_in(
             size.width,
             size.height,
             (0..size.height)
@@ -303,9 +358,9 @@ impl<P: SpectrumSource> PhaseReference<P> {
     /// # Errors
     ///
     /// [`Error::SizeMismatch`] if `moving` is not of the reference's size.
-    pub fn locate<J>(&self, moving: &J) -> Result<Option<PhaseCorrelation>, Error>
+    pub fn locate<J>(&self, moving: &J) -> Result<Option<PhaseCorrelation<S>>, Error>
     where
-        J: RasterImage<Pixel = P>,
+        J: RasterImage<Pixel = P, Space = S>,
     {
         if moving.size() != self.size {
             return Err(Error::SizeMismatch {
@@ -343,12 +398,12 @@ impl<P: SpectrumSource> PhaseReference<P> {
     /// relative height, or `None` if no peak is located.
     fn pass<J>(
         &self,
-        reference: &Spectrum<P>,
+        reference: &Spectrum<P, S>,
         moving: &J,
         window: (Span, Span),
     ) -> Option<((f64, f64), f64)>
     where
-        J: RasterImage<Pixel = P>,
+        J: RasterImage<Pixel = P, Space = S>,
     {
         let mut cross = Spectrum::forward(
             &windowed(moving, self.transform, window),
@@ -520,10 +575,10 @@ pub fn phase_correlate<I, J, P, M>(
     moving: &J,
     radius: CorrelationRadius,
     method: M,
-) -> Result<Option<PhaseCorrelation>, Error>
+) -> Result<Option<PhaseCorrelation<I::Space>>, Error>
 where
     I: RasterImage<Pixel = P>,
-    J: RasterImage<Pixel = P>,
+    J: RasterImage<Pixel = P, Space = I::Space>,
     P: SpectrumSource,
     M: DftMethod<P>,
 {
@@ -601,7 +656,7 @@ impl Span {
 ///
 /// Without the mean, a constant brightness would become a copy of the
 /// window, a structure that does not move with the content.
-fn windowed<I, P>(img: &I, transform: Size, window: (Span, Span)) -> Image<P>
+fn windowed<I, P>(img: &I, transform: Size, window: (Span, Span)) -> Image<P, I::Space>
 where
     I: RasterImage<Pixel = P>,
     P: SpectrumSource,
@@ -626,7 +681,7 @@ where
             *o = P::from_f64((p.to_f64() - mean) * fx * fy);
         }
     }
-    Image::from_vec(transform.width, transform.height, pixels)
+    Image::from_vec_in(transform.width, transform.height, pixels)
         .expect("the buffer has the transform's size")
 }
 
@@ -653,7 +708,9 @@ where
 /// is. Along each axis, the vertex of the parabola through the logarithms
 /// of the largest sample and its two neighbours, which the cyclic surface
 /// always has, is the vertex of the Gaussian through the three samples.
-fn locate_peak<P: SpectrumSource>(surface: &Image<P>) -> Option<((f64, f64), f64)> {
+fn locate_peak<P: SpectrumSource, S: PixelSpace>(
+    surface: &Image<P, S>,
+) -> Option<((f64, f64), f64)> {
     let Size { width, height } = crate::image::ImageView::size(surface);
     let value = |x: usize, y: usize| surface.row(y)[x].to_f64();
     let mut best: Option<(usize, usize, f64)> = None;
@@ -1040,5 +1097,52 @@ mod tests {
             "{x} {y}"
         );
         assert!((height - 2.0).abs() < 1e-12, "{height}");
+    }
+
+    // ── The space ──────────────────────────────────────────────────────
+
+    #[test]
+    fn the_shift_is_a_vector_of_the_images_space() {
+        use crate::geometry::Vector;
+        use crate::{IdealPixels, Pixels};
+        let mut rng = Rng::new(1330);
+        let pattern = sharp(&mut rng, 96);
+        let reference: Image<MonoF64, IdealPixels> = pattern.render(96, 96, 0.0, 0.0).into_space();
+        // The content moves right by 5 and up by 2.
+        let moving: Image<MonoF64, IdealPixels> = pattern.render(96, 96, 5.0, -2.0).into_space();
+        let found = phase_correlate(&reference, &moving, crate::correlation_radius!(0.06), Auto)
+            .unwrap()
+            .unwrap();
+        let shift: Vector<IdealPixels> = found.shift();
+        assert!(
+            (shift.x - 5.0).abs() < 0.01 && (shift.y + 2.0).abs() < 0.01,
+            "{shift:?}"
+        );
+
+        let reference_in_pixels = reference.as_space::<Pixels>();
+        let prepared =
+            PhaseReference::new(&reference_in_pixels, crate::correlation_radius!(0.06), Auto)
+                .unwrap();
+        let again: Vector<Pixels> = prepared
+            .locate(&moving.as_space::<Pixels>())
+            .unwrap()
+            .unwrap()
+            .shift();
+        assert_eq!((again.x, again.y), (shift.x, shift.y));
+    }
+
+    #[test]
+    fn the_correlation_traits_ask_nothing_of_the_space() {
+        let mut rng = Rng::new(17);
+        let pattern = sharp(&mut rng, 64);
+        let reference: Image<MonoF64> = pattern.render(64, 64, 0.0, 0.0);
+        let moving = pattern.render(64, 64, 2.0, 1.0);
+        let prepared =
+            PhaseReference::new(&reference, crate::correlation_radius!(0.06), Auto).unwrap();
+        let copy = prepared.clone();
+        assert!(format!("{copy:?}").starts_with("PhaseReference { size:"));
+        let found = copy.locate(&moving).unwrap().unwrap();
+        assert_eq!(Clone::clone(&found), found);
+        assert!(format!("{found:?}").starts_with("PhaseCorrelation { shift:"));
     }
 }

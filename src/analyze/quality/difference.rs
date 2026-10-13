@@ -360,7 +360,7 @@ impl SquaredError {
 pub fn squared_error<A, B, P>(a: &A, b: &B) -> Result<SquaredError, Error>
 where
     A: RasterImage<Pixel = P>,
-    B: RasterImage<Pixel = P>,
+    B: RasterImage<Pixel = P, Space = A::Space>,
     P: ChannelwiseMath,
     P::Channel: StatisticsChannel,
 {

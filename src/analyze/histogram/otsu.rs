@@ -157,7 +157,7 @@ where
 /// assert!(!mask.pixel_at(0, 0));
 /// assert!(mask.pixel_at(0, 1));
 /// ```
-pub fn otsu_binary_mask<I, P>(image: &I) -> Result<(u8, BinaryImage), Error>
+pub fn otsu_binary_mask<I, P>(image: &I) -> Result<(u8, BinaryImage<I::Space>), Error>
 where
     I: RasterImage<Pixel = P>,
     P: SingleChannel + ChannelwiseMath + From<u8>,
@@ -167,7 +167,7 @@ where
     let h: Histogram<NaturalBins, P::Channel> = histogram(image, &NaturalBins)?;
     let t = otsu_threshold(&h).unwrap_or(0);
     let thresh = P::from(t);
-    let mask: BinaryImage = convert_image(image, BinaryMask { thresh });
+    let mask: BinaryImage<I::Space> = convert_image(image, BinaryMask { thresh });
     Ok((t, mask))
 }
 

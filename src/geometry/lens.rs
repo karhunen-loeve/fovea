@@ -2,7 +2,7 @@
 
 use super::map::PlaneMap;
 use super::point::Point;
-use super::units::Pixels;
+use super::units::{IdealPixels, PixelSpace, Pixels};
 use crate::Error;
 use crate::error::{ParameterError, Requirement, Value};
 
@@ -91,14 +91,17 @@ impl CameraMatrix {
         self.principal_point
     }
 
-    fn to_normalized(self, p: Point<Pixels>) -> (f64, f64) {
+    // The camera matrix relates the pixels of the camera image and of the
+    // ideal image alike to normalised coordinates, so both conversions take
+    // either space.
+    fn to_normalized<S: PixelSpace>(self, p: Point<S>) -> (f64, f64) {
         (
             (p.x - self.principal_point.x) / self.focal_length.x,
             (p.y - self.principal_point.y) / self.focal_length.y,
         )
     }
 
-    fn to_pixels(self, x: f64, y: f64) -> Point<Pixels> {
+    fn to_pixels<S: PixelSpace>(self, x: f64, y: f64) -> Point<S> {
         Point::new(
             self.focal_length.x * x + self.principal_point.x,
             self.focal_length.y * y + self.principal_point.y,
@@ -357,7 +360,21 @@ impl BrownConrady {
     /// assert!(matches!(lens.undistort_point(beyond), Err(Error::DidNotConverge { .. })));
     /// # Ok::<(), fovea::Error>(())
     /// ```
-    pub fn undistort_point(&self, measured: Point<Pixels>) -> Result<Point<Pixels>, Error> {
+    ///
+    /// The corrected point lies in the ideal image, so correcting it a second
+    /// time does not compile:
+    ///
+    /// ```compile_fail
+    /// use fovea::Point;
+    /// use fovea::geometry::{BrownConrady, CameraMatrix, FocalLength};
+    ///
+    /// let cam = CameraMatrix::try_new(FocalLength { x: 1000.0, y: 1000.0 }, Point::new(640.0, 480.0))
+    ///     .unwrap();
+    /// let lens = BrownConrady::from_opencv(cam, &[-0.4, 0.0, 0.0, 0.0]).unwrap();
+    /// let ideal = lens.undistort_point(Point::new(1100.0, 300.0)).unwrap();
+    /// let _ = lens.undistort_point(ideal);
+    /// ```
+    pub fn undistort_point(&self, measured: Point<Pixels>) -> Result<Point<IdealPixels>, Error> {
         if !(measured.x.is_finite() && measured.y.is_finite()) {
             return Err(ParameterError::new(
                 "point",
@@ -441,12 +458,12 @@ impl BrownConrady {
 }
 
 impl PlaneMap for BrownConrady {
-    type Domain = Pixels;
+    type Domain = IdealPixels;
     type Codomain = Pixels;
 
     /// The pixel of the camera image where the lens puts the ideal pixel
     /// `p`; `None` only where that position is not finite.
-    fn try_map_point(&self, p: Point<Pixels>) -> Option<Point<Pixels>> {
+    fn try_map_point(&self, p: Point<IdealPixels>) -> Option<Point<Pixels>> {
         let (x, y) = self.camera.to_normalized(p);
         let (dx, dy) = self.distort(x, y);
         let q = self.camera.to_pixels(dx, dy);
@@ -587,9 +604,10 @@ mod tests {
     #[test]
     fn without_distortion_the_correction_is_the_identity() {
         let l = lens(0.0, 0.0, 0.0, 0.0, 0.0);
-        let p = Point::new(123.25, 456.5);
-        assert_eq!(l.undistort_point(p).unwrap(), p);
-        assert_eq!(l.try_map_point(p), Some(p));
+        let measured: Point<Pixels> = Point::new(123.25, 456.5);
+        let ideal: Point<IdealPixels> = Point::new(123.25, 456.5);
+        assert_eq!(l.undistort_point(measured).unwrap(), ideal);
+        assert_eq!(l.try_map_point(ideal), Some(measured));
     }
 
     #[test]

@@ -13,7 +13,7 @@ use std::ops::Sub;
 
 use crate::Error;
 use crate::analyze::integral::{IntegralImage, integral_image};
-use crate::image::{BinaryImage, ImageView, RasterImage, RasterImageMut};
+use crate::image::{BinaryImage, Image, ImageView, RasterImage, RasterImageMut};
 use crate::pixel::{IntegralPixel, Mono32, Mono64, MonoF64};
 use crate::{Coordinate, OddWindowSide, Rectangle, Size};
 
@@ -286,7 +286,7 @@ pub fn adaptive_threshold<I, A>(
     image: &I,
     window: OddWindowSide,
     offset: Bias<A>,
-) -> Result<BinaryImage, Error>
+) -> Result<BinaryImage<I::Space>, Error>
 where
     I: RasterImage,
     I::Pixel: IntegralPixel<A>,
@@ -294,7 +294,7 @@ where
 {
     // Owned variant allocates the output and delegates, matching the
     // `integral_image` / `hysteresis_threshold` convention.
-    let mut out = BinaryImage::fill(image.width(), image.height(), false);
+    let mut out = Image::fill_in(image.width(), image.height(), false);
     adaptive_threshold_into(image, window, offset, &mut out)?;
     Ok(out)
 }
@@ -318,7 +318,7 @@ pub fn adaptive_threshold_into<I, A>(
     image: &I,
     window: OddWindowSide,
     offset: Bias<A>,
-    out: &mut BinaryImage,
+    out: &mut BinaryImage<I::Space>,
 ) -> Result<(), Error>
 where
     I: RasterImage,

@@ -18,6 +18,7 @@
 
 use crate::border::Mirror;
 use crate::error::Error;
+use crate::geometry::PixelSpace;
 use crate::image::{
     Dyadic, Image, ImageRef, ImageRefMut, ImageView, ImageViewMut, LevelChain, OriginOffset,
     PlacedImage, PlacedPyramid, Pyramid, PyramidLevel, RasterImage, ScaledImage, ScaledPyramid,
@@ -80,7 +81,7 @@ const PYR_UP_WEIGHTS_UNDOUBLED: [f32; 5] = [0.0625, 0.25, 0.375, 0.25, 0.0625];
 /// assert!((half.pixel_at(2, 1).0 - 0.5).abs() < 1e-6);
 /// ```
 #[must_use]
-pub fn pyr_down<I, P, Acc>(image: &I) -> Image<P>
+pub fn pyr_down<I, P, Acc>(image: &I) -> Image<P, I::Space>
 where
     I: RasterImage<Pixel = P>,
     P: LinearPixel<f32, Accumulator = Acc> + LinearSpace + ZeroablePixel + FromLinear<Acc>,
@@ -100,7 +101,7 @@ fn pyr_down_with<I, P, Acc>(
     image: &I,
     scratch: &mut SeparableScratch<Acc>,
     blurred: &mut Vec<P>,
-) -> Image<P>
+) -> Image<P, I::Space>
 where
     I: RasterImage<Pixel = P>,
     P: LinearPixel<f32, Accumulator = Acc> + LinearSpace + ZeroablePixel + FromLinear<Acc>,
@@ -120,12 +121,13 @@ where
         blurred.resize(area, P::zero());
     }
     let mut view = ImageRefMut::new(width, height, &mut blurred[..area])
-        .expect("the blurred view is exactly width * height");
+        .expect("the blurred view is exactly width * height")
+        .into_space::<I::Space>();
     scratch.convolve_separable_into(image, &SeparableKernel::gaussian_5(), &Mirror, &mut view);
 
     let blurred = ImageRef::new(width, height, &blurred[..area])
         .expect("the blurred view is exactly width * height");
-    Image::generate(width.div_ceil(2), height.div_ceil(2), |x, y| {
+    Image::generate_in(width.div_ceil(2), height.div_ceil(2), |x, y| {
         blurred.pixel_at(2 * x, 2 * y)
     })
 }
@@ -173,7 +175,7 @@ where
 /// assert!((restored.pixel_at(4, 3).0 - 0.25).abs() < 1e-6);
 /// # Ok::<(), fovea::Error>(())
 /// ```
-pub fn pyr_up<I, P, Acc>(image: &I, target: Size) -> Result<Image<P>, Error>
+pub fn pyr_up<I, P, Acc>(image: &I, target: Size) -> Result<Image<P, I::Space>, Error>
 where
     I: RasterImage<Pixel = P>,
     P: LinearPixel<f32, Accumulator = Acc> + LinearSpace + ZeroablePixel + FromLinear<Acc>,
@@ -203,7 +205,7 @@ where
 
     // Zero-insertion: every input sample keeps its even-even position; the
     // in-between positions start at zero and are filled by the smoothing.
-    let mut upsampled = Image::<P>::zero(target.width, target.height);
+    let mut upsampled = Image::<P, _>::zero_in(target.width, target.height);
     for y in 0..h {
         let row = image.row(y);
         for (x, &pixel) in row.iter().enumerate() {
@@ -268,7 +270,7 @@ impl<C: Pyramid> Dyadic<C> {
     /// assert!(pyramid.expand(0).is_none()); // the finest level has no parent
     /// assert!(pyramid.expand(3).is_none()); // no such level
     /// ```
-    pub fn expand<P, Acc>(&self, child: usize) -> Option<Image<P>>
+    pub fn expand<P, Acc>(&self, child: usize) -> Option<Image<P, <C::Level as ImageView>::Space>>
     where
         C::Level: PyramidLevel<Pixel = P>,
         P: LinearPixel<f32, Accumulator = Acc> + LinearSpace + ZeroablePixel + FromLinear<Acc>,
@@ -302,7 +304,9 @@ impl<C: Pyramid> Dyadic<C> {
 /// a method that halves can return a [`Dyadic`](crate::image::Dyadic) one
 /// and hand its callers [`expand`](crate::image::Dyadic::expand), while a
 /// method that does not returns the plain chain. The level type is reached
-/// through it as `<Self::Output as Pyramid>::Level`.
+/// through it as `<Self::Output<S> as Pyramid>::Level`, where `S` is the
+/// space of the input image: every level of a pyramid lies in its base's
+/// space.
 ///
 /// # Example
 ///
@@ -318,8 +322,9 @@ impl<C: Pyramid> Dyadic<C> {
 /// assert_eq!(pyramid.coarsest().size().width, 4);
 /// ```
 pub trait PyramidMethod<P: Copy> {
-    /// The pyramid this method produces, container and level type at once.
-    type Output: Pyramid;
+    /// The pyramid this method produces from an image in the space `S`,
+    /// container and level type at once.
+    type Output<S: PixelSpace>: Pyramid;
 
     /// Builds a pyramid from the given image.
     ///
@@ -334,7 +339,7 @@ pub trait PyramidMethod<P: Copy> {
     /// and never mutates the caller's parameters. The resolved depth is
     /// whatever [`Pyramid::depth`] reports afterwards. The result always
     /// contains at least one level.
-    fn build<I>(&self, image: &I, max_depth: usize) -> Self::Output
+    fn build<I>(&self, image: &I, max_depth: usize) -> Self::Output<I::Space>
     where
         I: RasterImage<Pixel = P>;
 }
@@ -442,9 +447,9 @@ where
         + LinearPixel<f32, Accumulator = Acc>
         + std::ops::Add<Output = Acc>,
 {
-    type Output = PlacedPyramid<P>;
+    type Output<S: PixelSpace> = PlacedPyramid<P, S>;
 
-    fn build<I>(&self, image: &I, max_depth: usize) -> Self::Output
+    fn build<I>(&self, image: &I, max_depth: usize) -> Self::Output<I::Space>
     where
         I: RasterImage<Pixel = P>,
     {
@@ -511,9 +516,9 @@ where
         + LinearPixel<f32, Accumulator = Acc>
         + std::ops::Add<Output = Acc>,
 {
-    type Output = ScaledPyramid<P>;
+    type Output<S: PixelSpace> = ScaledPyramid<P, S>;
 
-    fn build<I>(&self, image: &I, max_depth: usize) -> Self::Output
+    fn build<I>(&self, image: &I, max_depth: usize) -> Self::Output<I::Space>
     where
         I: RasterImage<Pixel = P>,
     {
@@ -564,7 +569,7 @@ fn finish<L: PyramidLevel>(levels: Vec<L>) -> Dyadic<LevelChain<L>> {
 
 /// The shared level cascade: level 0 is an owned copy of the input, each
 /// further level the [`pyr_down`] of the one before it.
-fn gaussian_levels<I, P, Acc>(image: &I, max_depth: usize) -> Vec<Image<P>>
+fn gaussian_levels<I, P, Acc>(image: &I, max_depth: usize) -> Vec<Image<P, I::Space>>
 where
     I: RasterImage<Pixel = P>,
     P: LinearPixel<f32, Accumulator = Acc> + LinearSpace + ZeroablePixel + FromLinear<Acc>,
@@ -581,7 +586,7 @@ where
         for y in 0..image.height() {
             data.extend_from_slice(image.row(y));
         }
-        Image::from_vec(image.width(), image.height(), data)
+        Image::from_vec_in(image.width(), image.height(), data)
             .expect("rows fill width * height exactly")
     };
     let mut levels = vec![base];
@@ -608,7 +613,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::CoordinateF64;
+    use crate::Point;
     use crate::image::{Decimated, PyramidLevel, ScaleLevel};
     use crate::pixel::{Mono8, MonoF32};
     use crate::{pixel_distance, sigma};
@@ -1033,8 +1038,8 @@ mod tests {
             }
         }
 
-        let lifted = scaled.to_base(CoordinateF64::new(best.0 as f64, best.1 as f64));
-        assert_eq!(lifted, CoordinateF64::new(f64::from(cx), f64::from(cy)));
+        let lifted = scaled.to_base(Point::new(best.0 as f64, best.1 as f64));
+        assert_eq!(lifted, Point::new(f64::from(cx), f64::from(cy)));
     }
 
     // ── Gaussian: the geometry the builder no longer discards ───────────
@@ -1046,7 +1051,7 @@ mod tests {
         let distances: Vec<f64> = pyramid.iter().map(|l| l.pixel_distance().get()).collect();
         assert_eq!(distances, [1.0, 2.0, 4.0, 8.0]);
         for level in pyramid.iter() {
-            assert_eq!(level.origin_offset(), CoordinateF64::new(0.0, 0.0));
+            assert_eq!(level.origin_offset(), Point::new(0.0, 0.0));
         }
     }
 
@@ -1056,8 +1061,8 @@ mod tests {
         let pyramid: PlacedPyramid<MonoF32> = Gaussian.build(&src, 3);
         // pyr_down keeps even samples, so level-2 pixel 3 is base pixel 12.
         assert_eq!(
-            pyramid.level(2).to_base(CoordinateF64::new(3.0, 1.0)),
-            CoordinateF64::new(12.0, 4.0)
+            pyramid.level(2).to_base(Point::new(3.0, 1.0)),
+            Point::new(12.0, 4.0)
         );
     }
 

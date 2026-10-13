@@ -9,6 +9,7 @@ use core::ops::{Add, Mul};
 use crate::border::Clamp;
 use crate::error::{Error, ParameterError, Requirement, Value};
 use crate::features::Corner;
+use crate::geometry::{PixelSpace, Pixels};
 use crate::image::{Decimated, Image, ImageView, RasterImage, RasterImageMut};
 use crate::pixel::{FromLinear, LinearPixel, SingleChannel, ZeroablePixel};
 use crate::transform::{PixelMultiply, SeparableScratch, combine_images, sobel_x, sobel_y};
@@ -364,14 +365,35 @@ impl<C: CornerResponseChannel> CornerResponse<C> for ShiTomasi {
 /// assert!(tensor.response(harris!(0.04)).pixel_at(8, 8).value() < 0.0);
 /// # Ok::<(), fovea::Error>(())
 /// ```
-#[derive(Clone, Debug)]
-pub struct StructureTensor<P: Copy> {
-    xx: Image<P>,
-    xy: Image<P>,
-    yy: Image<P>,
+pub struct StructureTensor<P: Copy, S = Pixels> {
+    xx: Image<P, S>,
+    xy: Image<P, S>,
+    yy: Image<P, S>,
 }
 
-impl<P> StructureTensor<P>
+// Written by hand rather than derived: a derive would require `S: Clone`
+// and `S: Debug` of a marker that is never instantiated.
+impl<P: Copy, S> Clone for StructureTensor<P, S> {
+    fn clone(&self) -> Self {
+        Self {
+            xx: self.xx.clone(),
+            xy: self.xy.clone(),
+            yy: self.yy.clone(),
+        }
+    }
+}
+
+impl<P: Copy, S> core::fmt::Debug for StructureTensor<P, S> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("StructureTensor")
+            .field("xx", &self.xx)
+            .field("xy", &self.xy)
+            .field("yy", &self.yy)
+            .finish()
+    }
+}
+
+impl<P, S: PixelSpace> StructureTensor<P, S>
 where
     P: Copy
         + Default
@@ -416,8 +438,8 @@ where
     /// [`gaussian_kernel_size`](crate::image::gaussian_kernel_size).
     pub fn from_gradients<IX, IY>(gx: &IX, gy: &IY, window: Sigma) -> Result<Self, Error>
     where
-        IX: RasterImage<Pixel = P>,
-        IY: RasterImage<Pixel = P>,
+        IX: RasterImage<Pixel = P, Space = S>,
+        IY: RasterImage<Pixel = P, Space = S>,
     {
         // `gx·gy` is the only product that can mismatch; taking it first
         // means the error surfaces before two blurs have been paid for.
@@ -428,8 +450,8 @@ where
         // The three blurs are the same size, so they share one working set:
         // the first sizes it, the other two allocate only their outputs.
         let mut scratch = SeparableScratch::new();
-        let mut blur = |product: &Image<P>| {
-            let mut out = Image::<P>::zero(product.width(), product.height());
+        let mut blur = |product: &Image<P, S>| {
+            let mut out = Image::<P, S>::zero_in(product.width(), product.height());
             scratch.gaussian_blur_into(product, window, &Clamp, &mut out);
             out
         };
@@ -441,7 +463,7 @@ where
     }
 }
 
-impl<P: Copy> StructureTensor<P> {
+impl<P: Copy, S: PixelSpace> StructureTensor<P, S> {
     /// Assembles a structure tensor from three already-windowed product
     /// images.
     ///
@@ -455,7 +477,11 @@ impl<P: Copy> StructureTensor<P> {
     ///
     /// Returns [`Error::SizeMismatch`] unless all three images have the same
     /// dimensions.
-    pub fn from_smoothed(sxx: Image<P>, sxy: Image<P>, syy: Image<P>) -> Result<Self, Error> {
+    pub fn from_smoothed(
+        sxx: Image<P, S>,
+        sxy: Image<P, S>,
+        syy: Image<P, S>,
+    ) -> Result<Self, Error> {
         for other in [sxy.size(), syy.size()] {
             if other != sxx.size() {
                 return Err(Error::SizeMismatch {
@@ -473,19 +499,19 @@ impl<P: Copy> StructureTensor<P> {
 
     /// Returns the windowed `Gx·Gx` image.
     #[must_use]
-    pub fn xx(&self) -> &Image<P> {
+    pub fn xx(&self) -> &Image<P, S> {
         &self.xx
     }
 
     /// Returns the windowed `Gx·Gy` image, the off-diagonal entry.
     #[must_use]
-    pub fn xy(&self) -> &Image<P> {
+    pub fn xy(&self) -> &Image<P, S> {
         &self.xy
     }
 
     /// Returns the windowed `Gy·Gy` image.
     #[must_use]
-    pub fn yy(&self) -> &Image<P> {
+    pub fn yy(&self) -> &Image<P, S> {
         &self.yy
     }
 
@@ -525,14 +551,14 @@ impl<P: Copy> StructureTensor<P> {
     /// # Ok::<(), fovea::Error>(())
     /// ```
     #[must_use]
-    pub fn response<M>(&self, method: M) -> Image<P>
+    pub fn response<M>(&self, method: M) -> Image<P, S>
     where
         P: SingleChannel + ZeroablePixel,
         P::Channel: CornerResponseChannel,
         M: CornerResponse<P::Channel>,
     {
         let (w, h) = (self.xx.width(), self.xx.height());
-        let mut out = Image::fill(w, h, P::zero());
+        let mut out = Image::fill(w, h, P::zero()).into_space();
         for y in 0..h {
             let (xx, xy, yy) = (self.xx.row(y), self.xy.row(y), self.yy.row(y));
             let dst = out.row_mut(y);
@@ -705,7 +731,11 @@ impl CornerParams {
 /// assert!(response.pixel_at(8, 8).value() > response.pixel_at(12, 8).value());
 /// ```
 #[must_use]
-pub fn corner_response_map<I, M, P, Acc>(image: &I, method: M, window: Sigma) -> Image<Acc>
+pub fn corner_response_map<I, M, P, Acc>(
+    image: &I,
+    method: M,
+    window: Sigma,
+) -> Image<Acc, I::Space>
 where
     I: RasterImage<Pixel = P>,
     P: Copy + LinearPixel<f32, Accumulator = Acc>,
@@ -780,7 +810,11 @@ where
 /// [`MAX_RADIUS`](crate::image::MAX_RADIUS) (via
 /// [`gaussian_blur`](crate::transform::gaussian_blur)).
 #[must_use]
-pub fn detect_corners<I, M, P, Acc>(image: &I, method: M, params: CornerParams) -> Vec<Corner>
+pub fn detect_corners<I, M, P, Acc>(
+    image: &I,
+    method: M,
+    params: CornerParams,
+) -> Vec<Corner<I::Space>>
 where
     I: RasterImage<Pixel = P>,
     P: Copy + LinearPixel<f32, Accumulator = Acc>,
@@ -825,7 +859,7 @@ where
 /// concatenating levels then needs, which is the caller's policy to set:
 ///
 /// ```
-/// use fovea::CoordinateF64;
+/// use fovea::{Pixels, Point};
 /// use fovea::features::detect::{detect_corners_in_level, CornerParams, NmsRadius, ShiTomasi};
 /// use fovea::features::sort_by_response;
 /// use fovea::image::{Image, PlacedPyramid, Pyramid};
@@ -863,7 +897,7 @@ pub fn detect_corners_in_level<L, M, P, Acc>(
     level: &L,
     method: M,
     params: CornerParams,
-) -> Vec<Corner>
+) -> Vec<Corner<L::Space>>
 where
     L: Decimated<Pixel = P>,
     P: Copy + LinearPixel<f32, Accumulator = Acc>,
@@ -1541,5 +1575,14 @@ mod tests {
             assert_eq!(shifted.position().x - unshifted.position().x, 0.5);
             assert_eq!(shifted.position().y - unshifted.position().y, 0.5);
         }
+    }
+
+    #[test]
+    fn the_tensor_traits_ask_nothing_of_the_space() {
+        let plane = || Image::fill(2, 2, MonoF32::new(1.0));
+        let tensor = StructureTensor::from_smoothed(plane(), plane(), plane()).unwrap();
+        let copy = tensor.clone();
+        assert_eq!(copy.xy(), tensor.xy());
+        assert!(format!("{tensor:?}").starts_with("StructureTensor { xx:"));
     }
 }
