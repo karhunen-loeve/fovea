@@ -6,6 +6,16 @@ use super::point::{Length, Point, Vector};
 use super::units::LengthUnit;
 use crate::AxialOrientation;
 
+/// The seals of [`AffineMap`] and [`ConformalMap`]. Implemented in
+/// `affine.rs` for the four affine mappings, so the module is visible to
+/// the crate and to nothing outside it.
+pub(crate) mod sealed {
+    /// An affine mapping of this crate.
+    pub trait Affine {}
+    /// A similarity of this crate.
+    pub trait Conformal {}
+}
+
 /// A mapping of the plane from one unit of length to another.
 ///
 /// Every mapping converts points. Which other objects it converts depends on
@@ -74,6 +84,42 @@ pub trait PlaneMap {
 /// The mapping is total, and construction rejects a singular or overflowing
 /// `A`, so the inverse always exists.
 ///
+/// Sealed: the crate relies on what the trait certifies, a metric that is
+/// the same everywhere. An affine calibration of your own is a value,
+/// [`Affine::try_new`](super::Affine::try_new) with its matrix and
+/// translation; a model that is not affine implements [`PlaneMap`], which
+/// is open.
+///
+/// ```compile_fail
+/// use fovea::{Pixels, Point};
+/// use fovea::geometry::{AffineMap, PlaneMap, Vector};
+///
+/// struct Shift;
+/// impl PlaneMap for Shift {
+///     type Domain = Pixels;
+///     type Codomain = Pixels;
+///     fn try_map_point(&self, p: Point<Pixels>) -> Option<Point<Pixels>> {
+///         Some(p)
+///     }
+/// }
+/// // ERROR: the trait bound `Shift: Affine` (the seal) is not satisfied.
+/// impl AffineMap for Shift {
+///     type Inverse = Shift;
+///     fn map_point(&self, p: Point<Pixels>) -> Point<Pixels> {
+///         p
+///     }
+///     fn map_vector(&self, v: Vector<Pixels>) -> Vector<Pixels> {
+///         v
+///     }
+///     fn inverse(&self) -> Shift {
+///         Shift
+///     }
+///     fn reverses_orientation(&self) -> bool {
+///         false
+///     }
+/// }
+/// ```
+///
 /// # Example
 ///
 /// ```
@@ -92,7 +138,7 @@ pub trait PlaneMap {
 /// let back = scale.inverse().map_point(Point::new(2.0, 0.5));
 /// assert!((back.x - 100.0).abs() < 1e-12 && (back.y - 10.0).abs() < 1e-12);
 /// ```
-pub trait AffineMap: PlaneMap {
+pub trait AffineMap: PlaneMap + sealed::Affine {
     /// The inverse mapping's type, with domain and codomain swapped.
     type Inverse: AffineMap<Domain = Self::Codomain, Codomain = Self::Domain>;
 
@@ -216,6 +262,11 @@ pub trait AffineMap: PlaneMap {
 /// distances measured in the domain are not proportional to distances in
 /// the codomain.
 ///
+/// Sealed, like [`AffineMap`]: [`Fit::map`](crate::measure::Fit::map)
+/// converts residuals by [`factor`](ConformalMap::factor), which is right
+/// only for a mapping that has the property. [`UniformScale`](super::UniformScale)
+/// and [`Similarity`](super::Similarity) implement it.
+///
 /// # Example
 ///
 /// ```
@@ -236,7 +287,7 @@ pub trait AffineMap: PlaneMap {
 /// let scale: AxisScale<Pixels, Millimeter> = fovea::axis_scale!(0.02, 0.05);
 /// let _ = scale.map_length(Length::new(1.0));
 /// ```
-pub trait ConformalMap: AffineMap {
+pub trait ConformalMap: AffineMap + sealed::Conformal {
     /// The factor `a` by which every length is multiplied.
     fn factor(&self) -> f64;
 

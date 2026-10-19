@@ -118,7 +118,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   points, every `AffineMap` also displacements and their lengths
   (`length_of`), and only a `ConformalMap`, the uniform scale and the
   similarity, converts a length without a direction, so a radius cannot
-  pass through an axis scale. `uniform_scale!` and `axis_scale!` are
+  pass through an axis scale. `AffineMap` and `ConformalMap` are sealed,
+  since conversions such as `Fit::map` rely on what they certify; an
+  affine calibration of one's own is an `Affine` value, and `PlaneMap`
+  stays open for other models. `uniform_scale!` and `axis_scale!` are
   literals checked at compile time.
 - `error::Requirement::FiniteNonZero`, for a factor or a determinant that
   must not be zero.
@@ -227,7 +230,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Direction types and composition.** `DestToSource(map)` and
   `SourceToDest::new(map)` say which way a mapping runs; `SourceToDest`
   accepts an `Invertible` mapping (the affine family and the homography),
-  not a lens model. Every `AffineMap`, a caller's own included, is
+  not a lens model. Every `AffineMap` is
   `Invertible` through one blanket impl whose inverse is its
   `AffineMap::inverse`, so the two traits cannot name different inverses.
   Each names the space of its destination and of its

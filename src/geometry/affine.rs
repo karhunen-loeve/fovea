@@ -7,7 +7,7 @@
 use core::fmt;
 use core::marker::PhantomData;
 
-use super::map::{AffineMap, ConformalMap, PlaneMap};
+use super::map::{AffineMap, ConformalMap, PlaneMap, sealed};
 use super::point::{Point, Vector};
 use super::units::LengthUnit;
 use crate::Error;
@@ -518,6 +518,13 @@ impl<D: LengthUnit, C: LengthUnit> PlaneMap for UniformScale<D, C> {
         Some(self.map_point(p))
     }
 }
+
+impl<D, C> sealed::Affine for UniformScale<D, C> {}
+impl<D, C> sealed::Affine for AxisScale<D, C> {}
+impl<D, C> sealed::Affine for Similarity<D, C> {}
+impl<D, C> sealed::Affine for Affine<D, C> {}
+impl<D, C> sealed::Conformal for UniformScale<D, C> {}
+impl<D, C> sealed::Conformal for Similarity<D, C> {}
 
 impl<D: LengthUnit, C: LengthUnit> AffineMap for UniformScale<D, C> {
     type Inverse = UniformScale<C, D>;

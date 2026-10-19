@@ -97,9 +97,9 @@ where
 /// and the homography.
 ///
 /// [`SourceToDest`] needs one. Every `AffineMap` is `Invertible`, with its
-/// own [`inverse`](AffineMap::inverse) as [`invert`](Self::invert), so an
-/// affine mapping of your own needs no second impl and both traits name the
-/// same inverse. In generic code, bound on `AffineMap` alone: it brings
+/// own [`inverse`](AffineMap::inverse) as [`invert`](Self::invert), so the
+/// two traits name the same inverse. `Invertible` is open: a mapping of
+/// your own with a closed-form inverse that is not affine implements it. In generic code, bound on `AffineMap` alone: it brings
 /// `Invertible` with it, and `invert()` then returns an `AffineMap`. A bound
 /// on both, `M: AffineMap + Invertible`, makes the compiler take the two
 /// `Inverse` types from the bounds, where it cannot see that they are one.
@@ -328,52 +328,18 @@ mod tests {
         );
     }
 
-    /// A translation of a caller's own, written as an `AffineMap` only.
-    #[derive(Clone, Copy, Debug, PartialEq)]
-    struct Shift(f64, f64);
-
-    impl PlaneMap for Shift {
-        type Domain = Pixels;
-        type Codomain = Pixels;
-        fn try_map_point(&self, p: Point<Pixels>) -> Option<Point<Pixels>> {
-            Some(self.map_point(p))
-        }
-    }
-
-    impl AffineMap for Shift {
-        type Inverse = Shift;
-        fn map_point(&self, p: Point<Pixels>) -> Point<Pixels> {
-            Point::new(p.x + self.0, p.y + self.1)
-        }
-        fn map_vector(&self, v: Vector<Pixels>) -> Vector<Pixels> {
-            v
-        }
-        fn inverse(&self) -> Shift {
-            Shift(-self.0, -self.1)
-        }
-        fn reverses_orientation(&self) -> bool {
-            false
-        }
-    }
-
     #[test]
-    fn an_affine_map_of_ones_own_is_invertible_with_its_own_inverse() {
-        // The v0.6.0 review's P4: the two traits named two inverses, and
-        // an affine mapping of a caller's own needed a second impl to enter
-        // `SourceToDest`.
-        let shift = Shift(3.0, -2.0);
-        assert_eq!(shift.invert(), shift.inverse());
-        let lookup = SourceToDest::new(shift);
-        assert_eq!(
-            lookup.source_of(Point::new(10.0, 10.0)),
-            Some(Point::new(7.0, 12.0))
-        );
-        // The affine family goes through the same impl.
+    fn the_affine_family_is_invertible_with_its_own_inverse() {
+        // The v0.6.0 review's P4: the two traits named two inverses.
         let s: Similarity<Pixels, Pixels> = Similarity::try_linear(2.0, 0.5).unwrap();
         assert_eq!(s.invert(), s.inverse());
         let a: Affine<Pixels, IdealPixels> =
             Affine::try_new([[2.0, 0.5], [0.0, 1.0]], Vector::new(1.0, 2.0)).unwrap();
         assert_eq!(a.invert(), a.inverse());
+        let lookup = SourceToDest::new(a);
+        let p = Point::new(3.0, 4.0);
+        let back = lookup.source_of(a.map_point(p)).unwrap();
+        assert!(back.distance(p).get() < 1e-12);
     }
 
     /// Generic over `AffineMap` alone, the inverse is an `AffineMap` again.
@@ -383,9 +349,7 @@ mod tests {
 
     #[test]
     fn an_affine_bound_alone_gives_the_affine_inverse() {
-        assert_eq!(
-            back(&Shift(1.0, 1.0), Point::new(4.0, 6.0)),
-            Point::new(3.0, 5.0)
-        );
+        let s: Similarity<Pixels, Pixels> = Similarity::try_linear(2.0, 0.0).unwrap();
+        assert_eq!(back(&s, Point::new(4.0, 6.0)), Point::new(2.0, 3.0));
     }
 }
