@@ -107,4 +107,5 @@ assert_eq!(img.pixel_at(1, 1), Mono8::new(255));
 - Camera SDK buffers: [`camera_buffers`]
 - Large-image processing: [`large_images`]
 - Floating-point results, accuracy and ties: [`numerics`]
+- Which values may be averaged, ordered or only compared: [`scales_of_measurement`]
 - Common questions: [`faq`]

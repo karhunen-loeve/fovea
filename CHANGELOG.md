@@ -57,8 +57,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `assert_eq!` works on it. `Requirement` and `Value` are
   `#[non_exhaustive]`, so a new rule is not a breaking change.
   `fovea::Error` stays at the crate root.
-- `Error::WindowLargerThanImage { window, image }`, returned by `ssim` and
-  `ssim_map` when no position has the whole window inside the image.
+- **Breaking:** `Error::WindowLargerThanImage { window, image }`, returned
+  by `ssim` and `ssim_map` when no position has the whole window inside
+  the image. `Error` gained a variant, so an exhaustive `match` on it needs
+  an arm.
 - **Complex pixels, `pixel::ComplexF32` and `pixel::ComplexF64`.** One
   complex value `re + im·i` per pixel, laid out as two floats with `re`
   first. `*` between two of them is the complex product, so `PixelMultiply`
@@ -131,7 +133,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   height, and the position is the centroid of the derivative's lobe, which
   stays within about 0.001 px of a sub-pixel edge at σ = 1 px where the
   vertex of a parabola would be pulled up to 0.05 px towards a pixel
-  boundary. `Edges` offers the named selections `first`, `last`,
+  boundary. That figure holds for an edge with no other edge of either
+  polarity within about 7σ and no more blur than σ: the two sides of a bar
+  or a gap narrower than 7σ push each other outward (a bar of 4σ measures
+  about 0.23σ too wide), so choose σ at most W/7 for a pair of width W, and
+  an edge blurrier than σ locks towards the samples (up to 0.04 px for a
+  blur of 2 px at σ = 1 px). `Edges` offers the named selections `first`, `last`,
   `strongest` and `nearest_to`, and `pairs(first, rule)` forms edge pairs
   by a rule the caller names, `Neighbors` or `StrongestOfRun`, or one of
   their own through the `PairRule` trait. A pair's `width` is measured
@@ -207,7 +214,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `undistort_point` corrects a point measured on the camera image into the
   ideal image, `Point<Pixels>` to `Point<IdealPixels>`, so correcting a
   point twice does not compile. It works by Newton's method to 10⁻⁹ px, accepts only a point where the model is
-  one-to-one, and reports `Error::DidNotConverge` otherwise; OpenCV's
+  one-to-one, inside the fold where the distorted radius stops rising
+  (also when it rises again further out, as with `k1 < 0 < k2`), and
+  reports `Error::DidNotConverge` otherwise; OpenCV's
   default of five fixed-point steps leaves up to half a pixel in the
   corner of a strong lens.
 - **Direction types and composition.** `DestToSource(map)` and
@@ -240,7 +249,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking:** `Error::DidNotConverge { steps }`, returned by
   `undistort_point`. `Error` gained a variant, so an exhaustive `match` on
   it needs an arm.
-
 - **The discrete Fourier transform, `fovea::frequency`.**
   `dft(&img, method)` returns the `Spectrum<P, S>` of a `MonoF32` or
   `MonoF64` image in the space `S`, and `spectrum.inverse(method)` the
@@ -434,7 +442,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Error::EmptySource`, where it panicked before; `remap` under
   `Constant` fills such a target with the constant instead. Migration:
   add `?`, or `.expect(...)` where the source cannot be empty.
-
 - **Breaking:** `Error::InvalidParameter` carries a `ParameterError`
   instead of a `String`. A caller or a test now asks which rule failed
   (`e.requirement()`) and with which value (`e.value()`) instead of
@@ -451,7 +458,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   configuration as `Error::InvalidParameter`, and so does `histogram`,
   which calls `validate`.
   **Migration:** match `InvalidParameter` instead; a custom strategy's
-  `validate` returns `ParameterError::new(name, requirement, value).into()`.
+  `validate` returns `Err(ParameterError::new(name, requirement, value).into())`.
 - **Breaking:** `ssim` and `ssim_map` report a window larger than the image
   as `Error::WindowLargerThanImage` instead of `InvalidParameter`, because
   the failure is a relation between the parameters and the image, like
@@ -485,7 +492,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `HysteresisThresholds::try_new` no longer requires `C: Debug`. The bound
   existed only to print the two thresholds into the message, and the error
   now records no value for this generic pair.
-
 - **Breaking:** the channel-wise operations require `ChannelwiseMath`
   instead of `HomogeneousPixel`. That covers the combiners `AbsDiff`,
   `Max`, `Min`, `Magnitude`, `MagnitudeHypot` and `Direction` with
@@ -530,7 +536,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   std's error for an integer that does not fit, where `CoordinateI32`'s
   returned `fovea::Error`. **Migration:** `CoordinateI32` becomes
   `SignedCoordinate`; tuple literals such as `(3, -2)` still convert with
-  `.into()`, but a tuple of `i32` variables needs `as isize`.
+  `.into()`, but a tuple of `i32` variables needs `as isize`. A
+  `CoordinateI32::try_from(c)?` in a function that returns `fovea::Error`
+  no longer compiles, because `TryFromIntError` does not convert into it;
+  write the total `c.step(Offset::ZERO)`, since no pixel of an image lies
+  past `isize::MAX`.
 - **Breaking:** `BorderPolicy::pixel_at(&self, image, at: SignedCoordinate)`
   replaces `pixel_at(&self, image, x: isize, y: isize)`. The four callers in
   the crate formed that position by hand as `x as isize + dx as isize`;
@@ -539,7 +549,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `at.x` and `at.y`; a caller passes `SignedCoordinate::new(x, y)` or
   `coordinate.step(offset)`.
 - **Breaking:** an anchor is a `Coordinate`, not a `(usize, usize)` tuple:
-  `Kernel::anchor`, `Neighborhood::anchor` and `Neighborhood::with_anchor`,
+  `Kernel::anchor`, `Neighborhood::anchor`,
   `BorderPolicy::output_region`, `compute_interior_region`, and the
   `anchor` parameter of `fold_neighborhood`, `map_neighborhood` and their
   `_into` and `_fn` variants. **Migration:** `(1, 1)` becomes
@@ -559,8 +569,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `SeparableKernel::with_anchors::<HA, VA>(h_weights, v_weights)` replaces
   `with_anchors(h_weights, h_anchor, v_weights, v_anchor)`. The kernel's
   size was already const generic, and every anchor in the crate was a
-  literal. **Migration:** `with_anchor(data, Coordinate::new(0, 2))`
-  becomes `with_anchor::<0, 2>(data)`; `with_anchors(h, 0, v, 2)` becomes
+  literal. **Migration:** `with_anchor(data, (0, 2))` becomes
+  `with_anchor::<0, 2>(data)`; `with_anchors(h, 0, v, 2)` becomes
   `with_anchors::<0, 2>(h, v)`.
 - **In results:** when several vertices are equally far from the first,
   `approximate_polygon` splits the outline at the earliest of them, where
@@ -612,7 +622,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `otsu_threshold` states that the lowest of several equally good
   thresholds wins, and `Labeling` states that components are numbered in
   raster order of their first pixel. Both were already the behaviour.
-
 - **A guide page on scales of measurement.** `guide::scales_of_measurement`
   explains which operations a value admits, using Stevens' levels (nominal,
   ordinal, interval, ratio), circular scales for `Orientation` and
@@ -622,12 +631,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   systematic requires. Its section on vector quantities says how
   `ComplexF32` and `ComplexF64` map onto them, and the quick choice table of
   `guide::pixel_types` lists them.
-
 - The `analyze::edge` module documentation shows Canny in a loop over
   frames: built from its public stages, with the blur through a
   `SeparableScratch` kept across frames, so the blur allocates nothing
   after the first frame. The mask is the one `canny` gives.
-
 - **The camera-buffer guide names the stride.** *Padded rows* in
   `guide::camera_buffers` takes a plane with `ImageRef::from_strided` and
   `RowStride::bytes` in one call, where it viewed the buffer at its stride

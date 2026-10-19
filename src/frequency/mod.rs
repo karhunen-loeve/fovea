@@ -31,6 +31,22 @@
 //! choose the one parameter it needs, the radius of the weight on the
 //! frequencies.
 //!
+//! ## Filtering and convolution
+//!
+//! A spectrum is filtered in place:
+//! [`low_pass`](crate::frequency::Spectrum::low_pass),
+//! [`high_pass`](crate::frequency::Spectrum::high_pass),
+//! [`band_pass`](crate::frequency::Spectrum::band_pass) and
+//! [`band_stop`](crate::frequency::Spectrum::band_stop) take a cutoff and a
+//! [`Profile`](crate::frequency::Profile) that says how the filter passes
+//! from one to zero, [`filter`](crate::frequency::Spectrum::filter) takes
+//! any [`TransferFunction`](crate::frequency::TransferFunction), and
+//! [`apply`](crate::frequency::Spectrum::apply) a closure over the
+//! frequencies. [`convolve`](crate::frequency::convolve) convolves an image
+//! with a kernel through the transform, padding by a border policy as
+//! [`transform::convolve`](crate::transform::convolve) does, which pays off
+//! for large kernels.
+//!
 //! ## Choosing a method
 //!
 //! | Method | Sizes | Returns |

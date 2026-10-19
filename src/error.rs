@@ -216,8 +216,9 @@ pub enum Error {
     ///
     /// Returned by [`profile`](crate::measure::profile) under
     /// [`Skip`](crate::border::Skip), where an interpolation tap outside
-    /// the image has no value. Where a part lies is data, so this is an
-    /// error and not a profile with gaps.
+    /// the image has no value, and under every policy for a position more
+    /// than 2⁵² pixels from the origin. Where a part lies is data, so this
+    /// is an error and not a profile with gaps.
     CaliperOutsideImage {
         /// The first position along the path, counted in sampling steps
         /// from its start, at which a tap falls outside the image.
@@ -242,8 +243,9 @@ pub enum Error {
     ///
     /// Returned by [`try_fit`](crate::measure::try_fit) when the points
     /// coincide or spread equally in every direction (a line), lie on one
-    /// line (a circle or an ellipse), or admit no ellipse. Where the points
-    /// lie is data, so this is an error and not a panic.
+    /// line (a circle or an ellipse), admit no ellipse, or lie so far apart
+    /// that the fit overflows `f64`. Where the points lie is data, so this
+    /// is an error and not a panic.
     DegeneratePoints,
 
     /// An iterative inverse did not reach its tolerance.

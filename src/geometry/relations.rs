@@ -218,6 +218,11 @@ impl<U: LengthUnit> Segment<U> {
             line.signed_distance(self.start),
             line.signed_distance(self.end),
         );
+        // `f64::min` and `max` drop a NaN, which would report the other
+        // end's distance for a segment with a NaN end.
+        if s0.is_nan() || s1.is_nan() {
+            return (Length::new(f64::NAN), Length::new(f64::NAN));
+        }
         let (a0, a1) = (s0.abs(), s1.abs());
         let crosses = (s0 <= 0.0 && s1 >= 0.0) || (s0 >= 0.0 && s1 <= 0.0);
         let min = if crosses { 0.0 } else { a0.min(a1) };
@@ -439,6 +444,11 @@ mod tests {
             touching.distances_to(&l),
             (Length::new(0.0), Length::new(4.0))
         );
+        // A NaN end gives NaN, as `distance` does, not the other end's
+        // distance (the v0.6.0 review's C12).
+        let broken: Segment<Pixels> = Segment::new(px(f64::NAN, f64::NAN), px(10.0, 3.0));
+        let (min, max) = broken.distances_to(&l);
+        assert!(min.get().is_nan() && max.get().is_nan());
     }
 
     #[test]

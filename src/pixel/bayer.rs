@@ -83,7 +83,8 @@
 //!
 //! let raw = Image::fill(8, 8, BayerRggb12::new(2048));
 //! // ERROR: `BayerRggb12: LinearSpace` is not satisfied.
-//! let _ = resize(&raw, Size::new(4, 4), Bilinear)?;
+//! let _: Image<BayerRggb12> = resize(&raw, Size::new(4, 4), Bilinear)?;
+//! # Ok::<(), fovea::Error>(())
 //! ```
 //!
 //! Alpha-style blending of two samples:

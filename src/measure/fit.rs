@@ -96,8 +96,9 @@ pub struct TotalLeastSquares;
 
 /// The circle through points by Taubin's method.
 ///
-/// An algebraic fit in closed form, with no iteration that could diverge,
-/// whose constraint removes most of the plain algebraic fit's bias towards
+/// An algebraic fit whose solution is the smallest root of a cubic, found
+/// by Newton's method from zero, which rises monotonically to it and cannot
+/// diverge. Its constraint removes most of the plain algebraic fit's bias towards
 /// small circles; on a short arc it stays close to the geometric fit. It
 /// needs three points that do not lie on one line.
 ///
@@ -121,7 +122,10 @@ pub struct Taubin;
 /// Flusser.
 ///
 /// An algebraic fit in closed form whose constraint admits only ellipses,
-/// so it returns one even for points from a short arc. It needs five
+/// so it returns one even for points from a short arc, where the ellipse
+/// can be far from the true one while its residuals stay small: a 60° arc
+/// of a 100 × 40 ellipse with 0.05 px of noise fits as 75 × 29 at an RMS
+/// of 0.05 px. Check the axes against what the part allows. It needs five
 /// points that do not lie on one line. The residuals are exact geometric
 /// distances to the ellipse, not the algebraic error the method minimises.
 ///
@@ -722,7 +726,9 @@ impl<U: LengthUnit> Fit<Ellipse<U>> {
 ///   finite; its index is recorded.
 /// - [`Error::TooFewPoints`] if there are fewer points than
 ///   [`Estimator::MIN_POINTS`], or if [`Tukey`] leaves fewer used.
-/// - [`Error::DegeneratePoints`] if the points determine no unique element.
+/// - [`Error::DegeneratePoints`] if the points determine no unique element,
+///   or lie so far apart (beyond about 10¹⁵⁴) that the fit or its residuals
+///   overflow `f64`.
 ///
 /// # Example
 ///
@@ -823,6 +829,11 @@ where
         max_residual = max_residual.max(r.abs());
         above = above.max(r);
         below = below.max(-r);
+    }
+    // `f64::max` drops a NaN, so a figure that overflowed would read as
+    // zero; the sum of squares sees every residual and keeps it.
+    if !(rms_residual.is_finite() && (above + below).is_finite()) {
+        return Err(Error::DegeneratePoints);
     }
 
     let (element, extent) = E::finish(element, points, &used);
@@ -1069,6 +1080,26 @@ mod tests {
             try_fit(&same, Fitzgibbon, AllPoints).unwrap_err(),
             Error::DegeneratePoints
         );
+    }
+
+    #[test]
+    fn a_line_over_points_too_far_apart_for_f64_is_an_error() {
+        // The v0.6.0 review's C11: past about 1e155 px the scatter
+        // overflows; the line came back with a NaN direction and an RMS of
+        // NaN beside a maximum residual of 0.
+        let far: Vec<_> = (0..6)
+            .map(|k| px(k as f64 * 1e155, 0.5 * k as f64 * 1e155 + (k % 2) as f64))
+            .collect();
+        assert_eq!(
+            try_fit(&far, TotalLeastSquares, AllPoints).unwrap_err(),
+            Error::DegeneratePoints
+        );
+        // Below the overflow the fit is fine.
+        let near: Vec<_> = (0..6)
+            .map(|k| px(k as f64 * 1e150, 0.5 * k as f64 * 1e150))
+            .collect();
+        let fit = try_fit(&near, TotalLeastSquares, AllPoints).unwrap();
+        assert!(fit.rms_residual().get().is_finite());
     }
 
     // ── Circle ──────────────────────────────────────────────────────────

@@ -2199,4 +2199,47 @@ mod bayer_roi_tests {
         assert_eq!(roi.pixel_at(1, 1), Mono8::new(0));
         assert_eq!(right[0].pixel_at(0, 0), Mono8::new(7));
     }
+
+    #[test]
+    fn a_shared_roi_of_an_empty_rect_at_the_bottom_edge_touches_no_pointer() {
+        // The v0.6.0 review's C1: an empty rect at `y = height` resolves to
+        // an offset past the end of the allocation when the stride is padded
+        // or `left > 0`. Under `cargo +nightly miri test` forming that
+        // pointer was undefined behaviour; the view must come back empty.
+        use crate::image::RowStride;
+        use crate::pixel::Mono8;
+
+        let mut data = [Mono8::new(0); 11];
+        let view = ImageRefMut::from_strided(3, 3, RowStride::pixels(4), &mut data).unwrap();
+        let roi = view
+            .roi(Rectangle::new(Coordinate::new(0, 3), Size::new(3, 0)))
+            .unwrap();
+        assert_eq!(roi.size(), Size::new(3, 0));
+
+        let mut data = [Mono8::new(0); 16];
+        let view = ImageRefMut::new(4, 4, &mut data).unwrap();
+        let roi = view
+            .roi(Rectangle::new(Coordinate::new(1, 4), Size::new(3, 0)))
+            .unwrap();
+        assert_eq!(roi.size(), Size::new(3, 0));
+        assert!(roi.get(0, 0).is_none());
+    }
+
+    #[test]
+    fn a_shared_roi_of_zero_width_hands_out_empty_rows() {
+        // The other half of C1: a zero-width roi was built over an empty
+        // slice with the parent's stride, so `row(2)` indexed past it.
+        use crate::image::{RasterImage, RowStride};
+        use crate::pixel::Mono8;
+
+        let mut data = [Mono8::new(0); 11];
+        let view = ImageRefMut::from_strided(3, 3, RowStride::pixels(4), &mut data).unwrap();
+        let roi = view
+            .roi(Rectangle::new(Coordinate::new(1, 0), Size::new(0, 3)))
+            .unwrap();
+        assert_eq!(roi.size(), Size::new(0, 3));
+        for y in 0..3 {
+            assert!(roi.row(y).is_empty());
+        }
+    }
 }

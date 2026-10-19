@@ -12,8 +12,9 @@
 //!   sizes that exceed L2 (= a few megabytes on modern x86).
 //!
 //! Two **alternative** implementations are benched alongside the
-//! production ones to quantify what we leave on the table by keeping
-//! the naïve loops:
+//! production ones to quantify what the production loops leave on the
+//! table (the production transpose is blocked, the flips are plain
+//! loops):
 //!
 //! - `flip_h_zip`: replaces the `dst[w-1-x] = src[x]` index pair with
 //!   a `zip(src.iter(), dst.iter_mut().rev())` loop. Removes any

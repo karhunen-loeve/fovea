@@ -85,7 +85,8 @@ use fovea::pixel::Srgb8;
 use fovea::transform::{Bilinear, resize};
 
 let srgb = Image::fill(4, 4, Srgb8::new(128, 128, 128));
-let _ = resize(&srgb, Size::new(8, 8), Bilinear)?;
+let _: Image<Srgb8> = resize(&srgb, Size::new(8, 8), Bilinear)?;
+# Ok::<(), fovea::Error>(())
 ```
 
 Use `SrgbGamma` to move between sRGB and linear-light pixels.

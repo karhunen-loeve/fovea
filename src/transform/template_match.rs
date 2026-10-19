@@ -541,10 +541,13 @@ type ChannelSums<P> =
 
 /// Running accumulator for Normalized Cross-Correlation.
 ///
-/// Tracks three sums per output position:
-/// - `sum_i`: Σ I(c) over all template positions, one sum per channel
-/// - `sum_i_sq`: Σ I(c)² over all template positions and channels
-/// - `cross`: Σ I(c)·T(c) over all template positions and channels
+/// The patch enters shifted by the template's mean, `D(c) = I(c) − mean_c(T)`,
+/// so a large offset common to patch and template cancels before it is
+/// squared. Tracks three sums per output position:
+/// - `sum_i`: Σ D(c) over all template positions, one sum per channel
+/// - `sum_i_sq`: Σ D(c)² over all template positions and channels
+/// - `cross`: Σ D(c)·T'(c), with `T'(c) = T(c) − mean_c(T)`, over all
+///   template positions and channels
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct NccAccum<S> {
     sum_i: S,
@@ -558,7 +561,9 @@ pub(crate) struct NccAccum<S> {
 ///
 /// Precomputed template statistics are stored in the struct:
 /// - `template_mean`: the mean of T(c) over the template, one per channel
-/// - `template_var`: Σ (T(c) − mean)² / n, each channel about its own mean
+/// - `template_var`: Σ (T(c) − mean)² / n, each channel about its own mean,
+///   summed in a second pass over the centred values; zero for a constant
+///   template
 /// - `m`: pixel count of the template
 /// - `n`: total element count (pixels × channels)
 pub(crate) struct NccFold<P: HomogeneousPixel> {
@@ -588,12 +593,14 @@ where
 
     #[inline(always)]
     fn accumulate(&self, acc: &mut Self::Accumulator, item: FoldItem<P, P>) {
+        let means = self.template_mean.as_ref();
         for (c, sum) in acc.sum_i.as_mut().iter_mut().enumerate() {
             let i_val: f64 = item.pixel.channel(c).to_accumulator().into();
             let t_val: f64 = item.weight.channel(c).to_accumulator().into();
-            *sum += i_val;
-            acc.sum_i_sq = i_val.mul_add(i_val, acc.sum_i_sq);
-            acc.cross = i_val.mul_add(t_val, acc.cross);
+            let d = i_val - means[c];
+            *sum += d;
+            acc.sum_i_sq = d.mul_add(d, acc.sum_i_sq);
+            acc.cross = d.mul_add(t_val - means[c], acc.cross);
         }
     }
 
@@ -602,22 +609,26 @@ where
         let n = self.n;
         let channels = P::CHANNEL_COUNT as f64;
         // Each channel about its own mean: the n-th part of Σ_c m·mean_c²
-        // is Σ_c mean_c² / channels, and likewise for the cross term.
+        // is Σ_c mean_c² / channels. The cross term needs no correction,
+        // because T' sums to zero in every channel.
         let mut mean_i_sq = 0.0;
-        let mut mean_cross = 0.0;
-        for (sum, mean_t) in acc.sum_i.as_ref().iter().zip(self.template_mean.as_ref()) {
+        for sum in acc.sum_i.as_ref() {
             let mean_i = sum / self.m;
             mean_i_sq += mean_i * mean_i;
-            mean_cross += mean_i * mean_t;
         }
-        let var_i = acc.sum_i_sq / n - mean_i_sq / channels;
-        let cov = acc.cross / n - mean_cross / channels;
-        let denom = (var_i * self.template_var).sqrt();
-        if denom < 1e-12 {
-            MonoF32(0.0)
-        } else {
-            MonoF32((cov / denom) as f32)
+        let mean_sq = acc.sum_i_sq / n;
+        let var_i = mean_sq - mean_i_sq / channels;
+        let cov = acc.cross / n;
+        // On a constant patch `var_i` is rounding residue of either sign,
+        // up to about n·ε of `mean_sq`; at or below that bound the patch
+        // counts as constant. A NaN, which every comparison fails, takes
+        // the zero branch as well.
+        let constant = var_i.is_nan() || var_i <= 4.0 * n * f64::EPSILON * mean_sq;
+        if constant || self.template_var.is_nan() || self.template_var <= 0.0 {
+            return MonoF32(0.0);
         }
+        let score = cov / (var_i * self.template_var).sqrt();
+        MonoF32(score.clamp(-1.0, 1.0) as f32)
     }
 }
 
@@ -640,8 +651,13 @@ where
 /// - A score of `1.0` means perfect positive correlation.
 /// - A score of `-1.0` means perfect negative correlation.
 /// - A score of `0.0` means no linear correlation, or that the patch or
-///   the template has no variance (a constant region). OpenCV scores a
-///   constant template `1.0` everywhere instead.
+///   the template has no variance (a constant region) or holds a NaN.
+///   OpenCV scores a constant template `1.0` everywhere instead.
+///
+/// No score is NaN, and none leaves `[-1.0, 1.0]`: the variances are
+/// computed about the template's mean, which keeps a constant float patch
+/// from cancelling to a negative variance, and rounding cannot carry a
+/// perfect match past `1.0`.
 ///
 /// # Changes in illumination
 ///
@@ -721,26 +737,45 @@ where
 
         // Precompute template statistics, one mean per channel.
         let channels = <I::Pixel as HomogeneousPixel>::CHANNEL_COUNT;
+        // Two passes, the means first, so the variance sums centred values
+        // and cannot cancel to a negative number on a large offset.
         let mut template_sum: ChannelSums<I::Pixel> = Array::from_fn(|_| 0.0);
-        let mut template_sum_sq = 0.0f64;
         for y in 0..th {
             for x in 0..tw {
                 let p = template.pixel_at(x, y);
                 for (c, sum) in template_sum.as_mut().iter_mut().enumerate() {
                     let v: f64 = p.channel(c).to_accumulator().into();
                     *sum += v;
-                    template_sum_sq = v.mul_add(v, template_sum_sq);
                 }
             }
         }
         let m = (tw * th) as f64;
         let n = (tw * th * channels) as f64;
         let template_mean: ChannelSums<I::Pixel> = Array::from_fn(|c| template_sum.as_ref()[c] / m);
+        let mut template_sum_sq = 0.0f64;
+        for y in 0..th {
+            for x in 0..tw {
+                let p = template.pixel_at(x, y);
+                for (c, mean) in template_mean.as_ref().iter().enumerate() {
+                    let v: f64 = p.channel(c).to_accumulator().into();
+                    let d = v - mean;
+                    template_sum_sq = d.mul_add(d, template_sum_sq);
+                }
+            }
+        }
+        // A constant template leaves only the rounding of its mean, at most
+        // about n·ε of it, in every centred value; such a variance is zero.
         let mut mean_t_sq = 0.0;
         for mean in template_mean.as_ref() {
             mean_t_sq += mean * mean;
         }
-        let template_var = template_sum_sq / n - mean_t_sq / channels as f64;
+        let residue = 4.0 * n * f64::EPSILON;
+        let template_var = template_sum_sq / n;
+        let template_var = if template_var > residue * residue * mean_t_sq / channels as f64 {
+            template_var
+        } else {
+            0.0
+        };
 
         fold_neighborhood_into(
             image,
@@ -1206,6 +1241,76 @@ mod tests {
         assert_eq!(result.width(), 2);
         assert!((result.pixel_at(0, 0).0 - 1.0).abs() < 1e-6);
         assert!((result.pixel_at(1, 0).0 - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn ncc_scores_a_constant_float_window_zero_not_nan() {
+        // The v0.6.0 review's C2: the one-pass variance of a constant float
+        // window cancelled to a tiny negative number, and `sqrt` gave NaN.
+        let image: Image<MonoF32> = Image::fill(20, 20, MonoF32::new(0.1));
+        let template: Image<MonoF32> = Image::generate(11, 11, |x, y| {
+            MonoF32::new(((x * 3 + y * 7) % 11) as f32 / 10.0)
+        });
+        let result = match_template(&image, &template, NCC).unwrap();
+        for y in 0..result.height() {
+            for x in 0..result.width() {
+                assert_eq!(result.pixel_at(x, y), MonoF32(0.0), "at ({x}, {y})");
+            }
+        }
+    }
+
+    #[test]
+    fn ncc_finds_a_part_on_a_dark_float_background() {
+        // C2's probe: a part on a background of 7/255 scored 1.0 at the
+        // match, but NaN around it suppressed the peak in any peak search.
+        let background = 7.0 / 255.0;
+        let part = |x: usize, y: usize| ((x * 5 + y * 3) % 7) as f32 / 10.0 + 0.2;
+        let image: Image<MonoF32> = Image::generate(30, 30, |x, y| {
+            if (12..19).contains(&x) && (9..16).contains(&y) {
+                MonoF32::new(part(x - 12, y - 9))
+            } else {
+                MonoF32::new(background)
+            }
+        });
+        let template: Image<MonoF32> = Image::generate(7, 7, |x, y| MonoF32::new(part(x, y)));
+        let result = match_template(&image, &template, NCC).unwrap();
+        let mut best = (0, 0, f32::MIN);
+        for y in 0..result.height() {
+            for x in 0..result.width() {
+                let score = result.pixel_at(x, y).0;
+                assert!(score.is_finite(), "NaN at ({x}, {y})");
+                if score > best.2 {
+                    best = (x, y, score);
+                }
+            }
+        }
+        assert_eq!((best.0, best.1), (12, 9));
+        assert!((best.2 - 1.0).abs() < 1e-6, "score {}", best.2);
+    }
+
+    #[test]
+    fn ncc_scores_do_not_change_with_a_large_common_offset() {
+        // C2's second half: with a large offset the one-pass sums lost the
+        // score to cancellation and it exceeded 1. Shifted by the template
+        // mean, an offset of 1e7 (exact in f32 for these values) changes
+        // nothing.
+        let pattern = |x: usize, y: usize| ((x * 7 + y * 13) % 17) as f32;
+        let tpl = |x: usize, y: usize| ((x * 11 + y * 3) % 13) as f32;
+        let score = |offset: f32| {
+            let image: Image<MonoF32> =
+                Image::generate(12, 12, |x, y| MonoF32::new(offset + pattern(x, y)));
+            let template: Image<MonoF32> =
+                Image::generate(5, 5, |x, y| MonoF32::new(offset + tpl(x, y)));
+            match_template(&image, &template, NCC).unwrap()
+        };
+        let plain = score(0.0);
+        let shifted = score(1.0e7);
+        for y in 0..plain.height() {
+            for x in 0..plain.width() {
+                let (a, b) = (plain.pixel_at(x, y).0, shifted.pixel_at(x, y).0);
+                assert!((a - b).abs() < 1e-6, "at ({x}, {y}): {a} vs {b}");
+            }
+        }
     }
 
     #[test]

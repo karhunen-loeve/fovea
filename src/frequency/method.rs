@@ -1,6 +1,6 @@
 //! The DFT algorithms as values, and the transform's entry point.
 
-use super::engine::{Axis, AxisTables, Bluestein as BluesteinTables, Radix2 as Radix2Tables};
+use super::engine::{Axis, AxisTables, Bluestein as BluesteinTables, Cplx, Radix2 as Radix2Tables};
 use super::spectrum::{Spectrum, SpectrumSource};
 use crate::geometry::PixelSpace;
 use crate::image::{Image, RasterImage};
@@ -8,6 +8,14 @@ use crate::{Error, Size};
 
 /// The tables along x and along y.
 type Axes<C> = AxisTables<C>;
+
+/// Whether `size` has no pixels: then no row and no column is transformed,
+/// whatever the length of the other side, and every method builds tables
+/// of length zero. A side's length alone would make an image of 0 x n cost
+/// tables of length n.
+fn is_empty(size: Size) -> bool {
+    size.width == 0 || size.height == 0
+}
 
 mod sealed {
     use super::{Axes, DftMethod, Spectrum, SpectrumSource};
@@ -135,7 +143,7 @@ impl Radix2 {
     /// of two, or no pixels at all.
     #[must_use]
     pub fn accepts(self, size: Size) -> bool {
-        size.area() == 0 || (size.width.is_power_of_two() && size.height.is_power_of_two())
+        is_empty(size) || (size.width.is_power_of_two() && size.height.is_power_of_two())
     }
 
     /// The smallest size `Radix2` accepts that is at least `size`: every
@@ -148,7 +156,7 @@ impl Radix2 {
     /// a size no image can have.
     #[must_use]
     pub fn next_size(self, size: Size) -> Size {
-        if size.area() == 0 {
+        if is_empty(size) {
             return size;
         }
         let up = |n: usize| {
@@ -166,8 +174,7 @@ impl Radix2 {
                 size,
             });
         }
-        if size.area() == 0 {
-            // No row and no column is transformed.
+        if is_empty(size) {
             return Ok(AxisTables::new(
                 Axis::Radix2(Radix2Tables::new(0)),
                 Axis::Radix2(Radix2Tables::new(0)),
@@ -221,8 +228,9 @@ impl<P: SpectrumSource> sealed::Method<P> for Radix2 {
 ///
 /// A transform of length n becomes a circular convolution with the chirp
 /// `exp(−iπ·j²/n)`, which radix-2 transforms of the power of two at least
-/// 2n − 1 evaluate. It accepts every size, and its cost does not jump
-/// between neighbouring sizes; on a size [`Radix2`] accepts as well it
+/// 2n − 1 evaluate. It accepts every size. Its cost follows that power of
+/// two: it doubles from n = 2ᵏ to n = 2ᵏ + 1 and changes little in
+/// between. On a size [`Radix2`] accepts as well it
 /// takes three to four times as long (measured from 512 × 512 to
 /// 2048 × 2048 in `f32`).
 ///
@@ -264,6 +272,12 @@ impl Bluestein {
     pub fn next_size(self, size: Size) -> Size {
         size
     }
+
+    fn axes<C: Cplx>(self, size: Size) -> Axes<C> {
+        let side =
+            |len| Axis::Bluestein(BluesteinTables::new(if is_empty(size) { 0 } else { len }));
+        AxisTables::new(side(size.width), side(size.height))
+    }
 }
 
 impl<P: SpectrumSource> DftMethod<P> for Bluestein {
@@ -277,33 +291,23 @@ impl<P: SpectrumSource> sealed::Method<P> for Bluestein {
     }
 
     fn tables(&self, size: Size) -> Result<Axes<P::Bin>, Error> {
-        Ok(AxisTables::new(
-            Axis::Bluestein(BluesteinTables::new(size.width)),
-            Axis::Bluestein(BluesteinTables::new(size.height)),
-        ))
+        Ok(self.axes(size))
     }
 
     fn transform<I: RasterImage<Pixel = P>>(
         &self,
         src: &I,
     ) -> <Self as DftMethod<P>>::Output<I::Space> {
-        let Size { width, height } = src.size();
-        Spectrum::forward(
-            src,
-            &Axis::Bluestein(BluesteinTables::new(width)),
-            &Axis::Bluestein(BluesteinTables::new(height)),
-        )
+        let AxisTables { x, y } = self.axes(src.size());
+        Spectrum::forward(src, &x, &y)
     }
 
     fn invert<S: PixelSpace>(
         &self,
         spectrum: &Spectrum<P, S>,
     ) -> <Self as DftMethod<P>>::InverseOutput<S> {
-        let Size { width, height } = spectrum.source_size();
-        spectrum.invert(
-            &Axis::Bluestein(BluesteinTables::new(width)),
-            &Axis::Bluestein(BluesteinTables::new(height)),
-        )
+        let AxisTables { x, y } = self.axes(spectrum.source_size());
+        spectrum.invert(&x, &y)
     }
 }
 
@@ -345,12 +349,17 @@ impl Auto {
         size
     }
 
-    fn axis<P: SpectrumSource>(len: usize) -> Axis<P::Bin> {
-        if len == 0 || len.is_power_of_two() {
-            Axis::Radix2(Radix2Tables::new(len))
-        } else {
-            Axis::Bluestein(BluesteinTables::new(len))
-        }
+    fn axes<C: Cplx>(self, size: Size) -> Axes<C> {
+        let side = |len: usize| {
+            if is_empty(size) {
+                Axis::Radix2(Radix2Tables::new(0))
+            } else if len.is_power_of_two() {
+                Axis::Radix2(Radix2Tables::new(len))
+            } else {
+                Axis::Bluestein(BluesteinTables::new(len))
+            }
+        };
+        AxisTables::new(side(size.width), side(size.height))
     }
 }
 
@@ -365,26 +374,23 @@ impl<P: SpectrumSource> sealed::Method<P> for Auto {
     }
 
     fn tables(&self, size: Size) -> Result<Axes<P::Bin>, Error> {
-        Ok(AxisTables::new(
-            Self::axis::<P>(size.width),
-            Self::axis::<P>(size.height),
-        ))
+        Ok(self.axes(size))
     }
 
     fn transform<I: RasterImage<Pixel = P>>(
         &self,
         src: &I,
     ) -> <Self as DftMethod<P>>::Output<I::Space> {
-        let Size { width, height } = src.size();
-        Spectrum::forward(src, &Self::axis::<P>(width), &Self::axis::<P>(height))
+        let AxisTables { x, y } = self.axes(src.size());
+        Spectrum::forward(src, &x, &y)
     }
 
     fn invert<S: PixelSpace>(
         &self,
         spectrum: &Spectrum<P, S>,
     ) -> <Self as DftMethod<P>>::InverseOutput<S> {
-        let Size { width, height } = spectrum.source_size();
-        spectrum.invert(&Self::axis::<P>(width), &Self::axis::<P>(height))
+        let AxisTables { x, y } = self.axes(spectrum.source_size());
+        spectrum.invert(&x, &y)
     }
 }
 
@@ -724,6 +730,27 @@ mod tests {
     }
 
     #[test]
+    fn an_empty_image_costs_nothing_however_long_its_other_side() {
+        // The v0.6.0 review's C7: tables and a row buffer of the length of
+        // the one non-empty side took seconds at 4 000 001 and aborted the
+        // process at 2^40. A size without pixels needs no table at all.
+        for size in [Size::new(1 << 40, 0), Size::new(0, 1 << 40)] {
+            let img = Image::<MonoF32>::zero(size.width, size.height);
+            for kind in [Kind::Radix2, Kind::Bluestein, Kind::Auto] {
+                let spectrum = forward(kind, &img);
+                assert_eq!(spectrum.source_size(), size, "{kind:?}");
+                assert!(spectrum.stored().0.is_empty());
+                assert_eq!(backward(kind, &spectrum).size(), size, "{kind:?}");
+            }
+            let tables = |t: Axes<ComplexF32>| (t.x.len(), t.y.len());
+            let m = |method: &dyn Fn(Size) -> Axes<ComplexF32>| tables(method(size));
+            assert_eq!(m(&|s| Bluestein.axes(s)), (0, 0));
+            assert_eq!(m(&|s| Auto.axes(s)), (0, 0));
+            assert_eq!(m(&|s| Radix2.axes::<MonoF32>(s).unwrap()), (0, 0));
+        }
+    }
+
+    #[test]
     fn auto_runs_radix2_on_powers_of_two_and_bluestein_otherwise() {
         let mut rng = Rng::new(90);
         let pow2: Vec<f64> = (0..16 * 8).map(|_| rng.value()).collect();
@@ -753,6 +780,15 @@ mod tests {
         );
         assert!(Radix2.accepts(Size::new(0, 5)));
         assert_eq!(Radix2.next_size(Size::new(0, 5)), Size::new(0, 5));
+        // A size whose area overflows `usize` is answered, not a panic
+        // (the v0.6.0 review's C11).
+        let huge = Size::new(1 << 40, 1 << 40);
+        assert!(Radix2.accepts(huge));
+        assert!(!Radix2.accepts(Size::new((1 << 40) + 1, 1 << 40)));
+        assert_eq!(
+            Radix2.next_size(Size::new((1 << 40) + 1, 1 << 40)),
+            Size::new(1 << 41, 1 << 40)
+        );
         assert_eq!(Radix2.next_size(Size::new(512, 3)), Size::new(512, 4));
         for size in [Size::new(1920, 1080), Size::new(0, 7)] {
             assert!(Bluestein.accepts(size) && Auto.accepts(size));

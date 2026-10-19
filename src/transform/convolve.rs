@@ -176,6 +176,11 @@ where
 /// **Note:** Convolution flips the kernel before applying it. For the
 /// unflipped variant (cross-correlation), see [`correlate`]. The
 /// [module docs](crate::transform) explain the mathematical distinction.
+///
+/// For a large kernel on a float image,
+/// [`frequency::convolve`](crate::frequency::convolve) computes the same
+/// convolution through the Fourier transform, faster from about 21 × 21;
+/// its documentation gives the measurements.
 #[must_use]
 pub fn convolve<I, K, B, P, Out>(image: &I, kernel: &K, border: &B) -> Image<Out, I::Space>
 where

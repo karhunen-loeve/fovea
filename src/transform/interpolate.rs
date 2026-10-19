@@ -33,7 +33,9 @@ use crate::error::{Error, ParameterError, Requirement, Value};
 /// `floor(t) − RADIUS + 1` to `floor(t) + RADIUS`, with weights
 /// `weight(k − t)`. The engines normalise the weights of each position to sum
 /// to one, so a flat image stays flat even for a kernel whose weights do not
-/// sum to one exactly, such as Lanczos.
+/// sum to one exactly, such as Lanczos, up to the precision of the `f32`
+/// weights: a flat `Mono32` of 4·10⁹ can move by up to about 160 counts
+/// under `Lanczos3`.
 ///
 /// `RADIUS` is a **contract**: the weight must be zero for `|d| >= RADIUS`,
 /// and no engine reads further. A tap whose weight is exactly zero is not
@@ -74,7 +76,10 @@ use crate::error::{Error, ParameterError, Requirement, Value};
 /// ```
 pub trait InterpolationKernel: Copy {
     /// Taps on each side of the position: the weight is zero for
-    /// `|d| >= RADIUS`.
+    /// `|d| >= RADIUS`. At least 1, since a kernel must read the samples
+    /// on either side of the position; a kernel with `RADIUS = 0` fails to
+    /// build with [`sample`](crate::analyze::sampling::sample) and
+    /// [`resize`](crate::transform::resize).
     const RADIUS: usize;
 
     /// The weight of a sample at signed distance `d`, in pixels, from the
@@ -392,6 +397,12 @@ impl AxisWeights {
         widen: bool,
     ) -> Self {
         debug_assert!(in_len > 0, "an empty axis has no samples to weight");
+        const {
+            assert!(
+                K::RADIUS >= 1,
+                "an interpolation kernel has a RADIUS of at least 1"
+            )
+        };
         let scale = in_len as f64 / out_len.max(1) as f64;
         let stretch = if widen { scale.max(1.0) } else { 1.0 };
         let reach = K::RADIUS as f64 * stretch;

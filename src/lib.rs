@@ -16,6 +16,7 @@
 //! - [`guide::camera_buffers`] — raw bytes, camera SDK buffers, and byte layout
 //! - [`guide::large_images`] — slices, rows, tiles, sliding windows, and parallel runtimes
 //! - [`guide::numerics`]: which bits are stable, how accuracy is documented, and tie rules
+//! - [`guide::scales_of_measurement`]: which pixel values may be averaged, ordered or only compared
 
 extern crate self as fovea;
 

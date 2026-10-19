@@ -100,7 +100,8 @@ impl AxisTaps {
 /// Also `None` for a non-finite position and for one further than `2^52`
 /// pixels from the origin, where `f64` no longer separates neighbouring
 /// pixels. The weights are normalised to sum to one over all the kernel's
-/// taps, so a flat image samples flat; the normalisation never runs over the
+/// taps, so a flat image samples flat up to the precision of the `f32`
+/// weights; the normalisation never runs over the
 /// in-image taps alone, which would shift the kernel's centre of mass and with
 /// it a measured position.
 ///
@@ -174,6 +175,31 @@ impl AxisTaps {
 /// // ERROR: the kernel is wider than the point sampler's buffer.
 /// let _ = sample(&img, Point::new(8.5, 8.5), Lanczos::<9>, &Clamp);
 /// ```
+///
+/// So does a kernel of your own with a `RADIUS` of zero, which would read
+/// no sample at all:
+///
+/// ```compile_fail
+/// use fovea::{Pixels, Point};
+/// use fovea::analyze::sampling::sample;
+/// use fovea::border::Clamp;
+/// use fovea::image::Image;
+/// use fovea::pixel::MonoF32;
+/// use fovea::transform::InterpolationKernel;
+///
+/// #[derive(Clone, Copy)]
+/// struct Point0;
+/// impl InterpolationKernel for Point0 {
+///     const RADIUS: usize = 0;
+///     fn weight(&self, _: f64) -> f64 {
+///         0.0
+///     }
+/// }
+///
+/// let img = Image::fill(32, 32, MonoF32::new(1.0));
+/// // ERROR: an interpolation kernel has a RADIUS of at least 1.
+/// let _: Option<MonoF32> = sample(&img, Point::<Pixels>::new(8.5, 8.5), Point0, &Clamp);
+/// ```
 pub fn sample<I, K, B, Q>(image: &I, at: Point<I::Space>, kernel: K, border: &B) -> Option<Q>
 where
     I: ImageView,
@@ -185,7 +211,11 @@ where
         assert!(
             K::RADIUS <= MAX_SAMPLE_RADIUS,
             "the kernel is wider than the point sampler's buffer of MAX_SAMPLE_RADIUS taps a side"
-        )
+        );
+        assert!(
+            K::RADIUS >= 1,
+            "an interpolation kernel has a RADIUS of at least 1"
+        );
     };
     let usable = |t: f64| t.is_finite() && t.abs() < MAX_POSITION;
     if !(usable(at.x) && usable(at.y)) {

@@ -27,8 +27,10 @@ new configuration to validate.
 
 Where the accuracy of an operation depends on a choice it makes, its
 documentation names the choice and what follows from it. Two examples:
-template matching accumulates in `f64`, so a large template loses no
-precision, and the image statistics compute the variance with Welford's
+NCC template matching accumulates in `f64` and subtracts the template's mean
+from every pixel before it squares one, so neither a large template nor a
+large offset common to image and template cancels the variance to noise, and
+the image statistics compute the variance with Welford's
 recurrence, which avoids the cancellation of `E[x²] − E[x]²` on data with a
 large offset. Such a choice holds for every input the operation accepts, not
 only for typical image sizes.

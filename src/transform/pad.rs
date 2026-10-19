@@ -117,6 +117,7 @@ pub struct Margins {
 /// let img = Image::fill(3, 2, Mono8::new(1));
 /// // ERROR: `Skip: FullFrameBorder<_>` is not satisfied.
 /// let _ = pad(&img, Size::new(4, 4), &Skip)?;
+/// # Ok::<(), fovea::Error>(())
 /// ```
 pub fn pad<I, G, B>(img: &I, geometry: G, border: &B) -> Result<Image<I::Pixel, I::Space>, Error>
 where

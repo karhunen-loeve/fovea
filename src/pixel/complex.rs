@@ -140,7 +140,8 @@ macro_rules! impl_complex {
                 self.re.hypot(self.im)
             }
 
-            /// The argument of `z` in radians, in `(−π, π]`, as `atan2(im, re)`.
+            /// The argument of `z` in radians, in `[−π, π]`, as `atan2(im, re)`:
+            /// `−π` for a negative real part with an imaginary part of `−0.0`.
             #[must_use]
             #[inline]
             pub fn phase(self) -> $F {

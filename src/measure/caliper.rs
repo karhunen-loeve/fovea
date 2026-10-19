@@ -12,11 +12,14 @@ use crate::image::ImageView;
 use crate::pixel::{HomogeneousPixel, LinearPixel, LinearSpace, SingleChannel};
 use crate::transform::InterpolationKernel;
 
-/// The most samples a caliper takes along its path, and across it.
+/// The most samples a caliper takes along its path, and the most lines
+/// on each side of its centre line across it.
 ///
 /// A bound on the buffer a profile allocates. A path of 16 000 pixels
 /// sampled every thousandth of a pixel stays below it; a step that is
 /// accidentally tiny is reported as an error instead of exhausting memory.
+/// It bounds the memory, not the work: with both counts near the bound, a
+/// profile interpolates up to about 2⁴⁹ times.
 pub const MAX_CALIPER_SAMPLES: usize = 1 << 24;
 
 /// The path of a caliper.
@@ -451,7 +454,9 @@ impl<S> Profile<S> {
 ///
 /// [`Error::CaliperOutsideImage`] if a tap of the kernel falls outside the
 /// image under a policy that does not extend it, such as `Skip`, naming the
-/// first position at which it happens.
+/// first position at which it happens; under any policy also for a
+/// position further than 2⁵² pixels from the origin, where the sampler has
+/// no value.
 ///
 /// # Example
 ///

@@ -25,7 +25,9 @@ type M3 = [[f64; 3]; 3];
 /// only up to scale: multiplying it by a non-zero number gives the same
 /// mapping. Construction rejects a matrix that is not finite or not
 /// invertible, and stores the inverse, so [`inverse`](Self::inverse)
-/// cannot fail.
+/// cannot fail. Invertibility is judged on the matrix as given, so a
+/// scale far from one, such as the identity times 10⁻¹¹⁰, can be rejected
+/// though the mapping is the same.
 ///
 /// # Example
 ///

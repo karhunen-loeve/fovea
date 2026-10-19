@@ -13,8 +13,10 @@ use crate::{Coordinate, Rectangle, SignedCoordinate, Size};
 /// The `fold_neighborhood` engine splits iteration into an **interior hot path**
 /// (where the full kernel fits inside the image — no policy calls needed) and a
 /// **boundary cold path** (where `pixel_at` is called for out-of-bounds
-/// coordinates). This means `pixel_at` is only ever invoked for the thin border
-/// strip, making per-call overhead irrelevant.
+/// coordinates), so there `pixel_at` runs only for the thin border strip and
+/// its per-call overhead is irrelevant. Other callers use it more widely:
+/// [`pad`](crate::transform::pad) calls it for every output pixel, and
+/// [`sample`](crate::analyze::sampling::sample) for in-image taps as well.
 ///
 /// # Built-in policies
 ///
@@ -50,8 +52,10 @@ where
 {
     /// Fetch a pixel, handling out-of-bounds coordinates via the policy.
     ///
-    /// The `fold_neighborhood` engine guarantees this is called **only** for
-    /// boundary positions — interior positions use direct slice access.
+    /// The `fold_neighborhood` engine calls this **only** for boundary
+    /// positions and reads interior positions directly. Other callers, such
+    /// as [`pad`](crate::transform::pad), call it for in-image positions
+    /// too, where it must return the pixel itself.
     ///
     /// The position is a [`SignedCoordinate`], which represents negative
     /// (left/top overshoot) and beyond-dimension (right/bottom overshoot)

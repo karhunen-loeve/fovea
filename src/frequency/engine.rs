@@ -313,6 +313,15 @@ impl<C: Cplx> Axis<C> {
             *z = z.conj();
         }
     }
+
+    /// The length the tables transform.
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
+        match self {
+            Axis::Radix2(t) => t.len,
+            Axis::Bluestein(t) => t.len,
+        }
+    }
 }
 
 /// Side of the square blocks the transpose moves at a time.

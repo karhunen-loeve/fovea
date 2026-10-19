@@ -274,7 +274,8 @@ impl<P: SpectrumSource, S: PixelSpace> Spectrum<P, S> {
     /// A bin that is not stored is the conjugate of its mirror, which is.
     /// The value is the unscaled transform: a cosine of amplitude A at a
     /// bin's frequency, on a W × H image, gives A·W·H/2 at that bin and at
-    /// its mirror.
+    /// its mirror, and A·W·H at the zero frequency and at a Nyquist
+    /// frequency, which are their own mirror.
     ///
     /// `None` for the spectrum of an image without pixels, which has no
     /// bin; every index is a bin of any other spectrum.
@@ -513,7 +514,7 @@ impl<P: SpectrumSource, S: PixelSpace> Spectrum<P, S> {
         self.centered_map(|re, im| re * re + im * im)
     }
 
-    /// The phase of every bin in radians, in `(−π, π]`, in the layout of
+    /// The phase of every bin in radians, in `[−π, π]`, in the layout of
     /// [`centered`](Self::centered).
     ///
     /// The phase of a weak component is mostly rounding noise, and that of
@@ -583,6 +584,15 @@ impl<P: SpectrumSource, S: PixelSpace> Spectrum<P, S> {
         I: RasterImage<Pixel = P, Space = S>,
     {
         let Size { width, height } = src.size();
+        if width == 0 || height == 0 {
+            // No bins, and no row buffer of the length of the one side
+            // that has some.
+            return Self {
+                source_size: src.size(),
+                bins: Vec::new(),
+                space: PhantomData,
+            };
+        }
         let half = half_width(width);
         let mut bins = Vec::with_capacity(half * height);
         let mut work = Vec::new();

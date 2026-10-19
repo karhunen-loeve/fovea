@@ -674,7 +674,7 @@ where
 }
 
 // ───────────────────────────────────────────────────────────────────
-// RowStride — the distance between rows of a borrowed buffer
+// RowStride: the distance between rows of a borrowed buffer
 // ───────────────────────────────────────────────────────────────────
 
 /// The distance from the start of one row to the start of the next in a
@@ -1288,14 +1288,19 @@ impl<T, S> ImageRefMut<'_, T, S> {
     #[inline]
     fn strided_roi(&self, rect: Rectangle) -> Option<ImageRef<'_, T, S>> {
         let offset = strided_roi_offset(self.size, self.stride, self.offset, rect)?;
+        // An empty rect addresses no element, so it gets an empty slice
+        // without touching the pointer: its offset may lie past the end of
+        // the allocation (an empty rect at `y = height` with a padded stride
+        // or `left > 0`), where even forming `data.add(offset)` is undefined
+        // behaviour. Stride 0 keeps every row of a zero-width view at the
+        // start of the empty slice.
+        if rect.size.width == 0 || rect.size.height == 0 {
+            return ImageRef::strided(rect.size, 0, 0, &[]);
+        }
         // The elements the sub-view can address: its first element through
-        // its last, `(h-1)*stride + w` in total. Zero for an empty rect.
-        let span = if rect.size.width == 0 || rect.size.height == 0 {
-            0
-        } else {
-            (rect.size.height - 1) * self.stride + rect.size.width
-        };
-        // SAFETY, validity: `strided_roi_offset` proved the rect lies
+        // its last, `(h-1)*stride + w` in total.
+        let span = (rect.size.height - 1) * self.stride + rect.size.width;
+        // SAFETY, validity: `strided_roi_offset` proved the non-empty rect lies
         // inside this view and this view's own construction proved it lies
         // inside the allocation, so `offset + span <= data_len` and the
         // pointer is valid for reads over the whole slice for the returned

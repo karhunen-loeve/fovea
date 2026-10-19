@@ -351,7 +351,9 @@ pub struct Ideal;
 ///
 /// The order sets the slope: `Butterworth::<1>` is gentle, a high order
 /// approaches the [`Ideal`] edge and its ringing. The form is the squared
-/// one scikit-image uses. An order of zero does not compile.
+/// one scikit-image uses. An order of zero does not compile, and neither
+/// does one above 2^29, whose exponent `2N` no longer fits the `i32` the
+/// power is computed with.
 ///
 /// # Example
 ///
@@ -374,13 +376,27 @@ pub struct Ideal;
 /// // ERROR: a Butterworth filter has an order of at least 1
 /// spectrum.low_pass(Radius::cycles_per_pixel(0.1).unwrap(), Butterworth::<0>);
 /// ```
+///
+/// ```compile_fail
+/// use fovea::frequency::{Auto, Butterworth, Radius, dft};
+/// use fovea::image::Image;
+/// use fovea::pixel::MonoF32;
+///
+/// let mut spectrum = dft(&Image::fill(8, 8, MonoF32::new(1.0)), Auto);
+/// // ERROR: a Butterworth filter has an order of at most 2^29
+/// spectrum.low_pass(Radius::cycles_per_pixel(0.1).unwrap(), Butterworth::<{ 1 << 30 }>);
+/// ```
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Butterworth<const N: u32>;
 
 /// The Gaussian profile, 2^−(D/D₀)², half the amplitude at the cutoff.
 ///
-/// It does not ring: a Gaussian is a Gaussian in the image too, positive
-/// everywhere, so the step response rises monotonically. It is the
+/// It does not ring as long as the profile has decayed by the Nyquist
+/// frequency: a Gaussian is a Gaussian in the image too, positive
+/// everywhere, so the step response rises monotonically. That holds up to
+/// a cutoff of about 0.15 cycles per pixel; above it the spectrum's edge
+/// cuts the Gaussian short and a step overshoots a little, by 0.4 % at a
+/// cutoff of 0.3 and 1.4 % at 0.45. It is the
 /// textbook form exp(−D²/2D₀′²) with D₀′ = D₀ / √(2 ln 2) ≈ 0.849·D₀, and
 /// the same filter as a spatial Gaussian blur of σ = 1 / (2π·D₀′) pixels,
 /// for D₀ in cycles per pixel.
@@ -409,6 +425,12 @@ impl Profile for Ideal {}
 impl<const N: u32> sealed::Shape for Butterworth<N> {
     fn low_pass(&self, ratio: f64) -> f64 {
         const { assert!(N >= 1, "a Butterworth filter has an order of at least 1") };
+        const {
+            assert!(
+                N <= 1 << 29,
+                "a Butterworth filter has an order of at most 2^29"
+            )
+        };
         1.0 / (1.0 + ratio.powi(2 * N as i32))
     }
 }
@@ -701,7 +723,8 @@ impl Frequency<CyclesPerPixel> {
     /// frequency and its mirror are one component, so only the line they
     /// lie on is defined, modulo 180°. That is also what a filter can rely
     /// on, since [`Spectrum::apply`] and [`Spectrum::filter`] visit one of
-    /// the two, the one with a non-negative `fx`. Angles are measured as
+    /// the two, the one with a non-negative `fx`, except on the Nyquist
+    /// column of an even width, which is visited at `fx = −0.5`. Angles are measured as
     /// [`AxialOrientation`] measures them, from +x towards +y in the image.
     ///
     /// The structures that make a frequency lie at right angles to it:
@@ -1151,6 +1174,17 @@ mod tests {
             row.iter().copied().fold(f32::MIN, f32::max),
             row.iter().copied().fold(f32::MAX, f32::min),
         )
+    }
+
+    #[test]
+    fn the_highest_butterworth_order_is_still_a_low_pass() {
+        // The v0.6.0 review's C11: `2 * N as i32` wrapped from N = 2^30 on,
+        // inverting the filter. 2^29 is the highest order that compiles.
+        use sealed::Shape;
+        let b = Butterworth::<{ 1 << 29 }>;
+        assert_eq!(b.low_pass(0.999), 1.0);
+        assert_eq!(b.low_pass(1.0), 0.5);
+        assert_eq!(b.low_pass(1.001), 0.0);
     }
 
     #[test]

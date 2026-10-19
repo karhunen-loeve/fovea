@@ -172,10 +172,11 @@ impl<S> PhaseCorrelation<S> {
     /// reference: a point `p` of the reference is found at `p + shift` in
     /// the moving image.
     ///
-    /// Its whole part lies between −⌊W/2⌋ and ⌈W/2⌉ − 1 along x, likewise
-    /// along y, for the size W × H the transform runs at: a shift by more
-    /// than half the image cannot be told from its wrap, so +70 px on an
-    /// image 128 px wide reads as −58 px.
+    /// The peak it is refined from lies between −⌊W/2⌋ and ⌈W/2⌉ − 1 along
+    /// x, likewise along y, for the size W × H the transform runs at, and
+    /// the refinement moves it by up to half a pixel: a shift by more than
+    /// half the image cannot be told from its wrap, so +70 px on an image
+    /// 128 px wide reads as −58 px.
     #[must_use]
     pub fn shift(&self) -> Vector<S> {
         self.shift
@@ -534,8 +535,11 @@ impl<P: SpectrumSource, S: PixelSpace> PhaseReference<P, S> {
 ///   at a rotation of 0.25° to 1°, and 0.02 to 0.08 px at a scale of 1.0025
 ///   to 1.01, at a radius of 0.06. The peak's height falls a little with it.
 /// - **A large shift** leaves less of the images to compare: at radius 0.06
-///   on 128 × 128 pixels, 0.009 px at a quarter of the size, 0.02 px at
-///   three eighths, and 0.05 to 0.08 px close to half.
+///   on 128 × 128 pixels, 0.009 px at a quarter of the size and 0.02 px at
+///   three eighths. From about 0.4 of the size the first pass can lock onto
+///   a wrong peak: in the measurements it did for 2 to 4 of 8 random
+///   patterns, usually with a [`peak`](PhaseCorrelation::peak) well below
+///   0.9, so a low peak there is a warning.
 ///
 /// # Returns
 ///

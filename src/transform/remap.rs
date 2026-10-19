@@ -359,8 +359,9 @@ pub struct DestToSourceTable<D, S> {
 }
 
 // Written by hand rather than derived: a derive would require `D` and `S`
-// to be `Clone`, `Debug` and `PartialEq`, markers that are never
-// instantiated.
+// to be `Clone` and `Debug`, markers that are never instantiated. There is
+// no `PartialEq`: an unmapped pixel is stored as NaN, so a table whose
+// mapping leaves pixels unmapped would be unequal to its own clone.
 impl<D, S> Clone for DestToSourceTable<D, S> {
     fn clone(&self) -> Self {
         Self {
@@ -377,12 +378,6 @@ impl<D, S> core::fmt::Debug for DestToSourceTable<D, S> {
             .field("size", &self.size)
             .field("shift", &self.shift)
             .finish()
-    }
-}
-
-impl<D, S> PartialEq for DestToSourceTable<D, S> {
-    fn eq(&self, other: &Self) -> bool {
-        self.size == other.size && self.shift == other.shift
     }
 }
 
@@ -796,7 +791,7 @@ mod tests {
     #[test]
     fn the_table_traits_ask_nothing_of_the_space() {
         let table = DestToSourceTable::new(&DestToSource(lens()), Size::new(4, 3));
-        assert_eq!(table.clone(), table);
+        assert_eq!(format!("{:?}", table.clone()), format!("{table:?}"));
         assert!(format!("{table:?}").starts_with("DestToSourceTable { size:"));
     }
 }

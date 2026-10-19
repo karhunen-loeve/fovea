@@ -191,6 +191,9 @@ pub struct BrownConradyCoefficients {
 pub struct BrownConrady {
     camera: CameraMatrix,
     coefficients: BrownConradyCoefficients,
+    /// The squared normalised radius of the fold, where the radial
+    /// distortion stops increasing; infinite for a model without one.
+    fold: f64,
 }
 
 /// The distance in pixels within which a corrected point, distorted again,
@@ -227,6 +230,7 @@ impl BrownConrady {
         Ok(Self {
             camera,
             coefficients,
+            fold: fold_radius_squared(k1, k2, k3),
         })
     }
 
@@ -330,8 +334,12 @@ impl BrownConrady {
     /// Far enough from the centre a polynomial model folds back on itself,
     /// and other ideal points, some on the far side of the centre, distort
     /// onto the same measured one. A point is accepted only where the model
-    /// is one-to-one: its radial factor positive and its derivative
-    /// orientation-preserving.
+    /// is one-to-one: inside the fold, the first radius at which the
+    /// distorted radius `r·(1 + k1·r² + k2·r⁴ + k3·r⁶)` stops increasing, and
+    /// where its derivative preserves orientation. A model whose distorted
+    /// radius falls and then rises again, as with `k1 < 0 < k2`, has points
+    /// on the rising branch beyond the fold that distort correctly but are
+    /// not the correction; they are refused.
     ///
     /// # Errors
     ///
@@ -395,7 +403,7 @@ impl BrownConrady {
                 // Beyond the fold the model maps further ideal points onto
                 // the same measured one, some through the centre; only a
                 // point where the model is one-to-one is the correction.
-                return if self.radial_factor(x, y) > 0.0 && det > 0.0 {
+                return if x * x + y * y < self.fold && det > 0.0 {
                     Ok(self.camera.to_pixels(x, y))
                 } else {
                     Err(Error::DidNotConverge { steps: step })
@@ -413,6 +421,7 @@ impl BrownConrady {
     }
 
     /// `1 + k1·r² + k2·r⁴ + k3·r⁶`.
+    #[cfg(test)]
     fn radial_factor(&self, x: f64, y: f64) -> f64 {
         let Radial { k1, k2, k3 } = self.coefficients.radial;
         let r2 = x * x + y * y;
@@ -454,6 +463,70 @@ impl BrownConrady {
                 radial + 2.0 * y * y * slope + 6.0 * p1 * y + 2.0 * p2 * x,
             ],
         ]
+    }
+}
+
+/// The first positive root `s` of `1 + 3·k1·s + 5·k2·s² + 7·k3·s³`, the
+/// derivative of the distorted radius `r·(1 + k1·r² + k2·r⁴ + k3·r⁶)` with
+/// respect to `r`, written in `s = r²`; infinite if it has none.
+///
+/// The polynomial is 1 at `s = 0` and monotone between its critical points,
+/// so a root lies before the first critical point at which it is not
+/// positive, or beyond the last one if it falls without bound there; it is
+/// then bracketed and bisected to the last bit.
+fn fold_radius_squared(k1: f64, k2: f64, k3: f64) -> f64 {
+    let g = |s: f64| 1.0 + s * (3.0 * k1 + s * (5.0 * k2 + s * 7.0 * k3));
+    // The critical points of g: 3·k1 + 10·k2·s + 21·k3·s² = 0.
+    let mut stops: Vec<f64> = if k3 != 0.0 {
+        let disc = 100.0 * k2 * k2 - 252.0 * k1 * k3;
+        if disc < 0.0 {
+            Vec::new()
+        } else {
+            let root = disc.sqrt();
+            vec![
+                (-10.0 * k2 - root) / (42.0 * k3),
+                (-10.0 * k2 + root) / (42.0 * k3),
+            ]
+        }
+    } else if k2 != 0.0 {
+        vec![-3.0 * k1 / (10.0 * k2)]
+    } else {
+        Vec::new()
+    };
+    stops.retain(|&s| s > 0.0 && s.is_finite());
+    stops.sort_by(f64::total_cmp);
+    let mut lo = 0.0;
+    for stop in stops {
+        if g(stop) <= 0.0 {
+            return bisect(g, lo, stop);
+        }
+        lo = stop;
+    }
+    // Monotone from `lo` on: a root exists only if g falls there.
+    let mut hi = lo.max(1.0);
+    while g(hi) > 0.0 {
+        if g(2.0 * hi) >= g(hi) || !(2.0 * hi).is_finite() {
+            return f64::INFINITY;
+        }
+        lo = hi;
+        hi *= 2.0;
+    }
+    bisect(g, lo, hi)
+}
+
+/// The root of `g` in `[lo, hi]`, where `g(lo) > 0 >= g(hi)`, to the last
+/// bit; the lower end, so a point at it counts as before the root.
+fn bisect(g: impl Fn(f64) -> f64, mut lo: f64, mut hi: f64) -> f64 {
+    loop {
+        let mid = 0.5 * (lo + hi);
+        if mid <= lo || mid >= hi {
+            return lo;
+        }
+        if g(mid) > 0.0 {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
     }
 }
 
@@ -635,6 +708,69 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn a_root_on_the_rising_branch_beyond_the_fold_is_refused() {
+        // The v0.6.0 review's C5: with k1 < 0 < k2 the distorted radius
+        // rises, falls and rises again, and on the third branch a root has
+        // a positive radial factor and an orientation-preserving
+        // derivative. A typical barrel calibration on 1280 x 960 tops out
+        // at about 631 px; a point 700 px out was "corrected" to 1815 px.
+        let l = lens(-0.45, 0.08, 0.0, 0.0, 0.0);
+        for r in [700.0, 800.0] {
+            let p = Point::new(640.0 + r, 480.0);
+            let q = l.undistort_point(p);
+            assert!(matches!(q, Err(Error::DidNotConverge { .. })), "{r}: {q:?}");
+        }
+        // Here the fold sits at a distorted radius of about 566 px: 560 px
+        // is corrected on the first branch, the rest lie beyond.
+        let l = lens(-0.5, 0.05, 0.0, 0.0, 0.0);
+        let q = l.undistort_point(Point::new(640.0 + 560.0, 480.0)).unwrap();
+        assert!((q.x - 640.0 - 797.3).abs() < 0.1, "{q:?}");
+        for r in [600.0, 700.0, 800.0] {
+            let q = l.undistort_point(Point::new(640.0 + r, 480.0));
+            assert!(matches!(q, Err(Error::DidNotConverge { .. })), "{r}: {q:?}");
+        }
+        // Along one ray the answers are Ok up to the fold and Err beyond,
+        // never Ok again.
+        let l = lens(-0.45, 0.08, 0.0, 0.0, 0.0);
+        let mut refused = false;
+        for r in (0..1500).step_by(5) {
+            match l.undistort_point(Point::new(640.0 + r as f64, 480.0)) {
+                Ok(q) => {
+                    assert!(!refused, "Ok at {r} after an Err");
+                    let again = l.try_map_point(q).unwrap();
+                    assert!((again.x - 640.0 - r as f64).abs() < 1e-8);
+                }
+                Err(_) => refused = true,
+            }
+        }
+        assert!(refused);
+    }
+
+    #[test]
+    fn the_fold_is_where_the_distorted_radius_stops_rising() {
+        // k1 alone: the derivative 1 + 3·k1·s vanishes at s = −1/(3·k1).
+        assert!((fold_radius_squared(-0.4, 0.0, 0.0) - 1.0 / 1.2).abs() < 1e-15);
+        // No fold without distortion, for a pincushion, or where k2 lifts
+        // the derivative clear of zero.
+        assert_eq!(fold_radius_squared(0.0, 0.0, 0.0), f64::INFINITY);
+        assert_eq!(fold_radius_squared(0.15, 0.02, 0.0), f64::INFINITY);
+        assert_eq!(fold_radius_squared(-0.1, 0.1, 0.0), f64::INFINITY);
+        // k1 < 0 < k2 with a fold: the smaller of the two roots of
+        // 1 − 1.35·s + 0.4·s².
+        let s = fold_radius_squared(-0.45, 0.08, 0.0);
+        let expected = (1.35 - (1.35f64 * 1.35 - 1.6).sqrt()) / 0.8;
+        assert!((s - expected).abs() < 1e-14, "{s} vs {expected}");
+        // A negative k3 always folds, even after the derivative has risen.
+        let s = fold_radius_squared(0.1, 0.0, -0.01);
+        let g = |s: f64| 1.0 + s * (3.0 * 0.1 + s * (5.0 * 0.0 + s * 7.0 * -0.01));
+        assert!(g(s) > 0.0 && g(s * (1.0 + 1e-9)) <= 0.0, "{s}");
+        // For k1 = −0.4 the fold sits at a distorted radius of about 609 px
+        // at f = 1000 px, as the example of `undistort_point` says.
+        let r = fold_radius_squared(-0.4, 0.0, 0.0).sqrt();
+        assert!((1000.0 * r * (1.0 - 0.4 * r * r) - 608.6).abs() < 0.1);
     }
 
     #[test]

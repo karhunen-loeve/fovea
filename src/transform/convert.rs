@@ -2931,7 +2931,7 @@ pub struct ImaginaryPart;
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ComplexMagnitude;
 
-/// The argument of a complex pixel in radians, in `(−π, π]`, as a real one.
+/// The argument of a complex pixel in radians, in `[−π, π]`, as a real one.
 ///
 /// Per pixel this is [`ComplexF32::phase`]. See [`RealPart`] for the family.
 ///

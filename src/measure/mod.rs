@@ -6,7 +6,11 @@
 //! finds every edge of a polarity above a contrast, and
 //! [`Edges::pairs`](crate::measure::Edges::pairs) forms edge pairs by a rule
 //! the caller names. Picking one edge or one pair is always a named step;
-//! nothing is chosen silently.
+//! nothing is chosen silently. An edge with no other edge within about
+//! `7σ` and no more blur than σ is placed to about 0.001 px; closer edges
+//! and blurrier ones are biased, by amounts the accuracy section of
+//! [`Profile::edges`](crate::measure::Profile::edges) gives, so a pair of
+//! width `W` wants σ at most `W / 7`.
 //!
 //! [`try_fit`](crate::measure::try_fit) fits a line, circle or ellipse to
 //! points, from caliper edges, from

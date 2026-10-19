@@ -506,6 +506,10 @@ impl<S: PixelSpace> EdgePair<S> {
     /// `first.position().distance(second.position())`. Only that one converts to
     /// world units under every mapping, by converting the two positions; a
     /// width along the path converts under a conformal mapping.
+    ///
+    /// A pair narrower than about `7σ` of the σ its edges were found with
+    /// measures too wide, about `0.23σ` at a width of `4σ`; see the
+    /// accuracy section of [`Profile::edges`].
     #[must_use]
     pub fn width(&self) -> Length<S> {
         self.second.along - self.first.along
@@ -640,13 +644,32 @@ impl<S: PixelSpace> Profile<S> {
     /// vertex of the parabola, the centroid is not pulled towards pixel
     /// boundaries.
     ///
-    /// Choose `sigma` at least the sampling step, and comparable to the
-    /// blur of the edges: a smaller σ separates close edges, a larger one
-    /// suppresses noise. Two edges of the same polarity closer than about
-    /// `4σ` pull each other's positions; use a smaller σ there. An edge
-    /// whose derivative lobe runs into either end of the profile is not
-    /// reported, because its position cannot be measured without bias;
-    /// extend the caliper about `8σ` beyond the edges it should find.
+    /// Choose `sigma` at least the sampling step and at least the blur of
+    /// the edges; a larger σ suppresses noise. An edge whose derivative lobe
+    /// runs into either end of the profile is not reported, because its
+    /// position cannot be measured without bias; extend the caliper about
+    /// `8σ` beyond the edges it should find.
+    ///
+    /// # Accuracy
+    ///
+    /// A sharp edge with no other edge of either polarity within about
+    /// `7σ` is placed to about 0.001 px, at a step of a quarter pixel or
+    /// finer. Two conditions limit that, and neither is reported:
+    ///
+    /// - **Close edges.** Two edges of the same polarity closer than about
+    ///   `4σ` pull each other's positions. Two of opposite polarity, the
+    ///   sides of a bar or of a gap, closer than about `7σ` push each other
+    ///   outward, because each lobe ends where the neighbour's begins: a bar
+    ///   of width `4σ` measures about `0.23σ` too wide (up to `0.28σ`,
+    ///   depending on where it lies against the pixels), one of `3σ` about
+    ///   `0.55σ`. For an edge pair of width `W`, choose σ at most `W / 7`.
+    /// - **Blur.** The centroid is taken within `±4σ` of the extreme, so the
+    ///   lobe of an edge blurrier than σ is cut short and the position locks
+    ///   towards the samples: an edge blurred by a Gaussian of 2 px is off
+    ///   by up to 0.04 px at σ = 1 px, and by up to 0.005 px at σ = 2 px.
+    ///
+    /// Where a narrow pair and a blurred edge leave no σ that meets both,
+    /// the measured width carries the bias of the one not met.
     ///
     /// See [`Edges`] for an example.
     #[must_use]
@@ -656,8 +679,11 @@ impl<S: PixelSpace> Profile<S> {
         let values = self.values();
         let n = values.len();
         let s = f64::from(sigma.get()) / step;
+        // The cast saturates for a σ of many steps, so the window's length
+        // is checked, not computed: a profile shorter than it has no edge.
         let radius = ((4.0 * s).ceil() as usize).max(1);
-        if n < 2 * radius + 3 {
+        let needed = radius.checked_mul(2).and_then(|w| w.checked_add(3));
+        if needed.is_none_or(|needed| n < needed) {
             return Edges::default();
         }
         let kernel = derivative_kernel(s, radius);
@@ -796,6 +822,89 @@ mod tests {
         }
     }
 
+    /// The width error of the bar `x0..x0 + w` measured at σ = 1 px, worst
+    /// over 12 sub-pixel phases, signed: positive is too wide.
+    fn worst_bar_width_error(w: f64) -> f64 {
+        let mut worst = 0.0f64;
+        for k in 0..12 {
+            let x0 = 20.0 + k as f64 / 12.0;
+            let img = bar(x0, x0 + w);
+            let cal = horizontal(16.0, 5.0, 55.0, 4.0, 0.25);
+            let prof = profile(&img, &cal, CatmullRom, &Skip).unwrap();
+            let edges = prof.edges(Polarity::Either, sigma!(1.0), min_contrast!(50.0));
+            let pairs = edges.pairs(Polarity::DarkToLight, Neighbors);
+            assert_eq!(pairs.len(), 1, "w = {w}, x0 = {x0}: {edges:?}");
+            let error = pairs[0].width().get() - w;
+            if error.abs() > worst.abs() {
+                worst = error;
+            }
+        }
+        worst
+    }
+
+    #[test]
+    fn edges_of_opposite_polarity_closer_than_seven_sigma_push_each_other_out() {
+        // The v0.6.0 review's C3, the limit the documentation of `edges`
+        // states: at 7σ the pair is accurate to a few thousandths of a
+        // pixel; at 4σ each edge's lobe is cut by its neighbour's and the
+        // bar measures about 0.23σ too wide.
+        let at_seven = worst_bar_width_error(7.0);
+        assert!(at_seven.abs() < 3e-3, "W = 7σ: {at_seven}");
+        let at_four = worst_bar_width_error(4.0);
+        assert!((0.15..0.32).contains(&at_four), "W = 4σ: {at_four}");
+    }
+
+    /// The Gaussian distribution function, by Abramowitz and Stegun 7.1.26
+    /// (error below 1.5e-7, ample for a test scene).
+    fn phi(x: f64) -> f64 {
+        let z = x.abs() / std::f64::consts::SQRT_2;
+        let t = 1.0 / (1.0 + 0.327_591_1 * z);
+        let poly = t
+            * (0.254_829_592
+                + t * (-0.284_496_736
+                    + t * (1.421_413_741 + t * (-1.453_152_027 + t * 1.061_405_429))));
+        let erf = 1.0 - poly * (-z * z).exp();
+        0.5 * (1.0 + if x < 0.0 { -erf } else { erf })
+    }
+
+    /// The position error of a rising step at `x0..x0 + 1` blurred by a
+    /// Gaussian of `blur` px, measured at `sigma`, worst over 8 phases.
+    fn worst_blurred_step_error(blur: f64, sigma: Sigma) -> f64 {
+        let mut worst = 0.0f64;
+        for k in 0..8 {
+            let x0 = 30.0 + k as f64 / 8.0;
+            let img = Image::generate(64, 32, |x, _| {
+                // The pixel's area average of the blurred step.
+                let v: f64 = (0..32)
+                    .map(|j| phi((x as f64 - 0.5 + (j as f64 + 0.5) / 32.0 - x0) / blur))
+                    .sum::<f64>()
+                    / 32.0;
+                MonoF32::new((20.0 + 200.0 * v) as f32)
+            });
+            let cal = horizontal(16.0, 2.0, 61.0, 2.0, 0.25);
+            let prof = profile(&img, &cal, CatmullRom, &Skip).unwrap();
+            let edges = prof.edges(Polarity::DarkToLight, sigma, min_contrast!(50.0));
+            assert_eq!(edges.len(), 1, "blur {blur}, x0 = {x0}: {edges:?}");
+            let error = edges.as_slice()[0].position().x - x0;
+            if error.abs() > worst.abs() {
+                worst = error;
+            }
+        }
+        worst
+    }
+
+    #[test]
+    fn an_edge_blurrier_than_sigma_locks_towards_the_samples() {
+        // The v0.6.0 review's C4, the limit the documentation of `edges`
+        // states: σ at least the edge's own blur keeps the position to a
+        // few thousandths of a pixel; at half the blur the lobe outgrows
+        // the window of ±4σ and the error grows tenfold.
+        let matched = worst_blurred_step_error(2.0, sigma!(2.0));
+        let narrow = worst_blurred_step_error(2.0, sigma!(1.0));
+        assert!(matched.abs() < 0.01, "σ = blur: {matched}");
+        assert!(narrow.abs() > 0.02, "σ = blur / 2: {narrow}");
+    }
+
     #[test]
     fn the_contrast_of_a_step_is_close_to_its_height() {
         // σ = 2 needs about 16 px between each edge and the profile's ends.
@@ -826,6 +935,26 @@ mod tests {
         assert!(falling.first().unwrap().contrast < 0.0);
         let none = prof.edges(Polarity::Either, sigma!(1.0), min_contrast!(250.0));
         assert!(none.is_empty());
+    }
+
+    #[test]
+    fn a_sigma_of_more_steps_than_usize_holds_finds_no_edge() {
+        // The v0.6.0 review's C11: at a step of 1e-19 px, σ = 1 px is 1e19
+        // steps, the window's radius saturates to `usize::MAX`, and its
+        // length overflowed.
+        let img = bar(20.3, 35.8);
+        let cal = Caliper::try_segment(
+            Point::new(20.0, 16.0),
+            Point::new(20.0 + 1e-14, 16.0),
+            l(0.0),
+            l(1e-19),
+        )
+        .unwrap();
+        let prof = profile(&img, &cal, CatmullRom, &Skip).unwrap();
+        assert!(
+            prof.edges(Polarity::Either, sigma!(1.0), min_contrast!(50.0))
+                .is_empty()
+        );
     }
 
     #[test]

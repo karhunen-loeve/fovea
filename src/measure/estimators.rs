@@ -43,7 +43,9 @@ pub(super) fn fit_line<U: LengthUnit>(
         sxy += w * dx * dy;
     }
     let half_gap = 0.5 * (sxx - syy).hypot(2.0 * sxy);
-    if half_gap == 0.0 {
+    // Spreads beyond about 1e154 overflow the scatter; like the circle and
+    // the ellipse, such points give no element rather than a NaN one.
+    if half_gap == 0.0 || !(sxx.is_finite() && syy.is_finite() && half_gap.is_finite()) {
         return Err(Error::DegeneratePoints);
     }
     let lambda = 0.5 * (sxx + syy) + half_gap;
