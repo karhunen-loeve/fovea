@@ -308,8 +308,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of the open trait `TransferFunction`: `LowPass`, `HighPass`,
   `BandPass`, `BandStop`, `Notch`, or one of the caller's own. The
   methods `low_pass`, `high_pass`, `band_pass`, `band_stop` and `notch`
-  build the value and call `filter`. The shapes are `Radius<U>` and
-  `Band<U>`, validated, with `radius!` and `band!` for literals; the
+  build the value and call `filter`. The shapes are `Cutoff<U>` and
+  `Band<U>`, validated, with `cutoff!` and `band!` for literals (the
+  word other libraries use for the frequency where the gain is a half); the
   profiles are `Ideal`, `Butterworth<N>` with the order as a const
   parameter, and `Gaussian`. Every smooth profile halves the amplitude at
   the cutoff, so exchanging one keeps the place of the edge; a band is the

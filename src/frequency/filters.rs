@@ -12,30 +12,36 @@ use crate::geometry::PixelSpace;
 
 // ── Shapes ──────────────────────────────────────────────────────────────────
 
-/// A radius around a frequency, in the unit `U`: finite and positive.
+/// A cutoff frequency, in the unit `U`: finite and positive.
 ///
-/// The cutoff of a low-pass or high-pass, and the size of a notch. Build
-/// one with [`Radius::cycles_per_pixel`] or [`Radius::bins`], with
+/// The cutoff of a low-pass or high-pass, where the gain is a half (see
+/// [`Profile`]): the distance from the zero frequency, in every direction,
+/// so in the two-dimensional spectrum it is the radius of a circle. A
+/// notch is a high-pass around another frequency, and its cutoff is its
+/// size. The word is the one other libraries use: scikit-image's
+/// `cutoff_frequency_ratio`, HALCON's "cutoff frequency", SciPy's `cutoff`.
+/// Build
+/// one with [`Cutoff::cycles_per_pixel`] or [`Cutoff::bins`], with
 /// [`try_new`](Self::try_new) where the unit follows from the context, or
-/// with [`radius!`](crate::radius) for a literal checked at compile time.
+/// with [`cutoff!`](crate::cutoff) for a literal checked at compile time.
 ///
 /// # Example
 ///
 /// ```
-/// use fovea::frequency::{Bins, Radius};
+/// use fovea::frequency::{Bins, Cutoff};
 ///
-/// let cutoff = Radius::cycles_per_pixel(0.125)?;
+/// let cutoff = Cutoff::cycles_per_pixel(0.125)?;
 /// assert_eq!(cutoff.get(), 0.125);
-/// assert!(Radius::<Bins>::try_new(0.0).is_err());
+/// assert!(Cutoff::<Bins>::try_new(0.0).is_err());
 /// # Ok::<(), fovea::Error>(())
 /// ```
-pub struct Radius<U> {
+pub struct Cutoff<U> {
     value: f64,
     unit: PhantomData<U>,
 }
 
-impl<U: FrequencyUnit> Radius<U> {
-    /// A radius of `value`, or `None` unless it is finite and positive.
+impl<U: FrequencyUnit> Cutoff<U> {
+    /// A cutoff of `value`, or `None` unless it is finite and positive.
     #[must_use]
     pub const fn new(value: f64) -> Option<Self> {
         if value.is_finite() && value > 0.0 {
@@ -48,7 +54,7 @@ impl<U: FrequencyUnit> Radius<U> {
         }
     }
 
-    /// A radius of `value`, validated.
+    /// A cutoff of `value`, validated.
     ///
     /// # Errors
     ///
@@ -56,19 +62,19 @@ impl<U: FrequencyUnit> Radius<U> {
     /// infinite.
     pub fn try_new(value: f64) -> Result<Self, Error> {
         Self::new(value).ok_or_else(|| {
-            ParameterError::new("radius", Requirement::FinitePositive, Value::F64(value)).into()
+            ParameterError::new("cutoff", Requirement::FinitePositive, Value::F64(value)).into()
         })
     }
 
-    /// The radius, in the unit `U`.
+    /// The cutoff, in the unit `U`.
     #[must_use]
     pub const fn get(&self) -> f64 {
         self.value
     }
 }
 
-impl Radius<CyclesPerPixel> {
-    /// A radius of `value` cycles per pixel, validated.
+impl Cutoff<CyclesPerPixel> {
+    /// A cutoff of `value` cycles per pixel, validated.
     ///
     /// # Errors
     ///
@@ -79,8 +85,8 @@ impl Radius<CyclesPerPixel> {
     }
 }
 
-impl Radius<Bins> {
-    /// A radius of `value` bins, validated.
+impl Cutoff<Bins> {
+    /// A cutoff of `value` bins, validated.
     ///
     /// # Errors
     ///
@@ -91,31 +97,31 @@ impl Radius<Bins> {
     }
 }
 
-/// A [`Radius`] literal, checked at compile time; the unit follows from the
+/// A [`Cutoff`] literal, checked at compile time; the unit follows from the
 /// context.
 ///
 /// A value that is not a constant expression does not compile
-/// (`error[E0435]`); use [`Radius::try_new`](crate::frequency::Radius::try_new)
+/// (`error[E0435]`); use [`Cutoff::try_new`](crate::frequency::Cutoff::try_new)
 /// there.
 ///
 /// # Example
 ///
 /// ```
-/// use fovea::frequency::{CyclesPerPixel, Radius};
+/// use fovea::frequency::{CyclesPerPixel, Cutoff};
 ///
-/// let cutoff: Radius<CyclesPerPixel> = fovea::radius!(0.25);
+/// let cutoff: Cutoff<CyclesPerPixel> = fovea::cutoff!(0.25);
 /// assert_eq!(cutoff.get(), 0.25);
 /// ```
 ///
 /// ```compile_fail
 /// // ERROR: evaluation panicked: must be finite and strictly positive
-/// let _: fovea::frequency::Radius<fovea::frequency::Bins> = fovea::radius!(-1.0);
+/// let _: fovea::frequency::Cutoff<fovea::frequency::Bins> = fovea::cutoff!(-1.0);
 /// ```
 #[macro_export]
-macro_rules! radius {
+macro_rules! cutoff {
     ($value:expr) => {
         const {
-            $crate::frequency::Radius::new($value)
+            $crate::frequency::Cutoff::new($value)
                 .expect($crate::error::Requirement::FinitePositive.text())
         }
     };
@@ -263,9 +269,9 @@ macro_rules! impl_plain_traits {
     )*};
 }
 
-impl_plain_traits!(Radius, Band);
+impl_plain_traits!(Cutoff, Band);
 
-impl<U> PartialEq for Radius<U> {
+impl<U> PartialEq for Cutoff<U> {
     fn eq(&self, other: &Self) -> bool {
         self.value == other.value
     }
@@ -277,9 +283,9 @@ impl<U> PartialEq for Band<U> {
     }
 }
 
-impl<U> core::fmt::Debug for Radius<U> {
+impl<U> core::fmt::Debug for Cutoff<U> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_tuple("Radius").field(&self.value).finish()
+        f.debug_tuple("Cutoff").field(&self.value).finish()
     }
 }
 
@@ -303,6 +309,9 @@ mod sealed {
 
 /// How a filter passes from one to zero: [`Ideal`], [`Butterworth`] or
 /// [`Gaussian`]. Sealed.
+///
+/// Not to be confused with [`measure::Profile`](crate::measure::Profile),
+/// the intensities along a caliper.
 ///
 /// Every smooth profile halves the amplitude at the cutoff, so exchanging
 /// one for another changes the slope of the edge and not its place. As a
@@ -330,14 +339,14 @@ pub trait Profile: sealed::Shape {}
 /// # Example
 ///
 /// ```
-/// use fovea::frequency::{Auto, Ideal, Radius, dft};
+/// use fovea::frequency::{Auto, Ideal, Cutoff, dft};
 /// use fovea::image::{Image, ImageView};
 /// use fovea::pixel::MonoF32;
 ///
 /// // A step from 0 to 1, low-passed by the ideal profile.
 /// let step = Image::generate(256, 4, |x, _| MonoF32::new(if (64..192).contains(&x) { 1.0 } else { 0.0 }));
 /// let mut spectrum = dft(&step, Auto);
-/// spectrum.low_pass(Radius::cycles_per_pixel(0.1)?, Ideal);
+/// spectrum.low_pass(Cutoff::cycles_per_pixel(0.1)?, Ideal);
 /// let smooth = spectrum.inverse(Auto);
 /// let peak = (0..256).map(|x| smooth.pixel_at(x, 0).0).fold(f32::MIN, f32::max);
 /// assert!(peak > 1.08, "the ideal filter rings: {peak}");
@@ -358,38 +367,42 @@ pub struct Ideal;
 /// # Example
 ///
 /// ```
-/// use fovea::frequency::{Auto, Butterworth, Radius, dft};
+/// use fovea::frequency::{Auto, Butterworth, Cutoff, dft};
 /// use fovea::image::Image;
 /// use fovea::pixel::MonoF32;
 ///
 /// let mut spectrum = dft(&Image::fill(64, 64, MonoF32::new(1.0)), Auto);
-/// spectrum.low_pass(Radius::cycles_per_pixel(0.1)?, Butterworth::<2>);
+/// spectrum.low_pass(Cutoff::cycles_per_pixel(0.1)?, Butterworth::<2>);
 /// # Ok::<(), fovea::Error>(())
 /// ```
 ///
 /// ```compile_fail
-/// use fovea::frequency::{Auto, Butterworth, Radius, dft};
+/// use fovea::frequency::{Auto, Butterworth, Cutoff, dft};
 /// use fovea::image::Image;
 /// use fovea::pixel::MonoF32;
 ///
 /// let mut spectrum = dft(&Image::fill(8, 8, MonoF32::new(1.0)), Auto);
 /// // ERROR: a Butterworth filter has an order of at least 1
-/// spectrum.low_pass(Radius::cycles_per_pixel(0.1).unwrap(), Butterworth::<0>);
+/// spectrum.low_pass(Cutoff::cycles_per_pixel(0.1).unwrap(), Butterworth::<0>);
 /// ```
 ///
 /// ```compile_fail
-/// use fovea::frequency::{Auto, Butterworth, Radius, dft};
+/// use fovea::frequency::{Auto, Butterworth, Cutoff, dft};
 /// use fovea::image::Image;
 /// use fovea::pixel::MonoF32;
 ///
 /// let mut spectrum = dft(&Image::fill(8, 8, MonoF32::new(1.0)), Auto);
 /// // ERROR: a Butterworth filter has an order of at most 2^29
-/// spectrum.low_pass(Radius::cycles_per_pixel(0.1).unwrap(), Butterworth::<{ 1 << 30 }>);
+/// spectrum.low_pass(Cutoff::cycles_per_pixel(0.1).unwrap(), Butterworth::<{ 1 << 30 }>);
 /// ```
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Butterworth<const N: u32>;
 
 /// The Gaussian profile, 2^−(D/D₀)², half the amplitude at the cutoff.
+///
+/// The same Gaussian shape as the pyramid's
+/// [`transform::Gaussian`](crate::transform::Gaussian), here as a filter on
+/// the spectrum.
 ///
 /// It does not ring as long as the profile has decayed by the Nyquist
 /// frequency: a Gaussian is a Gaussian in the image too, positive
@@ -404,12 +417,12 @@ pub struct Butterworth<const N: u32>;
 /// # Example
 ///
 /// ```
-/// use fovea::frequency::{Auto, Gaussian, Radius, dft};
+/// use fovea::frequency::{Auto, Gaussian, Cutoff, dft};
 /// use fovea::image::Image;
 /// use fovea::pixel::MonoF32;
 ///
 /// let mut spectrum = dft(&Image::fill(64, 64, MonoF32::new(1.0)), Auto);
-/// spectrum.low_pass(Radius::cycles_per_pixel(0.1)?, Gaussian);
+/// spectrum.low_pass(Cutoff::cycles_per_pixel(0.1)?, Gaussian);
 /// # Ok::<(), fovea::Error>(())
 /// ```
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -497,16 +510,16 @@ pub trait TransferFunction {
 /// # Example
 ///
 /// ```
-/// use fovea::frequency::{Gaussian, LowPass, Radius, TransferFunction, Frequency};
+/// use fovea::frequency::{Gaussian, LowPass, Cutoff, TransferFunction, Frequency};
 ///
-/// let lp = LowPass::new(Radius::cycles_per_pixel(0.1)?, Gaussian);
+/// let lp = LowPass::new(Cutoff::cycles_per_pixel(0.1)?, Gaussian);
 /// assert_eq!(lp.gain(Frequency::cycles_per_pixel(0.0, 0.0)), 1.0);
 /// assert_eq!(lp.gain(Frequency::cycles_per_pixel(0.1, 0.0)), 0.5);
 /// # Ok::<(), fovea::Error>(())
 /// ```
 #[derive(Debug)]
 pub struct LowPass<U, S> {
-    cutoff: Radius<U>,
+    cutoff: Cutoff<U>,
     profile: S,
 }
 
@@ -515,16 +528,16 @@ pub struct LowPass<U, S> {
 /// # Example
 ///
 /// ```
-/// use fovea::frequency::{Butterworth, Frequency, HighPass, Radius, TransferFunction};
+/// use fovea::frequency::{Butterworth, Frequency, HighPass, Cutoff, TransferFunction};
 ///
-/// let hp = HighPass::new(Radius::cycles_per_pixel(0.1)?, Butterworth::<2>);
+/// let hp = HighPass::new(Cutoff::cycles_per_pixel(0.1)?, Butterworth::<2>);
 /// assert_eq!(hp.gain(Frequency::cycles_per_pixel(0.0, 0.0)), 0.0);
 /// assert_eq!(hp.gain(Frequency::cycles_per_pixel(0.0, 0.1)), 0.5);
 /// # Ok::<(), fovea::Error>(())
 /// ```
 #[derive(Debug)]
 pub struct HighPass<U, S> {
-    cutoff: Radius<U>,
+    cutoff: Cutoff<U>,
     profile: S,
 }
 
@@ -572,22 +585,22 @@ pub struct BandStop<U, S> {
     profile: S,
 }
 
-/// A notch: removes the frequencies within a radius of a centre and of
+/// A notch: removes the frequencies within its cutoff of a centre and of
 /// its mirror, as a periodic disturbance shows up in the spectrum of a
 /// real image.
 ///
 /// The gain is one minus the low-pass around the centre, times the same
-/// around the mirror. A radius in [`Bins`] suits a notch, since the width
+/// around the mirror. A cutoff in [`Bins`] suits a notch, since the width
 /// of a peak is set by leakage, which is the same number of bins on every
 /// axis. Distances are taken in the canonical range, so a notch within its
-/// radius of the Nyquist frequency does not reach across it.
+/// cutoff of the Nyquist frequency does not reach across it.
 ///
 /// # Example
 ///
 /// ```
-/// use fovea::frequency::{Frequency, Ideal, Notch, Radius, TransferFunction};
+/// use fovea::frequency::{Frequency, Ideal, Notch, Cutoff, TransferFunction};
 ///
-/// let notch = Notch::new(Frequency::bins(30.0, 12.0), Radius::bins(2.0)?, Ideal);
+/// let notch = Notch::new(Frequency::bins(30.0, 12.0), Cutoff::bins(2.0)?, Ideal);
 /// assert_eq!(notch.gain(Frequency::bins(31.0, 12.0)), 0.0);
 /// assert_eq!(notch.gain(Frequency::bins(-30.0, -12.0)), 0.0);
 /// assert_eq!(notch.gain(Frequency::bins(0.0, 0.0)), 1.0);
@@ -596,14 +609,14 @@ pub struct BandStop<U, S> {
 #[derive(Debug)]
 pub struct Notch<U, S> {
     center: Frequency<U>,
-    radius: Radius<U>,
+    cutoff: Cutoff<U>,
     profile: S,
 }
 
 impl<U: FrequencyUnit, S: Profile> LowPass<U, S> {
     /// The low-pass with `cutoff` and `profile`.
     #[must_use]
-    pub const fn new(cutoff: Radius<U>, profile: S) -> Self {
+    pub const fn new(cutoff: Cutoff<U>, profile: S) -> Self {
         Self { cutoff, profile }
     }
 }
@@ -611,7 +624,7 @@ impl<U: FrequencyUnit, S: Profile> LowPass<U, S> {
 impl<U: FrequencyUnit, S: Profile> HighPass<U, S> {
     /// The high-pass with `cutoff` and `profile`.
     #[must_use]
-    pub const fn new(cutoff: Radius<U>, profile: S) -> Self {
+    pub const fn new(cutoff: Cutoff<U>, profile: S) -> Self {
         Self { cutoff, profile }
     }
 }
@@ -633,12 +646,12 @@ impl<U: FrequencyUnit, S: Profile> BandStop<U, S> {
 }
 
 impl<U: FrequencyUnit, S: Profile> Notch<U, S> {
-    /// The notch at `center` and its mirror, with `radius` and `profile`.
+    /// The notch at `center` and its mirror, with `cutoff` and `profile`.
     #[must_use]
-    pub const fn new(center: Frequency<U>, radius: Radius<U>, profile: S) -> Self {
+    pub const fn new(center: Frequency<U>, cutoff: Cutoff<U>, profile: S) -> Self {
         Self {
             center,
-            radius,
+            cutoff,
             profile,
         }
     }
@@ -678,7 +691,7 @@ impl<U: FrequencyUnit, S: Profile> TransferFunction for Notch<U, S> {
     type Unit = U;
     fn gain(&self, f: Frequency<U>) -> f64 {
         let (cx, cy) = (self.center.fx(), self.center.fy());
-        let r = self.radius.get();
+        let r = self.cutoff.get();
         let near = (f.fx() - cx).hypot(f.fy() - cy);
         let mirror = (f.fx() + cx).hypot(f.fy() + cy);
         (1.0 - self.profile.low_pass(near / r)) * (1.0 - self.profile.low_pass(mirror / r))
@@ -708,7 +721,7 @@ impl_filter_traits!(
     BandStop { band, profile },
     Notch {
         center,
-        radius,
+        cutoff,
         profile
     }
 );
@@ -766,12 +779,12 @@ impl<P: SpectrumSource, S: PixelSpace> Spectrum<P, S> {
     /// # Example
     ///
     /// ```
-    /// use fovea::frequency::{Auto, Gaussian, LowPass, Radius, dft};
+    /// use fovea::frequency::{Auto, Gaussian, LowPass, Cutoff, dft};
     /// use fovea::image::Image;
     /// use fovea::pixel::MonoF32;
     ///
     /// // Built once, applied to every frame.
-    /// let smooth = LowPass::new(Radius::cycles_per_pixel(0.1)?, Gaussian);
+    /// let smooth = LowPass::new(Cutoff::cycles_per_pixel(0.1)?, Gaussian);
     /// for level in 0..3 {
     ///     let frame = Image::fill(32, 32, MonoF32::new(level as f32));
     ///     let mut spectrum = dft(&frame, Auto);
@@ -790,15 +803,15 @@ impl<P: SpectrumSource, S: PixelSpace> Spectrum<P, S> {
     /// # Example
     ///
     /// ```
-    /// use fovea::frequency::{Auto, Butterworth, Radius, dft};
+    /// use fovea::frequency::{Auto, Butterworth, Cutoff, dft};
     /// use fovea::image::Image;
     /// use fovea::pixel::MonoF32;
     ///
     /// let mut spectrum = dft(&Image::fill(64, 64, MonoF32::new(1.0)), Auto);
-    /// spectrum.low_pass(Radius::cycles_per_pixel(0.1)?, Butterworth::<2>);
+    /// spectrum.low_pass(Cutoff::cycles_per_pixel(0.1)?, Butterworth::<2>);
     /// # Ok::<(), fovea::Error>(())
     /// ```
-    pub fn low_pass<U: FrequencyUnit, R: Profile>(&mut self, cutoff: Radius<U>, profile: R) {
+    pub fn low_pass<U: FrequencyUnit, R: Profile>(&mut self, cutoff: Cutoff<U>, profile: R) {
         self.filter(&LowPass::new(cutoff, profile));
     }
 
@@ -807,15 +820,15 @@ impl<P: SpectrumSource, S: PixelSpace> Spectrum<P, S> {
     /// # Example
     ///
     /// ```
-    /// use fovea::frequency::{Auto, Gaussian, Radius, dft};
+    /// use fovea::frequency::{Auto, Gaussian, Cutoff, dft};
     /// use fovea::image::Image;
     /// use fovea::pixel::MonoF32;
     ///
     /// let mut spectrum = dft(&Image::fill(64, 64, MonoF32::new(1.0)), Auto);
-    /// spectrum.high_pass(Radius::cycles_per_pixel(0.02)?, Gaussian);
+    /// spectrum.high_pass(Cutoff::cycles_per_pixel(0.02)?, Gaussian);
     /// # Ok::<(), fovea::Error>(())
     /// ```
-    pub fn high_pass<U: FrequencyUnit, R: Profile>(&mut self, cutoff: Radius<U>, profile: R) {
+    pub fn high_pass<U: FrequencyUnit, R: Profile>(&mut self, cutoff: Cutoff<U>, profile: R) {
         self.filter(&HighPass::new(cutoff, profile));
     }
 
@@ -853,27 +866,27 @@ impl<P: SpectrumSource, S: PixelSpace> Spectrum<P, S> {
         self.filter(&BandStop::new(band, profile));
     }
 
-    /// Removes the frequencies within `radius` of `center` and of its
+    /// Removes the frequencies within `cutoff` of `center` and of its
     /// mirror, as [`Notch`] defines it.
     ///
     /// # Example
     ///
     /// ```
-    /// use fovea::frequency::{Auto, Frequency, Gaussian, Radius, dft};
+    /// use fovea::frequency::{Auto, Frequency, Gaussian, Cutoff, dft};
     /// use fovea::image::Image;
     /// use fovea::pixel::MonoF32;
     ///
     /// let mut spectrum = dft(&Image::fill(64, 64, MonoF32::new(1.0)), Auto);
-    /// spectrum.notch(Frequency::bins(8.0, 3.0), Radius::bins(1.5)?, Gaussian);
+    /// spectrum.notch(Frequency::bins(8.0, 3.0), Cutoff::bins(1.5)?, Gaussian);
     /// # Ok::<(), fovea::Error>(())
     /// ```
     pub fn notch<U: FrequencyUnit, R: Profile>(
         &mut self,
         center: Frequency<U>,
-        radius: Radius<U>,
+        cutoff: Cutoff<U>,
         profile: R,
     ) {
-        self.filter(&Notch::new(center, radius, profile));
+        self.filter(&Notch::new(center, cutoff, profile));
     }
 }
 
@@ -899,15 +912,15 @@ mod tests {
 
     #[test]
     fn shapes_and_filters_copy_compare_and_print() {
-        let r = Radius::<Bins>::try_new(2.0).unwrap();
+        let r = Cutoff::<Bins>::try_new(2.0).unwrap();
         let b = Band::<Bins>::try_new(1.0, 3.0).unwrap();
-        assert_eq!(format!("{r:?}"), "Radius(2.0)");
+        assert_eq!(format!("{r:?}"), "Cutoff(2.0)");
         assert_eq!(format!("{b:?}"), "Band { low: 1.0, high: 3.0 }");
         assert_eq!(r.clone(), r);
         assert_eq!(b.clone(), b);
         let lp = LowPass::new(r, Gaussian);
         assert_eq!(lp.clone(), lp);
-        assert_ne!(lp, LowPass::new(Radius::try_new(3.0).unwrap(), Gaussian));
+        assert_ne!(lp, LowPass::new(Cutoff::try_new(3.0).unwrap(), Gaussian));
         let hp = HighPass::new(r, Ideal);
         assert_eq!(hp.clone(), hp);
         let bp = BandPass::new(b, Butterworth::<1>);
@@ -921,18 +934,18 @@ mod tests {
     }
 
     #[test]
-    fn a_radius_is_finite_and_positive() {
-        assert_eq!(Radius::<Bins>::try_new(2.0).unwrap().get(), 2.0);
+    fn a_cutoff_is_finite_and_positive() {
+        assert_eq!(Cutoff::<Bins>::try_new(2.0).unwrap().get(), 2.0);
         for bad in [0.0, -1.0, f64::NAN, f64::INFINITY] {
-            let e = Radius::<Bins>::try_new(bad).unwrap_err();
+            let e = Cutoff::<Bins>::try_new(bad).unwrap_err();
             assert_eq!(requirement(e).0, R::FinitePositive, "{bad}");
-            assert!(Radius::<CyclesPerPixel>::new(bad).is_none());
+            assert!(Cutoff::<CyclesPerPixel>::new(bad).is_none());
         }
         assert_eq!(
-            Radius::bins(1.5).unwrap(),
-            Radius::<Bins>::new(1.5).unwrap()
+            Cutoff::bins(1.5).unwrap(),
+            Cutoff::<Bins>::new(1.5).unwrap()
         );
-        assert_eq!(Radius::cycles_per_pixel(0.1).unwrap().get(), 0.1);
+        assert_eq!(Cutoff::cycles_per_pixel(0.1).unwrap().get(), 0.1);
     }
 
     #[test]
@@ -1007,7 +1020,7 @@ mod tests {
 
     #[test]
     fn every_filter_is_even() {
-        let r = Radius::cycles_per_pixel(0.1).unwrap();
+        let r = Cutoff::cycles_per_pixel(0.1).unwrap();
         let b = Band::cycles_per_pixel(0.05, 0.2).unwrap();
         even(&LowPass::new(r, Gaussian));
         even(&HighPass::new(r, Butterworth::<3>));
@@ -1015,14 +1028,14 @@ mod tests {
         even(&BandStop::new(b, Gaussian));
         even(&Notch::new(
             cpp(0.2, -0.1),
-            Radius::cycles_per_pixel(0.03).unwrap(),
+            Cutoff::cycles_per_pixel(0.03).unwrap(),
             Gaussian,
         ));
     }
 
     fn partition<S: Profile>(profile: S) {
         let (a, b, c) = (0.05, 0.12, 0.3);
-        let r = |v| Radius::<CyclesPerPixel>::try_new(v).unwrap();
+        let r = |v| Cutoff::<CyclesPerPixel>::try_new(v).unwrap();
         let band = |lo, hi| Band::<CyclesPerPixel>::try_new(lo, hi).unwrap();
         for i in 0..=70 {
             let f = cpp(i as f64 * 0.01, 0.0);
@@ -1046,7 +1059,7 @@ mod tests {
 
     #[test]
     fn a_band_from_zero_is_a_low_pass() {
-        let lp = LowPass::new(Radius::cycles_per_pixel(0.2).unwrap(), Gaussian);
+        let lp = LowPass::new(Cutoff::cycles_per_pixel(0.2).unwrap(), Gaussian);
         let bp = BandPass::new(Band::cycles_per_pixel(0.0, 0.2).unwrap(), Gaussian);
         for i in 0..=50 {
             let f = cpp(i as f64 * 0.01, 0.0);
@@ -1058,7 +1071,7 @@ mod tests {
     fn a_notch_removes_its_centre_and_the_mirror() {
         let notch = Notch::new(
             Frequency::bins(30.0, 12.0),
-            Radius::bins(2.0).unwrap(),
+            Cutoff::bins(2.0).unwrap(),
             Ideal,
         );
         for (fx, fy) in [(30.0, 12.0), (31.0, 13.0), (-30.0, -12.0), (-28.5, -12.0)] {
@@ -1100,7 +1113,7 @@ mod tests {
             (0..480).map(|_| MonoF64::new(rng.value())).collect(),
         )
         .unwrap();
-        let r = Radius::cycles_per_pixel(0.15).unwrap();
+        let r = Cutoff::cycles_per_pixel(0.15).unwrap();
         let b = Band::cycles_per_pixel(0.05, 0.25).unwrap();
         let c = Frequency::cycles_per_pixel(0.25, 0.1);
         let base = dft(&img, Auto);
@@ -1124,11 +1137,11 @@ mod tests {
             s.filter(&BandStop::new(b, Gaussian))
         });
         check(
-            &|s| s.notch(c, Radius::cycles_per_pixel(0.05).unwrap(), Ideal),
+            &|s| s.notch(c, Cutoff::cycles_per_pixel(0.05).unwrap(), Ideal),
             &|s| {
                 s.filter(&Notch::new(
                     c,
-                    Radius::cycles_per_pixel(0.05).unwrap(),
+                    Cutoff::cycles_per_pixel(0.05).unwrap(),
                     Ideal,
                 ))
             },
@@ -1144,7 +1157,7 @@ mod tests {
             (0..192).map(|_| MonoF64::new(rng.value())).collect(),
         )
         .unwrap();
-        let lp = LowPass::new(Radius::cycles_per_pixel(0.2).unwrap(), Butterworth::<2>);
+        let lp = LowPass::new(Cutoff::cycles_per_pixel(0.2).unwrap(), Butterworth::<2>);
         let mut filtered = dft(&img, Auto);
         filtered.filter(&lp);
         let original = dft(&img, Auto);
@@ -1167,7 +1180,7 @@ mod tests {
             MonoF32::new(if (64..192).contains(&x) { 1.0 } else { 0.0 })
         });
         let mut spectrum = dft(&step, Radix2).unwrap();
-        spectrum.low_pass(Radius::cycles_per_pixel(0.1).unwrap(), profile);
+        spectrum.low_pass(Cutoff::cycles_per_pixel(0.1).unwrap(), profile);
         let smooth = spectrum.inverse(Radix2).unwrap();
         let row: Vec<f32> = (0..256).map(|x| smooth.pixel_at(x, 0).0).collect();
         (

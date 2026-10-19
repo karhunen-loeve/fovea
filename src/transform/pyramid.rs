@@ -369,6 +369,9 @@ pub trait PyramidMethod<P: Copy> {
 /// resolved depth may be smaller than requested; a `max_depth` of 0 is
 /// treated as 1, because a pyramid always contains at least its base level.
 ///
+/// The Gaussian shape as a filter on a spectrum is
+/// [`frequency::Gaussian`](crate::frequency::Gaussian).
+///
 /// # Example
 ///
 /// ```

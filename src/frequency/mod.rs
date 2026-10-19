@@ -102,8 +102,8 @@ mod units;
 pub use convolve::convolve;
 pub use correlate::{CorrelationRadius, PhaseCorrelation, PhaseReference, phase_correlate};
 pub use filters::{
-    Band, BandPass, BandStop, Butterworth, Gaussian, HighPass, Ideal, LowPass, Notch, Profile,
-    Radius, TransferFunction,
+    Band, BandPass, BandStop, Butterworth, Cutoff, Gaussian, HighPass, Ideal, LowPass, Notch,
+    Profile, TransferFunction,
 };
 pub use method::{Auto, Bluestein, DftMethod, Radix2, dft};
 pub use spectrum::{Spectrum, SpectrumSource};

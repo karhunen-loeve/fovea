@@ -373,6 +373,8 @@ impl<S: PixelSpace> Caliper<S> {
 ///
 /// Returned by [`profile`]. The values are kept, so a caller can inspect,
 /// plot or reuse them; [`edges`](Profile::edges) finds the edges on them.
+/// Not to be confused with
+/// [`frequency::Profile`](crate::frequency::Profile), the shape of a filter.
 ///
 /// # Example
 ///
