@@ -175,7 +175,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Huber` or `Tukey`, whose threshold is a length in the unit of the
   points (`tukey!(0.5)`, `huber!(0.5)`, or `try_new` for a computed value),
   so a threshold in pixels does not compile against points in millimetres.
-  Tukey starts from Huber's result. The returned `Fit` carries the element
+  Tukey starts from Huber's result, and must keep a majority: a Tukey fit
+  that uses no more than half of the points is `TooFewPoints`, since its
+  threshold then lies below the noise and the RMS over the few points kept
+  would flatter a poor element. For data whose outliers are the majority,
+  the documentation points to a consensus method such as RANSAC, which
+  fovea does not provide. The returned `Fit` carries the element
   and its residuals as exact geometric distances, the ellipse's included:
   `rms_residual` over the points that shaped the element, `max_residual`
   and `peak_to_valley` (the form deviation, furthest point outside plus

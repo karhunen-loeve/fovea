@@ -267,7 +267,9 @@ pub struct AllPoints;
 /// No point is dropped, so every point is used, and a point beyond the
 /// threshold counts as an outlier while still pulling the element a
 /// little. The fit is reweighted until the weights settle. Gentler than
-/// [`Tukey`], and the start [`Tukey`] begins from.
+/// [`Tukey`], and the start [`Tukey`] begins from. Set the threshold above
+/// the noise of the points, as for [`Tukey`]: below it, every good point
+/// is down-weighted as an outlier.
 ///
 /// Same construction discipline as the crate's other parameter types:
 /// [`huber!`](crate::huber) for literals, [`Huber::try_new`] for computed
@@ -297,6 +299,23 @@ pub struct Huber<U> {
 /// with the same threshold and reweights from there until the weights
 /// settle. The figures that judge the part, the maximum residual and the
 /// peak to valley, still include the outliers; see [`Fit`].
+///
+/// # The threshold and the noise
+///
+/// Set the threshold well above the noise of the points, a few times its
+/// standard deviation, so that every good point stays in: it says which
+/// points are wrong, not how precise the result should be. Below the noise
+/// the fit would keep only the few good points the element happens to pass
+/// close to, and report a small [`rms_residual`](Fit::rms_residual) over
+/// them for an element worse than one fitted to all points. A fit that
+/// keeps no more than half of the points is therefore an
+/// [`Error::TooFewPoints`] naming the majority it needed.
+///
+/// Tukey assumes the good points are the majority. For data in which the
+/// outliers outnumber them, a consensus method such as RANSAC is the
+/// suitable tool: it searches for the largest set of points one element
+/// fits, rather than reweighting from a fit to all of them. fovea does not
+/// provide one.
 ///
 /// # Example
 ///
@@ -530,6 +549,11 @@ impl<T: Element> Fit<T> {
 
     /// The root mean square of the distances of the points used from the
     /// element: how well the element describes the points that shaped it.
+    ///
+    /// Under [`Tukey`] these are the points within its threshold, so the
+    /// figure cannot exceed the threshold and says nothing about the
+    /// points left out; [`max_residual`](Self::max_residual) and
+    /// [`outlier_count`](Self::outlier_count) do.
     #[doc(alias = "rms")]
     #[doc(alias = "rmse")]
     #[must_use]
@@ -725,7 +749,9 @@ impl<U: LengthUnit> Fit<Ellipse<U>> {
 /// - [`Error::InvalidParameter`] if a point has a coordinate that is not
 ///   finite; its index is recorded.
 /// - [`Error::TooFewPoints`] if there are fewer points than
-///   [`Estimator::MIN_POINTS`], or if [`Tukey`] leaves fewer used.
+///   [`Estimator::MIN_POINTS`], or if [`Tukey`] leaves fewer used, or no
+///   more than half of the points: its threshold then lies below the
+///   noise, or the outliers are the majority (see [`Tukey`]).
 /// - [`Error::DegeneratePoints`] if the points determine no unique element,
 ///   or lie so far apart (beyond about 10¹⁵⁴) that the fit or its residuals
 ///   overflow `f64`.
@@ -802,9 +828,16 @@ where
         })
         .collect();
     let used_count = used.iter().filter(|u| **u).count();
-    if used_count < E::MIN_POINTS {
+    // Tukey must keep a majority: a threshold below the noise keeps the
+    // few points the start passes through, and the RMS over those few
+    // flatters an element that is worse than one fitted to all of them.
+    let required = match weighting {
+        Weighting::Tukey(_) => E::MIN_POINTS.max(points.len() / 2 + 1),
+        Weighting::AllPoints | Weighting::Huber(_) => E::MIN_POINTS,
+    };
+    if used_count < required {
         return Err(Error::TooFewPoints {
-            required: E::MIN_POINTS,
+            required,
             actual: used_count,
         });
     }
@@ -1203,17 +1236,46 @@ mod tests {
             }
         );
 
-        // On data with a clear majority a tiny threshold keeps exactly the
-        // points the start passes through, and says so.
+        // A tiny threshold keeps only the points the start passes
+        // through, a minority, which is an error naming the majority.
         let mut noise = Noise(42);
         let noisy: Vec<_> = circle_points(0.0, 0.0, 50.0, 40, 0.0, TAU)
             .into_iter()
             .map(|p| px(p.x + noise.gauss(1.0), p.y + noise.gauss(1.0)))
             .collect();
         let rule = Tukey::<Pixels>::try_new(Length::new(1e-6)).unwrap();
-        let fit = try_fit(&noisy, Taubin, rule).unwrap();
-        assert_eq!(fit.used_count() + fit.outlier_count(), noisy.len());
-        assert!(fit.used_count() >= Taubin::MIN_POINTS);
+        let Err(Error::TooFewPoints { required, actual }) = try_fit(&noisy, Taubin, rule) else {
+            panic!("a minority was accepted");
+        };
+        assert_eq!(required, 21);
+        assert!(actual <= 20, "{actual}");
+    }
+
+    #[test]
+    fn a_tukey_threshold_below_the_noise_is_an_error_not_a_flattering_fit() {
+        // The v0.6.0 review's P5: 200 points on a circle of r = 50 px with
+        // 0.3 px of radial noise. At 0.1 px Tukey kept 63 points, reported
+        // an RMS of 0.048 px and put the centre five times further off
+        // than a fit to all points.
+        let mut noise = Noise(7);
+        let points: Vec<_> = circle_points(0.0, 0.0, 50.0, 200, 0.0, TAU)
+            .into_iter()
+            .map(|p| {
+                let r = 1.0 + noise.gauss(0.3) / 50.0;
+                px(p.x * r, p.y * r)
+            })
+            .collect();
+        let Err(Error::TooFewPoints { required, actual }) =
+            try_fit(&points, Taubin, crate::tukey!(0.1))
+        else {
+            panic!("a fit to a minority was accepted");
+        };
+        assert_eq!(required, 101);
+        assert!(actual <= 100, "{actual}");
+        // A threshold a few times the noise keeps every good point.
+        let fit = try_fit(&points, Taubin, crate::tukey!(1.0)).unwrap();
+        assert!(fit.used_count() > 190, "{}", fit.used_count());
+        assert!(fit.element().center().distance(px(0.0, 0.0)).get() < 0.1);
     }
 
     // ── Ellipse ─────────────────────────────────────────────────────────
