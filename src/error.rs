@@ -228,7 +228,7 @@ pub enum Error {
     /// A fit has fewer points than its estimator needs to determine an
     /// element: 2 for a line, 3 for a circle, 5 for an ellipse.
     ///
-    /// Returned by [`try_fit`](crate::measure::try_fit), both when the input
+    /// Returned by [`fit`](crate::measure::fit), both when the input
     /// is too short and when the outlier handling leaves too few points to
     /// shape the element.
     TooFewPoints {
@@ -241,7 +241,7 @@ pub enum Error {
 
     /// The points determine no unique element of the kind being fitted.
     ///
-    /// Returned by [`try_fit`](crate::measure::try_fit) when the points
+    /// Returned by [`fit`](crate::measure::fit) when the points
     /// coincide or spread equally in every direction (a line), lie on one
     /// line (a circle or an ellipse), admit no ellipse, or lie so far apart
     /// that the fit overflows `f64`. Where the points lie is data, so this

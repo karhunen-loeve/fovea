@@ -12,11 +12,11 @@
 //! [`Profile::edges`](crate::measure::Profile::edges) gives, so a pair of
 //! width `W` wants σ at most `W / 7`.
 //!
-//! [`try_fit`](crate::measure::try_fit) fits a line, circle or ellipse to
+//! [`fit`](crate::measure::fit) fits a line, circle or ellipse to
 //! points, from caliper edges, from
 //! [`interpolate_edge_points`](crate::analyze::edge::interpolate_edge_points)
 //! or from a contour, with an estimator and an outlier rule the caller
-//! writes out: `try_fit(&points, Taubin, tukey!(0.5))`. The
+//! writes out: `fit(&points, Taubin, tukey!(0.5))`. The
 //! [`Fit`](crate::measure::Fit) carries the element and how well it fits,
 //! as exact geometric distances: the RMS residual over the points that
 //! shaped it, and the maximum residual and the form deviation over all
@@ -96,5 +96,5 @@ pub use edges::{
 };
 pub use fit::{
     AllPoints, Estimator, Fit, Fitzgibbon, Huber, OutlierRule, Taubin, TotalLeastSquares, Tukey,
-    try_fit,
+    fit,
 };

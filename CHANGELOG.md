@@ -171,7 +171,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   becomes an ellipse. The sealed trait `Element` names an element's unit.
   `draw::Line` and `draw::Circle` keep their names and meaning: they paint
   pixels.
-- **Geometric fits, `measure::try_fit`.** `try_fit(&points, estimator,
+- **Geometric fits, `measure::fit`.** `fit(&points, estimator,
   outliers)` fits a line by `TotalLeastSquares`, a circle by `Taubin` or an
   ellipse by `Fitzgibbon` (the direct least squares method, in Halíř and
   Flusser's stable form), with the outlier rule written out: `AllPoints`,
@@ -194,7 +194,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its residuals through a `ConformalMap`; under any other calibration the
   points convert first. Each estimator has `MIN_POINTS` (2, 3, 5).
 - **Breaking:** `Error::TooFewPoints { required, actual }` and
-  `Error::DegeneratePoints`, returned by `try_fit`. `Error` gained two
+  `Error::DegeneratePoints`, returned by `fit`. `Error` gained two
   variants, so an exhaustive `match` on it needs two arms.
 - **Geometric relations, as methods on the elements.** `distance(p)` and
   `closest_point(p)` on `Line`, `Segment`, `Circle` and `Ellipse`, exact

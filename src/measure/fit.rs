@@ -57,11 +57,11 @@ mod sealed {
 use sealed::Weighting;
 
 /// A method that fits one kind of element to points: the second parameter
-/// of [`try_fit`].
+/// of [`fit`].
 ///
 /// The estimator is a value, so the method is written at the call site and
 /// a different one for the same element can join later without changing
-/// `try_fit`. Sealed.
+/// `fit`. Sealed.
 pub trait Estimator: sealed::Fitter + Copy {
     /// The element it fits to points in the unit `U`.
     type Element<U: LengthUnit>: Element<Unit = U>;
@@ -82,13 +82,13 @@ pub trait Estimator: sealed::Fitter + Copy {
 ///
 /// ```
 /// use fovea::{Pixels, Point};
-/// use fovea::measure::{AllPoints, TotalLeastSquares, try_fit};
+/// use fovea::measure::{AllPoints, TotalLeastSquares, fit};
 ///
 /// // A vertical edge.
 /// let points: Vec<Point<Pixels>> = (0..5).map(|k| Point::new(12.5, k as f64)).collect();
-/// let fit = try_fit(&points, TotalLeastSquares, AllPoints)?;
-/// assert_eq!(fit.element().point().x, 12.5);
-/// assert_eq!(fit.max_residual().get(), 0.0);
+/// let line = fit(&points, TotalLeastSquares, AllPoints)?;
+/// assert_eq!(line.element().point().x, 12.5);
+/// assert_eq!(line.max_residual().get(), 0.0);
 /// # Ok::<(), fovea::Error>(())
 /// ```
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -106,12 +106,12 @@ pub struct TotalLeastSquares;
 ///
 /// ```
 /// use fovea::{Pixels, Point};
-/// use fovea::measure::{AllPoints, Taubin, try_fit};
+/// use fovea::measure::{AllPoints, Taubin, fit};
 ///
 /// let points: [Point<Pixels>; 4] =
 ///     [Point::new(15.0, 10.0), Point::new(10.0, 15.0), Point::new(5.0, 10.0), Point::new(10.0, 5.0)];
-/// let fit = try_fit(&points, Taubin, AllPoints)?;
-/// assert!((fit.element().radius().get() - 5.0).abs() < 1e-12);
+/// let circle = fit(&points, Taubin, AllPoints)?;
+/// assert!((circle.element().radius().get() - 5.0).abs() < 1e-12);
 /// # Ok::<(), fovea::Error>(())
 /// ```
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -133,7 +133,7 @@ pub struct Taubin;
 ///
 /// ```
 /// use fovea::{Pixels, Point};
-/// use fovea::measure::{AllPoints, Fitzgibbon, try_fit};
+/// use fovea::measure::{AllPoints, Fitzgibbon, fit};
 ///
 /// // Points of the ellipse (x / 20)² + (y / 8)² = 1 about (50, 30).
 /// let points: Vec<Point<Pixels>> = (0..12)
@@ -142,9 +142,9 @@ pub struct Taubin;
 ///         Point::new(50.0 + 20.0 * t.cos(), 30.0 + 8.0 * t.sin())
 ///     })
 ///     .collect();
-/// let fit = try_fit(&points, Fitzgibbon, AllPoints)?;
-/// assert!((fit.element().semi_major().get() - 20.0).abs() < 1e-9);
-/// assert!((fit.element().semi_minor().get() - 8.0).abs() < 1e-9);
+/// let ellipse = fit(&points, Fitzgibbon, AllPoints)?;
+/// assert!((ellipse.element().semi_major().get() - 20.0).abs() < 1e-9);
+/// assert!((ellipse.element().semi_minor().get() - 8.0).abs() < 1e-9);
 /// # Ok::<(), fovea::Error>(())
 /// ```
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -238,7 +238,7 @@ impl Estimator for Fitzgibbon {
 }
 
 /// How a fit treats points far from the element: the third parameter of
-/// [`try_fit`].
+/// [`fit`].
 ///
 /// There is no default: [`AllPoints`] is written out. [`Huber`] and
 /// [`Tukey`] take a threshold in the unit of the points, so a threshold in
@@ -251,11 +251,11 @@ pub trait OutlierRule<U: LengthUnit>: sealed::Rule + Copy {}
 ///
 /// ```
 /// use fovea::{Pixels, Point};
-/// use fovea::measure::{AllPoints, TotalLeastSquares, try_fit};
+/// use fovea::measure::{AllPoints, TotalLeastSquares, fit};
 ///
 /// let points: [Point<Pixels>; 3] = [Point::new(0.0, 0.0), Point::new(1.0, 0.0), Point::new(2.0, 0.0)];
-/// let fit = try_fit(&points, TotalLeastSquares, AllPoints)?;
-/// assert_eq!((fit.used_count(), fit.outlier_count()), (3, 0));
+/// let line = fit(&points, TotalLeastSquares, AllPoints)?;
+/// assert_eq!((line.used_count(), line.outlier_count()), (3, 0));
 /// # Ok::<(), fovea::Error>(())
 /// ```
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -332,11 +332,11 @@ pub struct Huber<U> {
 ///
 /// ```compile_fail
 /// use fovea::{Millimeter, Pixels, Point};
-/// use fovea::measure::{Taubin, Tukey, try_fit};
+/// use fovea::measure::{Taubin, Tukey, fit};
 ///
 /// let points: Vec<Point<Pixels>> = Vec::new();
 /// let rule: Tukey<Millimeter> = fovea::tukey!(0.01);
-/// let _ = try_fit(&points, Taubin, rule);
+/// let _ = fit(&points, Taubin, rule);
 /// ```
 pub struct Tukey<U> {
     threshold: Length<U>,
@@ -483,7 +483,7 @@ macro_rules! tukey {
     };
 }
 
-/// A fitted element and how well it fits: the result of [`try_fit`].
+/// A fitted element and how well it fits: the result of [`fit`].
 ///
 /// Residuals are geometric distances from the points to the element, exact
 /// for every element, the ellipse included, in the unit of the points. The
@@ -509,7 +509,7 @@ macro_rules! tukey {
 ///
 /// ```
 /// use fovea::{Pixels, Point};
-/// use fovea::measure::{Taubin, try_fit};
+/// use fovea::measure::{Taubin, fit};
 ///
 /// // A hole of radius 10 px with a chip: three points 2 px inside.
 /// let points: Vec<Point<Pixels>> = (0..360)
@@ -520,13 +520,13 @@ macro_rules! tukey {
 ///     })
 ///     .collect();
 ///
-/// let fit = try_fit(&points, Taubin, fovea::tukey!(0.5))?;
-/// assert_eq!(fit.outlier_count(), 3);
+/// let circle = fit(&points, Taubin, fovea::tukey!(0.5))?;
+/// assert_eq!(circle.outlier_count(), 3);
 /// // The circle fits the good edge exactly...
-/// assert!(fit.rms_residual().get() < 1e-9);
-/// assert!((fit.element().radius().get() - 10.0).abs() < 1e-9);
+/// assert!(circle.rms_residual().get() < 1e-9);
+/// assert!((circle.element().radius().get() - 10.0).abs() < 1e-9);
 /// // ...and the chip still shows where the part is judged.
-/// assert!((fit.max_residual().get() - 2.0).abs() < 1e-9);
+/// assert!((circle.max_residual().get() - 2.0).abs() < 1e-9);
 /// # Ok::<(), fovea::Error>(())
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -632,11 +632,11 @@ impl<U: LengthUnit> Fit<Line<U>> {
     ///
     /// ```
     /// use fovea::{Pixels, Point};
-    /// use fovea::measure::{AllPoints, TotalLeastSquares, try_fit};
+    /// use fovea::measure::{AllPoints, TotalLeastSquares, fit};
     ///
     /// let points: Vec<Point<Pixels>> = (2..=8).map(|k| Point::new(k as f64, 5.0)).collect();
-    /// let fit = try_fit(&points, TotalLeastSquares, AllPoints)?;
-    /// let extent = fit.extent();
+    /// let line = fit(&points, TotalLeastSquares, AllPoints)?;
+    /// let extent = line.extent();
     /// assert_eq!((extent.start, extent.end), (Point::new(2.0, 5.0), Point::new(8.0, 5.0)));
     /// # Ok::<(), fovea::Error>(())
     /// ```
@@ -656,13 +656,13 @@ impl<U: LengthUnit> Fit<Line<U>> {
     /// ```
     /// use fovea::{Millimeter, Pixels, Point};
     /// use fovea::geometry::UniformScale;
-    /// use fovea::measure::{AllPoints, TotalLeastSquares, try_fit};
+    /// use fovea::measure::{AllPoints, TotalLeastSquares, fit};
     ///
     /// let points: [Point<Pixels>; 3] = [Point::new(0.0, 0.0), Point::new(40.0, 1.0), Point::new(80.0, 0.0)];
-    /// let fit = try_fit(&points, TotalLeastSquares, AllPoints)?;
+    /// let line = fit(&points, TotalLeastSquares, AllPoints)?;
     /// let scale: UniformScale<Pixels, Millimeter> = fovea::uniform_scale!(0.025);
-    /// let in_mm = fit.map(&scale);
-    /// assert!((in_mm.peak_to_valley().get() - fit.peak_to_valley().get() * 0.025).abs() < 1e-15);
+    /// let in_mm = line.map(&scale);
+    /// assert!((in_mm.peak_to_valley().get() - line.peak_to_valley().get() * 0.025).abs() < 1e-15);
     /// # Ok::<(), fovea::Error>(())
     /// ```
     ///
@@ -672,12 +672,12 @@ impl<U: LengthUnit> Fit<Line<U>> {
     /// ```compile_fail
     /// use fovea::{IdealPixels, Millimeter, Pixels, Point};
     /// use fovea::geometry::UniformScale;
-    /// use fovea::measure::{AllPoints, TotalLeastSquares, try_fit};
+    /// use fovea::measure::{AllPoints, TotalLeastSquares, fit};
     ///
     /// let points: [Point<Pixels>; 3] = [Point::new(0.0, 0.0), Point::new(40.0, 1.0), Point::new(80.0, 0.0)];
-    /// let fit = try_fit(&points, TotalLeastSquares, AllPoints).unwrap();
+    /// let line = fit(&points, TotalLeastSquares, AllPoints).unwrap();
     /// let scale: UniformScale<IdealPixels, Millimeter> = fovea::uniform_scale!(0.025);
-    /// let _ = fit.map(&scale);
+    /// let _ = line.map(&scale);
     /// ```
     #[must_use]
     pub fn map<M: ConformalMap<Domain = U>>(&self, mapping: &M) -> Fit<Line<M::Codomain>> {
@@ -695,12 +695,12 @@ impl<U: LengthUnit> Fit<Circle<U>> {
     /// ```
     /// use fovea::{Millimeter, Pixels, Point};
     /// use fovea::geometry::UniformScale;
-    /// use fovea::measure::{AllPoints, Taubin, try_fit};
+    /// use fovea::measure::{AllPoints, Taubin, fit};
     ///
     /// let points: [Point<Pixels>; 3] = [Point::new(160.0, 0.0), Point::new(0.0, 160.0), Point::new(-160.0, 0.0)];
-    /// let fit = try_fit(&points, Taubin, AllPoints)?;
+    /// let circle = fit(&points, Taubin, AllPoints)?;
     /// let scale: UniformScale<Pixels, Millimeter> = fovea::uniform_scale!(0.0125);
-    /// assert!((fit.map(&scale).element().radius().get() - 2.0).abs() < 1e-12);
+    /// assert!((circle.map(&scale).element().radius().get() - 2.0).abs() < 1e-12);
     /// # Ok::<(), fovea::Error>(())
     /// ```
     ///
@@ -710,12 +710,12 @@ impl<U: LengthUnit> Fit<Circle<U>> {
     /// ```compile_fail
     /// use fovea::{Millimeter, Pixels, Point};
     /// use fovea::geometry::AxisScale;
-    /// use fovea::measure::{AllPoints, Taubin, try_fit};
+    /// use fovea::measure::{AllPoints, Taubin, fit};
     ///
     /// let points: [Point<Pixels>; 3] = [Point::new(1.0, 0.0), Point::new(0.0, 1.0), Point::new(-1.0, 0.0)];
-    /// let fit = try_fit(&points, Taubin, AllPoints).unwrap();
+    /// let circle = fit(&points, Taubin, AllPoints).unwrap();
     /// let scale: AxisScale<Pixels, Millimeter> = fovea::axis_scale!(0.02, 0.05);
-    /// let _ = fit.map(&scale);
+    /// let _ = circle.map(&scale);
     /// ```
     #[must_use]
     pub fn map<M: ConformalMap<Domain = U>>(&self, mapping: &M) -> Fit<Circle<M::Codomain>> {
@@ -760,21 +760,21 @@ impl<U: LengthUnit> Fit<Ellipse<U>> {
 ///
 /// ```
 /// use fovea::{Pixels, Point};
-/// use fovea::measure::{AllPoints, TotalLeastSquares, try_fit};
+/// use fovea::measure::{AllPoints, TotalLeastSquares, fit};
 ///
 /// // An edge that wanders a quarter pixel either side of y = 0.
 /// let points: [Point<Pixels>; 4] = [
 ///     Point::new(0.0, 0.25), Point::new(1.0, -0.25), Point::new(2.0, -0.25), Point::new(3.0, 0.25),
 /// ];
-/// let fit = try_fit(&points, TotalLeastSquares, AllPoints)?;
-/// assert_eq!(fit.max_residual().get(), 0.25);
-/// assert_eq!(fit.peak_to_valley().get(), 0.5);
+/// let line = fit(&points, TotalLeastSquares, AllPoints)?;
+/// assert_eq!(line.max_residual().get(), 0.25);
+/// assert_eq!(line.peak_to_valley().get(), 0.5);
 ///
 /// // A single point determines no line.
-/// assert!(try_fit(&points[..1], TotalLeastSquares, AllPoints).is_err());
+/// assert!(fit(&points[..1], TotalLeastSquares, AllPoints).is_err());
 /// # Ok::<(), fovea::Error>(())
 /// ```
-pub fn try_fit<U, E, O>(
+pub fn fit<U, E, O>(
     points: &[Point<U>],
     estimator: E,
     outliers: O,
@@ -989,10 +989,10 @@ mod tests {
             let points: Vec<_> = (0..10)
                 .map(|k| px(3.0 + k as f64 * cos, -7.0 + k as f64 * sin))
                 .collect();
-            let fit = try_fit(&points, TotalLeastSquares, AllPoints).unwrap();
-            assert!(fit.max_residual().get() < 1e-12, "angle {angle}");
+            let found = fit(&points, TotalLeastSquares, AllPoints).unwrap();
+            assert!(found.max_residual().get() < 1e-12, "angle {angle}");
             // The direction runs from the first point towards the last.
-            let d = fit.element().direction();
+            let d = found.element().direction();
             assert!(
                 (d.x - cos).abs() < 1e-12 && (d.y - sin).abs() < 1e-12,
                 "angle {angle}"
@@ -1004,8 +1004,8 @@ mod tests {
     fn a_line_points_from_its_first_input_to_its_last() {
         let forward: Vec<_> = (0..5).map(|k| px(k as f64, 2.0)).collect();
         let backward: Vec<_> = forward.iter().rev().copied().collect();
-        let f = try_fit(&forward, TotalLeastSquares, AllPoints).unwrap();
-        let b = try_fit(&backward, TotalLeastSquares, AllPoints).unwrap();
+        let f = fit(&forward, TotalLeastSquares, AllPoints).unwrap();
+        let b = fit(&backward, TotalLeastSquares, AllPoints).unwrap();
         assert_eq!(f.element().direction(), Vector::new(1.0, 0.0));
         assert_eq!(b.element().direction(), Vector::new(-1.0, 0.0));
         assert_eq!(b.extent().start, px(4.0, 2.0));
@@ -1018,13 +1018,13 @@ mod tests {
         // Tukey, so it neither shapes the line nor lengthens the extent.
         let mut points: Vec<_> = (0..20).map(|k| px(k as f64, 10.0)).collect();
         points.push(px(60.0, 13.0));
-        let fit = try_fit(&points, TotalLeastSquares, crate::tukey!(0.5)).unwrap();
-        assert_eq!((fit.used_count(), fit.outlier_count()), (20, 1));
-        let extent = fit.extent();
+        let found = fit(&points, TotalLeastSquares, crate::tukey!(0.5)).unwrap();
+        assert_eq!((found.used_count(), found.outlier_count()), (20, 1));
+        let extent = found.extent();
         assert!(extent.start.distance(px(0.0, 10.0)).get() < 1e-9);
         assert!(extent.end.distance(px(19.0, 10.0)).get() < 1e-9);
         assert!((extent.length().get() - 19.0).abs() < 1e-9);
-        assert!((fit.max_residual().get() - 3.0).abs() < 1e-9);
+        assert!((found.max_residual().get() - 3.0).abs() < 1e-9);
     }
 
     #[test]
@@ -1033,8 +1033,8 @@ mod tests {
         // corner the drawing dimensions is (11, 0), outside both extents.
         let top: Vec<_> = (0..=8).map(|k| px(k as f64, 0.0)).collect();
         let right: Vec<_> = (3..=10).map(|k| px(11.0, k as f64)).collect();
-        let top = try_fit(&top, TotalLeastSquares, AllPoints).unwrap();
-        let right = try_fit(&right, TotalLeastSquares, AllPoints).unwrap();
+        let top = fit(&top, TotalLeastSquares, AllPoints).unwrap();
+        let right = fit(&right, TotalLeastSquares, AllPoints).unwrap();
         // Where the infinite lines meet: solve p + s·d = q + t·e.
         let (p, d) = (top.element().point(), top.element().direction());
         let (q, e) = (right.element().point(), right.element().direction());
@@ -1051,21 +1051,21 @@ mod tests {
     fn too_few_points_are_reported_with_the_minimum() {
         let points = circle_points(0.0, 0.0, 1.0, 4, 0.0, TAU);
         assert_eq!(
-            try_fit(&points[..1], TotalLeastSquares, AllPoints).unwrap_err(),
+            fit(&points[..1], TotalLeastSquares, AllPoints).unwrap_err(),
             Error::TooFewPoints {
                 required: 2,
                 actual: 1
             }
         );
         assert_eq!(
-            try_fit(&points[..2], Taubin, AllPoints).unwrap_err(),
+            fit(&points[..2], Taubin, AllPoints).unwrap_err(),
             Error::TooFewPoints {
                 required: 3,
                 actual: 2
             }
         );
         assert_eq!(
-            try_fit(&points, Fitzgibbon, AllPoints).unwrap_err(),
+            fit(&points, Fitzgibbon, AllPoints).unwrap_err(),
             Error::TooFewPoints {
                 required: 5,
                 actual: 4
@@ -1079,7 +1079,7 @@ mod tests {
     #[test]
     fn a_point_that_is_not_finite_is_named_by_its_index() {
         let points = [px(0.0, 0.0), px(1.0, 1.0), px(f64::NAN, 2.0), px(3.0, 3.0)];
-        let Err(Error::InvalidParameter(e)) = try_fit(&points, TotalLeastSquares, AllPoints) else {
+        let Err(Error::InvalidParameter(e)) = fit(&points, TotalLeastSquares, AllPoints) else {
             panic!("a NaN point was accepted");
         };
         assert_eq!(e.requirement(), Requirement::Finite);
@@ -1091,26 +1091,26 @@ mod tests {
     fn degenerate_points_are_an_error() {
         let same = [px(2.0, 3.0); 6];
         assert_eq!(
-            try_fit(&same, TotalLeastSquares, AllPoints).unwrap_err(),
+            fit(&same, TotalLeastSquares, AllPoints).unwrap_err(),
             Error::DegeneratePoints
         );
         // Spread equally in every direction: no line is better than another.
         let square = [px(1.0, 1.0), px(-1.0, 1.0), px(-1.0, -1.0), px(1.0, -1.0)];
         assert_eq!(
-            try_fit(&square, TotalLeastSquares, AllPoints).unwrap_err(),
+            fit(&square, TotalLeastSquares, AllPoints).unwrap_err(),
             Error::DegeneratePoints
         );
         let collinear: Vec<_> = (0..8).map(|k| px(k as f64, 2.0 * k as f64 + 1.0)).collect();
         assert_eq!(
-            try_fit(&collinear, Taubin, AllPoints).unwrap_err(),
+            fit(&collinear, Taubin, AllPoints).unwrap_err(),
             Error::DegeneratePoints
         );
         assert_eq!(
-            try_fit(&collinear, Fitzgibbon, AllPoints).unwrap_err(),
+            fit(&collinear, Fitzgibbon, AllPoints).unwrap_err(),
             Error::DegeneratePoints
         );
         assert_eq!(
-            try_fit(&same, Fitzgibbon, AllPoints).unwrap_err(),
+            fit(&same, Fitzgibbon, AllPoints).unwrap_err(),
             Error::DegeneratePoints
         );
     }
@@ -1124,15 +1124,15 @@ mod tests {
             .map(|k| px(k as f64 * 1e155, 0.5 * k as f64 * 1e155 + (k % 2) as f64))
             .collect();
         assert_eq!(
-            try_fit(&far, TotalLeastSquares, AllPoints).unwrap_err(),
+            fit(&far, TotalLeastSquares, AllPoints).unwrap_err(),
             Error::DegeneratePoints
         );
         // Below the overflow the fit is fine.
         let near: Vec<_> = (0..6)
             .map(|k| px(k as f64 * 1e150, 0.5 * k as f64 * 1e150))
             .collect();
-        let fit = try_fit(&near, TotalLeastSquares, AllPoints).unwrap();
-        assert!(fit.rms_residual().get().is_finite());
+        let found = fit(&near, TotalLeastSquares, AllPoints).unwrap();
+        assert!(found.rms_residual().get().is_finite());
     }
 
     // ── Circle ──────────────────────────────────────────────────────────
@@ -1140,14 +1140,14 @@ mod tests {
     #[test]
     fn a_circle_fits_exactly_through_three_points_and_far_from_the_origin() {
         let three = [px(1.0, 0.0), px(0.0, 1.0), px(-1.0, 0.0)];
-        let fit = try_fit(&three, Taubin, AllPoints).unwrap();
-        assert!(fit.element().center().distance(px(0.0, 0.0)).get() < 1e-14);
-        assert!((fit.element().radius().get() - 1.0).abs() < 1e-14);
+        let found = fit(&three, Taubin, AllPoints).unwrap();
+        assert!(found.element().center().distance(px(0.0, 0.0)).get() < 1e-14);
+        assert!((found.element().radius().get() - 1.0).abs() < 1e-14);
 
         for (cx, cy, r) in [(1.0e4, -2.0e4, 3.0), (0.5, 0.25, 1.0e3), (-7.0, 4.0, 0.01)] {
             let points = circle_points(cx, cy, r, 9, 0.0, TAU);
-            let fit = try_fit(&points, Taubin, AllPoints).unwrap();
-            let c = fit.element();
+            let found = fit(&points, Taubin, AllPoints).unwrap();
+            let c = found.element();
             assert!(
                 c.center().distance(px(cx, cy)).get() < 1e-9 * r.max(1.0),
                 "{c:?}"
@@ -1163,12 +1163,12 @@ mod tests {
             .into_iter()
             .map(|p| px(p.x + noise.gauss(0.2), p.y + noise.gauss(0.2)))
             .collect();
-        let fit = try_fit(&points, Taubin, AllPoints).unwrap();
+        let found = fit(&points, Taubin, AllPoints).unwrap();
         // A test criterion, not a promise: a fifth of a pixel of noise on a
         // quarter turn of a 70 px circle.
-        assert!(fit.element().center().distance(px(10.0, -4.0)).get() < 0.5);
-        assert!((fit.element().radius().get() - 70.0).abs() < 0.5);
-        assert!((fit.rms_residual().get() - 0.2).abs() < 0.05);
+        assert!(found.element().center().distance(px(10.0, -4.0)).get() < 0.5);
+        assert!((found.element().radius().get() - 70.0).abs() < 0.5);
+        assert!((found.rms_residual().get() - 0.2).abs() < 0.05);
     }
 
     #[test]
@@ -1182,13 +1182,13 @@ mod tests {
                 px(r * t.cos(), r * t.sin())
             })
             .collect();
-        let fit = try_fit(&points, Taubin, AllPoints).unwrap();
-        assert!(fit.element().center().distance(px(0.0, 0.0)).get() < 1e-12);
-        let r = fit.element().radius().get();
-        assert!((fit.peak_to_valley().get() - 0.5).abs() < 1e-12);
+        let found = fit(&points, Taubin, AllPoints).unwrap();
+        assert!(found.element().center().distance(px(0.0, 0.0)).get() < 1e-12);
+        let r = found.element().radius().get();
+        assert!((found.peak_to_valley().get() - 0.5).abs() < 1e-12);
         let expected_max = (10.3 - r).max(r - 9.8);
-        assert!((fit.max_residual().get() - expected_max).abs() < 1e-12);
-        assert!(fit.max_residual() < fit.peak_to_valley());
+        assert!((found.max_residual().get() - expected_max).abs() < 1e-12);
+        assert!(found.max_residual() < found.peak_to_valley());
     }
 
     #[test]
@@ -1201,20 +1201,20 @@ mod tests {
                 px(200.0 + r * t.cos(), 150.0 + r * t.sin())
             })
             .collect();
-        let fit = try_fit(&points, Taubin, crate::tukey!(0.5)).unwrap();
-        assert_eq!((fit.used_count(), fit.outlier_count()), (997, 3));
-        assert!(fit.element().center().distance(px(200.0, 150.0)).get() < 0.01);
-        assert!((fit.rms_residual().get() - 0.05).abs() < 0.01);
-        assert!((fit.max_residual().get() - 2.0).abs() < 0.2);
-        assert!(fit.peak_to_valley().get() > 2.0 && fit.peak_to_valley().get() < 2.5);
+        let found = fit(&points, Taubin, crate::tukey!(0.5)).unwrap();
+        assert_eq!((found.used_count(), found.outlier_count()), (997, 3));
+        assert!(found.element().center().distance(px(200.0, 150.0)).get() < 0.01);
+        assert!((found.rms_residual().get() - 0.05).abs() < 0.01);
+        assert!((found.max_residual().get() - 2.0).abs() < 0.2);
+        assert!(found.peak_to_valley().get() > 2.0 && found.peak_to_valley().get() < 2.5);
 
         // Huber keeps every point and counts the chip as outliers.
-        let fit = try_fit(&points, Taubin, crate::huber!(0.5)).unwrap();
-        assert_eq!((fit.used_count(), fit.outlier_count()), (1000, 3));
+        let found = fit(&points, Taubin, crate::huber!(0.5)).unwrap();
+        assert_eq!((found.used_count(), found.outlier_count()), (1000, 3));
 
         // All points: the chip pulls the circle, and nothing is an outlier.
-        let fit = try_fit(&points, Taubin, AllPoints).unwrap();
-        assert_eq!((fit.used_count(), fit.outlier_count()), (1000, 0));
+        let found = fit(&points, Taubin, AllPoints).unwrap();
+        assert_eq!((found.used_count(), found.outlier_count()), (1000, 0));
     }
 
     #[test]
@@ -1244,7 +1244,7 @@ mod tests {
             .map(|p| px(p.x + noise.gauss(1.0), p.y + noise.gauss(1.0)))
             .collect();
         let rule = Tukey::<Pixels>::try_new(Length::new(1e-6)).unwrap();
-        let Err(Error::TooFewPoints { required, actual }) = try_fit(&noisy, Taubin, rule) else {
+        let Err(Error::TooFewPoints { required, actual }) = fit(&noisy, Taubin, rule) else {
             panic!("a minority was accepted");
         };
         assert_eq!(required, 21);
@@ -1266,16 +1266,16 @@ mod tests {
             })
             .collect();
         let Err(Error::TooFewPoints { required, actual }) =
-            try_fit(&points, Taubin, crate::tukey!(0.1))
+            fit(&points, Taubin, crate::tukey!(0.1))
         else {
             panic!("a fit to a minority was accepted");
         };
         assert_eq!(required, 101);
         assert!(actual <= 100, "{actual}");
         // A threshold a few times the noise keeps every good point.
-        let fit = try_fit(&points, Taubin, crate::tukey!(1.0)).unwrap();
-        assert!(fit.used_count() > 190, "{}", fit.used_count());
-        assert!(fit.element().center().distance(px(0.0, 0.0)).get() < 0.1);
+        let found = fit(&points, Taubin, crate::tukey!(1.0)).unwrap();
+        assert!(found.used_count() > 190, "{}", found.used_count());
+        assert!(found.element().center().distance(px(0.0, 0.0)).get() < 0.1);
     }
 
     // ── Ellipse ─────────────────────────────────────────────────────────
@@ -1286,8 +1286,8 @@ mod tests {
             let points: Vec<_> = (0..12)
                 .map(|k| ellipse_point(50.0, 30.0, 20.0, 8.0, phi, TAU * k as f64 / 12.0))
                 .collect();
-            let fit = try_fit(&points, Fitzgibbon, AllPoints).unwrap();
-            let e = fit.element();
+            let found = fit(&points, Fitzgibbon, AllPoints).unwrap();
+            let e = found.element();
             assert!(
                 e.center().distance(px(50.0, 30.0)).get() < 1e-9,
                 "{phi}: {e:?}"
@@ -1299,7 +1299,7 @@ mod tests {
                 e.orientation().signed_difference(expected).abs() < 1e-9,
                 "{phi}: {e:?}"
             );
-            assert!(fit.max_residual().get() < 1e-9);
+            assert!(found.max_residual().get() < 1e-9);
         }
     }
 
@@ -1308,14 +1308,14 @@ mod tests {
         let five: Vec<_> = (0..5)
             .map(|k| ellipse_point(-3.0, 7.0, 12.0, 4.0, 0.4, 1.1 * k as f64))
             .collect();
-        let fit = try_fit(&five, Fitzgibbon, AllPoints).unwrap();
-        assert!((fit.element().semi_major().get() - 12.0).abs() < 1e-8);
-        assert!((fit.element().semi_minor().get() - 4.0).abs() < 1e-8);
+        let found = fit(&five, Fitzgibbon, AllPoints).unwrap();
+        assert!((found.element().semi_major().get() - 12.0).abs() < 1e-8);
+        assert!((found.element().semi_minor().get() - 4.0).abs() < 1e-8);
 
         let round = circle_points(5.0, 5.0, 9.0, 24, 0.0, TAU);
-        let fit = try_fit(&round, Fitzgibbon, AllPoints).unwrap();
-        assert!((fit.element().semi_major().get() - 9.0).abs() < 1e-9);
-        assert!((fit.element().semi_minor().get() - 9.0).abs() < 1e-9);
+        let found = fit(&round, Fitzgibbon, AllPoints).unwrap();
+        assert!((found.element().semi_major().get() - 9.0).abs() < 1e-9);
+        assert!((found.element().semi_minor().get() - 9.0).abs() < 1e-9);
     }
 
     #[test]
@@ -1333,9 +1333,9 @@ mod tests {
         let normal = Vector::<Pixels>::new(b * t.cos(), a * t.sin());
         let normal = normal * (1.0 / normal.length().get());
         points.push(on + normal * 5.0);
-        let fit = try_fit(&points, Fitzgibbon, crate::tukey!(0.5)).unwrap();
-        assert_eq!(fit.outlier_count(), 1);
-        assert!((fit.max_residual().get() - 5.0).abs() < 1e-6);
+        let found = fit(&points, Fitzgibbon, crate::tukey!(0.5)).unwrap();
+        assert_eq!(found.outlier_count(), 1);
+        assert!((found.max_residual().get() - 5.0).abs() < 1e-6);
     }
 
     // ── Parameters and mappings ─────────────────────────────────────────
@@ -1373,17 +1373,17 @@ mod tests {
                 px(40.0 + r * t.cos(), 20.0 + r * t.sin())
             })
             .collect();
-        let fit = try_fit(&points, Taubin, AllPoints).unwrap();
+        let found = fit(&points, Taubin, AllPoints).unwrap();
         let scale: UniformScale<Pixels, Millimeter> = crate::uniform_scale!(0.0125);
-        let mm = fit.map(&scale);
+        let mm = found.map(&scale);
         assert!((mm.element().center().x - 0.5).abs() < 1e-12);
         assert!((mm.element().center().y - 0.25).abs() < 1e-12);
         assert!((mm.peak_to_valley().get() - 0.5 * 0.0125).abs() < 1e-14);
-        assert_eq!(mm.used_count(), fit.used_count());
+        assert_eq!(mm.used_count(), found.used_count());
 
         // A line under a rotation: the extent maps with it.
         let line_points: Vec<_> = (0..=10).map(|k| px(k as f64, 0.0)).collect();
-        let line = try_fit(&line_points, TotalLeastSquares, AllPoints).unwrap();
+        let line = fit(&line_points, TotalLeastSquares, AllPoints).unwrap();
         let turn: Similarity<Pixels, Millimeter> = Similarity::try_linear(2.0, FRAC_PI_2).unwrap();
         let mapped = line.map(&turn);
         let extent = mapped.extent();
@@ -1393,7 +1393,7 @@ mod tests {
         let ellipse_points: Vec<_> = (0..12)
             .map(|k| ellipse_point(0.0, 0.0, 20.0, 8.0, 0.0, TAU * k as f64 / 12.0))
             .collect();
-        let ellipse = try_fit(&ellipse_points, Fitzgibbon, AllPoints).unwrap();
+        let ellipse = fit(&ellipse_points, Fitzgibbon, AllPoints).unwrap();
         let mapped = ellipse.map(&turn);
         assert!((mapped.element().semi_major().get() - 40.0).abs() < 1e-8);
         let vertical = AxialOrientation::from_radians(FRAC_PI_2).unwrap();

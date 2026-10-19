@@ -140,7 +140,7 @@ pub mod geometry;
 /// [`profile`](measure::profile), then
 /// [`Profile::edges`](measure::Profile::edges) and
 /// [`Edges::pairs`](measure::Edges::pairs); fit the points with
-/// [`try_fit`](measure::try_fit). Results are positions and lengths in
+/// [`fit`](measure::fit). Results are positions and lengths in
 /// pixels, which a calibration from [`geometry`] converts.
 pub mod measure;
 

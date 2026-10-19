@@ -3,7 +3,7 @@
 //!
 //! Each takes the points with a weight per point, all weights finite and
 //! not negative, at least the estimator's minimum of them positive, and
-//! every point finite; `try_fit` checks all of that before calling.
+//! every point finite; `fit` checks all of that before calling.
 
 use crate::AxialOrientation;
 use crate::Error;

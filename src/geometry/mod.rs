@@ -76,7 +76,7 @@
 //! ```
 //! use fovea::{Millimeter, Pixels, Point};
 //! use fovea::geometry::{ConformalMap, UniformScale};
-//! use fovea::measure::{AllPoints, Taubin, try_fit};
+//! use fovea::measure::{AllPoints, Taubin, fit};
 //!
 //! // Two holes of radius 40 px, their edges found in the image.
 //! let edge = |cx: f64, cy: f64| -> Vec<Point<Pixels>> {
@@ -87,8 +87,8 @@
 //!         })
 //!         .collect()
 //! };
-//! let left = try_fit(&edge(200.0, 300.0), Taubin, AllPoints)?;
-//! let right = try_fit(&edge(680.0, 300.0), Taubin, AllPoints)?;
+//! let left = fit(&edge(200.0, 300.0), Taubin, AllPoints)?;
+//! let right = fit(&edge(680.0, 300.0), Taubin, AllPoints)?;
 //!
 //! // The pitch of the holes, in pixels and on the part.
 //! let pitch = left.element().center().distance(right.element().center());

@@ -152,7 +152,7 @@ Important distinction: `Rgb8` and `Srgb8` may both store three `u8` channels, bu
 | `features` | `detect::detect_corners`, `detect::fast`, `refine_corners`, `Corner` | Corner detection — the structure-tensor and segment-test families — sub-pixel refinement, and the keypoint types they produce. |
 | `draw` | `draw_rect`, `draw_circle`, `draw_text`, `Drawable` | Annotation burn-in: lines, rectangles, circles, polylines, crosshairs and bitmap text, clipped, with hard single-pixel strokes. |
 | `geometry` | `Point`, `Millimeter`, `UniformScale`, `AffineMap`, `BrownConrady` | Units, positions and mappings of the plane: pixels to millimetres, with the mapping's class deciding what converts, and the lens model that corrects measured points. |
-| `measure` | `Caliper`, `profile`, `Profile::edges`, `try_fit` | Sub-pixel metrology: edges and edge pairs along a caliper, and lines, circles and ellipses fitted to points with a named outlier rule. |
+| `measure` | `Caliper`, `profile`, `Profile::edges`, `fit` | Sub-pixel metrology: edges and edge pairs along a caliper, and lines, circles and ellipses fitted to points with a named outlier rule. |
 | `frequency` | `dft`, `Spectrum`, `phase_correlate`, `frequency::convolve` | The discrete Fourier transform: spectra, filters on them, sub-pixel shifts by phase correlation, and convolution with large kernels. |
 | `error` | `Error`, `ParameterError` | The one error type, and what a rejected parameter reports. |
 | `border` | `Clamp`, `Mirror`, `Skip` | Boundary behavior for neighborhood operations. |
