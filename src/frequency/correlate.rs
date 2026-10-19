@@ -18,22 +18,31 @@ use std::f64::consts::PI;
 /// the window and the wrap at the edges distort it.
 const MIN_BINS: f64 = 3.0;
 
+/// The largest radius, exclusive. The weight is cut at the Nyquist
+/// frequency, 0.5 cycles per pixel; from about 0.18 on the cut leaves the
+/// correlation peak no longer Gaussian, and its sub-pixel fit is biased on
+/// clean images. At 0.2 the weight there has fallen to about 1 %.
+const MAX_RADIUS: f64 = 0.2;
+
 /// The rule a [`CorrelationRadius`] keeps, as its errors report it.
 const RADIUS_RANGE: Requirement = Requirement::OpenInterval {
     low: 0.0,
-    high: 0.5,
+    high: MAX_RADIUS,
 };
 
 /// The radius of the weight phase correlation puts on the frequencies, in
-/// cycles per pixel: strictly between 0 and 0.5.
+/// cycles per pixel: strictly between 0 and 0.2.
 ///
 /// The weight halves the amplitude at the radius, as the smooth profiles
 /// of the frequency filters do, and it decides how accurate
 /// [`phase_correlate`] is on a given kind of image. How to choose it is
 /// described there. 0.5 cycles per pixel is the highest frequency an image
-/// holds, so a value of 0.5 or more, such as a size in pixels written by
-/// mistake, is rejected here; a radius too small for a particular image is
-/// rejected by the call, which knows the image's size.
+/// holds, and the weight is cut there: from a radius of about 0.18 on, the
+/// cut makes the correlation peak lose its shape, and the shift is off by
+/// a hundredth of a pixel at 0.25 and fails on every image from 0.4, so a
+/// value of 0.2 or more, such as a size in pixels written by mistake, is
+/// rejected here. A radius too small for a particular image is rejected by
+/// the call, which knows the image's size.
 ///
 /// Build one with [`try_new`](Self::try_new), or with
 /// [`correlation_radius!`](crate::correlation_radius) for a literal checked
@@ -58,11 +67,11 @@ pub struct CorrelationRadius {
 
 impl CorrelationRadius {
     /// A radius of `value` cycles per pixel, or `None` unless it lies
-    /// strictly between 0 and 0.5.
+    /// strictly between 0 and 0.2.
     #[must_use]
     pub const fn new(value: f64) -> Option<Self> {
         // Written in the positive, so NaN is refused.
-        if value > 0.0 && value < 0.5 {
+        if value > 0.0 && value < MAX_RADIUS {
             Some(Self { value })
         } else {
             None
@@ -74,7 +83,7 @@ impl CorrelationRadius {
     /// # Errors
     ///
     /// [`Error::InvalidParameter`] unless `value` lies strictly between 0
-    /// and 0.5.
+    /// and 0.2.
     pub fn try_new(value: f64) -> Result<Self, Error> {
         Self::new(value)
             .ok_or_else(|| ParameterError::new("radius", RADIUS_RANGE, Value::F64(value)).into())
@@ -105,6 +114,11 @@ impl CorrelationRadius {
 /// // ERROR: evaluation panicked: must lie strictly between
 /// let _ = fovea::correlation_radius!(8.0);
 /// ```
+///
+/// ```compile_fail
+/// // ERROR: evaluation panicked: must lie strictly between
+/// let _ = fovea::correlation_radius!(0.25);
+/// ```
 #[macro_export]
 macro_rules! correlation_radius {
     ($value:expr) => {
@@ -112,7 +126,7 @@ macro_rules! correlation_radius {
             $crate::frequency::CorrelationRadius::new($value).expect(
                 $crate::error::Requirement::OpenInterval {
                     low: 0.0,
-                    high: 0.5,
+                    high: 0.2,
                 }
                 .text(),
             )
@@ -286,7 +300,7 @@ impl<P: SpectrumSource, S: PixelSpace> PhaseReference<P, S> {
     /// [`Error::InvalidParameter`] if `radius` does not exceed 3 frequency
     /// bins of the image's shorter side, 3 / min(W, H) cycles per pixel;
     /// the error's interval names the smallest radius that does. No radius
-    /// is large enough for an image with a side under 7 pixels, or none.
+    /// is large enough for an image with a side under 16 pixels, or none.
     pub fn new<I, M>(reference: &I, radius: CorrelationRadius, method: M) -> Result<Self, Error>
     where
         I: RasterImage<Pixel = P, Space = S>,
@@ -295,9 +309,9 @@ impl<P: SpectrumSource, S: PixelSpace> PhaseReference<P, S> {
         let size = reference.size();
         let shorter = size.width.min(size.height);
         let smallest = if shorter == 0 {
-            0.5
+            MAX_RADIUS
         } else {
-            (MIN_BINS / shorter as f64).min(0.5)
+            (MIN_BINS / shorter as f64).min(MAX_RADIUS)
         };
         // The radius is never NaN, so the comparison is total.
         if radius.get() <= smallest {
@@ -305,7 +319,7 @@ impl<P: SpectrumSource, S: PixelSpace> PhaseReference<P, S> {
                 "radius",
                 Requirement::OpenInterval {
                     low: smallest,
-                    high: 0.5,
+                    high: MAX_RADIUS,
                 },
                 Value::F64(radius.get()),
             )
@@ -451,8 +465,11 @@ impl<P: SpectrumSource, S: PixelSpace> PhaseReference<P, S> {
 /// the images hold: a soft image, defocused or of large smooth shapes, has
 /// nothing left at high frequencies but noise and the traces of the frame's
 /// edges, and a radius that reaches there fails by a tenth of a pixel and
-/// more, with no sign of it in the result. A sharp image holds more, and a
-/// larger radius is then more accurate.
+/// more, with no sign of it in the result. A sharp image holds more, and up
+/// to 0.12, the largest radius measured below, a larger radius is then more
+/// accurate. Beyond about 0.18 the weight is cut at the Nyquist frequency,
+/// and even a sharp, noise-free pair is fitted with a bias, which is why
+/// [`CorrelationRadius`] stops below 0.2.
 ///
 /// Measured during development on synthetic 128 × 128 images in `f64`: the
 /// worst error over sub-pixel shifts without noise, and the root mean
@@ -1019,7 +1036,7 @@ mod tests {
             "radius",
             Requirement::OpenInterval {
                 low: 3.0 / 128.0,
-                high: 0.5,
+                high: 0.2,
             },
             Value::F64(0.001),
         )
@@ -1030,23 +1047,23 @@ mod tests {
     }
 
     #[test]
-    fn no_radius_fits_an_image_under_seven_pixels() {
-        for size in [Size::new(6, 40), Size::new(40, 0), Size::new(0, 0)] {
+    fn no_radius_fits_an_image_under_sixteen_pixels() {
+        for size in [Size::new(15, 40), Size::new(40, 0), Size::new(0, 0)] {
             let img = Image::fill(size.width, size.height, MonoF32::new(1.0));
-            let err = PhaseReference::new(&img, correlation_radius!(0.49), Auto).unwrap_err();
+            let err = PhaseReference::new(&img, correlation_radius!(0.199), Auto).unwrap_err();
             let Error::InvalidParameter(e) = err else {
                 panic!("{err:?}")
             };
             assert_eq!(
                 e.requirement(),
                 Requirement::OpenInterval {
-                    low: 0.5,
-                    high: 0.5
+                    low: 0.2,
+                    high: 0.2
                 }
             );
         }
-        let seven = Image::fill(7, 7, MonoF32::new(1.0));
-        assert!(PhaseReference::new(&seven, correlation_radius!(0.49), Auto).is_ok());
+        let sixteen = Image::fill(16, 16, MonoF32::new(1.0));
+        assert!(PhaseReference::new(&sixteen, correlation_radius!(0.199), Auto).is_ok());
     }
 
     #[test]
@@ -1067,18 +1084,20 @@ mod tests {
 
     #[test]
     fn the_radius_keeps_to_its_range() {
-        for bad in [0.0, -0.1, 0.5, 8.0, f64::NAN, f64::INFINITY] {
+        // 0.25 and 0.4 lie in the range the cap took away: biased at 0.25,
+        // no peak on any image at 0.4 (the v0.6.0 review's C8).
+        for bad in [0.0, -0.1, 0.2, 0.25, 0.4, 0.5, 8.0, f64::NAN, f64::INFINITY] {
             assert_eq!(CorrelationRadius::new(bad), None, "{bad}");
             assert_eq!(
                 CorrelationRadius::try_new(bad).unwrap_err(),
                 ParameterError::new("radius", RADIUS_RANGE, Value::F64(bad)).into(),
             );
         }
-        for good in [1e-9, 0.03, 0.12, 0.499_999] {
+        for good in [1e-9, 0.03, 0.12, 0.199_999] {
             assert_eq!(CorrelationRadius::new(good).map(|r| r.get()), Some(good));
         }
-        const R: CorrelationRadius = correlation_radius!(0.25);
-        assert_eq!(R.get(), 0.25);
+        const R: CorrelationRadius = correlation_radius!(0.15);
+        assert_eq!(R.get(), 0.15);
     }
 
     #[test]

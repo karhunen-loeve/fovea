@@ -327,9 +327,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   space saying where the content of `moving` lies, so a point `p` of the reference is
   at `p + shift`, and `found.peak()`, 1 for identical images. The phase
   of the cross-power spectrum is weighted by a Gaussian of a mandatory
-  radius, a `CorrelationRadius` strictly between 0 and 0.5 cycles per
+  radius, a `CorrelationRadius` strictly between 0 and 0.2 cycles per
   pixel (`correlation_radius!(0.06)` for a literal, so a size in pixels
-  written by mistake fails to build), and its peak is located by a
+  written by mistake fails to build; above about 0.18 the weight is cut at
+  the Nyquist frequency and the peak fit is biased even on clean images,
+  so a phase correlation needs an image of at least 16 px a side), and
+  its peak is located by a
   three-point Gaussian fit. Both images are windowed by Hann, and a
   second pass windows them over the part they share. The documentation
   gives the accuracy measured by radius and sharpness of the images,
