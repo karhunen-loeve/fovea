@@ -1,6 +1,5 @@
 //! Composition of mappings, and the direction a remap reads them in.
 
-use super::affine::{Affine, AxisScale, Similarity, UniformScale};
 use super::homography::Homography;
 use super::lens::BrownConrady;
 use super::map::{AffineMap, PlaneMap};
@@ -94,12 +93,35 @@ where
     }
 }
 
-/// A mapping whose inverse is known in closed form: the affine family and
-/// the homography.
+/// A mapping whose inverse is known in closed form: every [`AffineMap`]
+/// and the homography.
 ///
-/// [`SourceToDest`] needs one. A lens model has no closed-form inverse, so it
-/// is not `Invertible`: its points are corrected one by one with
-/// [`BrownConrady::undistort_point`].
+/// [`SourceToDest`] needs one. Every `AffineMap` is `Invertible`, with its
+/// own [`inverse`](AffineMap::inverse) as [`invert`](Self::invert), so an
+/// affine mapping of your own needs no second impl and both traits name the
+/// same inverse. In generic code, bound on `AffineMap` alone: it brings
+/// `Invertible` with it, and `invert()` then returns an `AffineMap`. A bound
+/// on both, `M: AffineMap + Invertible`, makes the compiler take the two
+/// `Inverse` types from the bounds, where it cannot see that they are one.
+/// A lens model has no closed-form inverse, so it is not `Invertible`: its
+/// points are corrected one by one with [`BrownConrady::undistort_point`].
+///
+/// # Example
+///
+/// ```
+/// use fovea::{Pixels, Point};
+/// use fovea::geometry::{AffineMap, Invertible, SourceLookup, SourceToDest, Similarity};
+///
+/// // An `AffineMap` bound is enough for both.
+/// fn back<M: AffineMap>(m: &M, p: Point<M::Codomain>) -> Point<M::Domain> {
+///     m.invert().map_point(p)
+/// }
+///
+/// let s: Similarity<Pixels, Pixels> = Similarity::try_linear(2.0, 0.0)?;
+/// assert_eq!(back(&s, Point::new(4.0, 6.0)), Point::new(2.0, 3.0));
+/// assert_eq!(SourceToDest::new(s).source_of(Point::new(4.0, 6.0)), Some(Point::new(2.0, 3.0)));
+/// # Ok::<(), fovea::Error>(())
+/// ```
 pub trait Invertible: PlaneMap {
     /// The inverse mapping's type.
     type Inverse: PlaneMap<Domain = Self::Codomain, Codomain = Self::Domain>;
@@ -108,18 +130,15 @@ pub trait Invertible: PlaneMap {
     fn invert(&self) -> Self::Inverse;
 }
 
-macro_rules! invertible_affine {
-    ($($ty:ident),*) => {$(
-        impl<D: LengthUnit, C: LengthUnit> Invertible for $ty<D, C> {
-            type Inverse = $ty<C, D>;
-            fn invert(&self) -> $ty<C, D> {
-                self.inverse()
-            }
-        }
-    )*};
-}
+/// One inverse for the affine family: the one `AffineMap` computes, so the
+/// two traits cannot disagree.
+impl<M: AffineMap> Invertible for M {
+    type Inverse = <M as AffineMap>::Inverse;
 
-invertible_affine!(UniformScale, AxisScale, Similarity, Affine);
+    fn invert(&self) -> Self::Inverse {
+        self.inverse()
+    }
+}
 
 impl<D: LengthUnit, C: LengthUnit> Invertible for Homography<D, C> {
     type Inverse = Homography<C, D>;
@@ -253,7 +272,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::geometry::{CameraMatrix, FocalLength, Vector};
+    use crate::geometry::{Affine, CameraMatrix, FocalLength, Similarity, Vector};
     use crate::{IdealPixels, Pixels};
 
     fn lens() -> BrownConrady {
@@ -306,6 +325,67 @@ mod tests {
                 .distance(Point::new(5.0, 7.0))
                 .get()
                 < 1e-12
+        );
+    }
+
+    /// A translation of a caller's own, written as an `AffineMap` only.
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    struct Shift(f64, f64);
+
+    impl PlaneMap for Shift {
+        type Domain = Pixels;
+        type Codomain = Pixels;
+        fn try_map_point(&self, p: Point<Pixels>) -> Option<Point<Pixels>> {
+            Some(self.map_point(p))
+        }
+    }
+
+    impl AffineMap for Shift {
+        type Inverse = Shift;
+        fn map_point(&self, p: Point<Pixels>) -> Point<Pixels> {
+            Point::new(p.x + self.0, p.y + self.1)
+        }
+        fn map_vector(&self, v: Vector<Pixels>) -> Vector<Pixels> {
+            v
+        }
+        fn inverse(&self) -> Shift {
+            Shift(-self.0, -self.1)
+        }
+        fn reverses_orientation(&self) -> bool {
+            false
+        }
+    }
+
+    #[test]
+    fn an_affine_map_of_ones_own_is_invertible_with_its_own_inverse() {
+        // The v0.6.0 review's P4: the two traits named two inverses, and
+        // an affine mapping of a caller's own needed a second impl to enter
+        // `SourceToDest`.
+        let shift = Shift(3.0, -2.0);
+        assert_eq!(shift.invert(), shift.inverse());
+        let lookup = SourceToDest::new(shift);
+        assert_eq!(
+            lookup.source_of(Point::new(10.0, 10.0)),
+            Some(Point::new(7.0, 12.0))
+        );
+        // The affine family goes through the same impl.
+        let s: Similarity<Pixels, Pixels> = Similarity::try_linear(2.0, 0.5).unwrap();
+        assert_eq!(s.invert(), s.inverse());
+        let a: Affine<Pixels, IdealPixels> =
+            Affine::try_new([[2.0, 0.5], [0.0, 1.0]], Vector::new(1.0, 2.0)).unwrap();
+        assert_eq!(a.invert(), a.inverse());
+    }
+
+    /// Generic over `AffineMap` alone, the inverse is an `AffineMap` again.
+    fn back<M: AffineMap>(m: &M, p: Point<M::Codomain>) -> Point<M::Domain> {
+        m.invert().map_point(p)
+    }
+
+    #[test]
+    fn an_affine_bound_alone_gives_the_affine_inverse() {
+        assert_eq!(
+            back(&Shift(1.0, 1.0), Point::new(4.0, 6.0)),
+            Point::new(3.0, 5.0)
         );
     }
 }

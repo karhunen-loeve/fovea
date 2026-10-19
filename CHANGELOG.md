@@ -222,7 +222,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Direction types and composition.** `DestToSource(map)` and
   `SourceToDest::new(map)` say which way a mapping runs; `SourceToDest`
   accepts an `Invertible` mapping (the affine family and the homography),
-  not a lens model. Each names the space of its destination and of its
+  not a lens model. Every `AffineMap`, a caller's own included, is
+  `Invertible` through one blanket impl whose inverse is its
+  `AffineMap::inverse`, so the two traits cannot name different inverses.
+  Each names the space of its destination and of its
   source (`SourceLookup::Dest`, `SourceLookup::Source`), both spaces
   measured in pixels, so a remap through a calibration into world units
   does not compile. `PlaneMap::then` chains any mapping that ends in the
