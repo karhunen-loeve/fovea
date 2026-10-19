@@ -319,6 +319,20 @@ impl<P: SpectrumSource> sealed::Method<P> for Bluestein {
 /// the same up to rounding, and the change is recorded in the changelog.
 /// To keep the algorithm fixed, write [`Radix2`] or [`Bluestein`].
 ///
+/// # In the functions that pad
+///
+/// [`phase_correlate`](super::phase_correlate),
+/// [`PhaseReference`](super::PhaseReference) and
+/// [`convolve`](super::convolve) pad the image with zeros to a size of the
+/// method's choosing. There `Auto` pads every side to the next power of
+/// two, as [`Radix2::next_size`] does, and transforms by radix-2: a padded
+/// radix-2 transform is faster than Bluestein's at the exact size, which
+/// runs radix-2 transforms of twice the length. The padded size changes
+/// the result of a phase correlation by more than rounding, so this choice
+/// is fixed: a faster method for other sizes would arrive under a name of
+/// its own, and `Auto` keeps the results of these functions across
+/// releases. [`dft`] never pads, under any method.
+///
 /// # Example
 ///
 /// ```
@@ -370,7 +384,9 @@ impl<P: SpectrumSource> DftMethod<P> for Auto {
 
 impl<P: SpectrumSource> sealed::Method<P> for Auto {
     fn fit(&self, size: Size) -> Size {
-        size
+        // Fixed for good (see "In the functions that pad"): the padded size
+        // is part of a phase correlation's result.
+        Radix2.next_size(size)
     }
 
     fn tables(&self, size: Size) -> Result<Axes<P::Bin>, Error> {

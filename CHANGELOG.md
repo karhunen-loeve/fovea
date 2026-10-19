@@ -272,7 +272,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   image, so image operations do not apply to it. The method is always written out:
   `Radix2` for sides that are powers of two, returning a `Result`;
   `Bluestein` for any size; `Auto`, which picks `Radix2` or `Bluestein`
-  per side and may pick faster algorithms in later releases. Each method
+  per side and may pick faster algorithms in later releases. In the
+  functions that pad anyway, `phase_correlate`, `PhaseReference` and
+  `frequency::convolve`, `Auto` pads every side to a power of two and
+  transforms by radix-2, faster than Bluestein at the exact size; this is
+  fixed for good, since the padded size changes a phase correlation's
+  result. Each method
   answers which sizes it accepts, `Radix2.accepts(size)` and
   `Radix2.next_size(size)`. Nothing is padded behind the caller's back:
   the image is transformed as one period of a periodic signal. An image

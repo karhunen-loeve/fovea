@@ -24,8 +24,8 @@ use crate::{SignedCoordinate, Size};
 ///    [`Skip`](crate::border::Skip) nothing is padded);
 /// 2. pads further with zeros to the size `method` transforms fast, which
 ///    leaves the kept part unchanged: a power of two per side for
-///    [`Radix2`](super::Radix2), nothing more for
-///    [`Bluestein`](super::Bluestein) and [`Auto`](super::Auto);
+///    [`Radix2`](super::Radix2) and [`Auto`](super::Auto), nothing more
+///    for [`Bluestein`](super::Bluestein);
 /// 3. places the kernel, zero elsewhere, into an image of that size and
 ///    transforms it, and transforms the padded image;
 /// 4. multiplies the spectra, inverts, and crops to the output region.
@@ -39,8 +39,8 @@ use crate::{SignedCoordinate, Size};
 /// The padding can cost more than the convolution saves. Measured on a
 /// development machine in a release build, `f32`: one transform of a
 /// 1024 × 1024 image takes 16.5 ms by `Radix2`. A 31 × 31 kernel pads it to
-/// 1054 × 1054, which `Auto` transforms by `Bluestein` in 124 ms and
-/// `Radix2`, padded on with zeros to 2048 × 2048, in 73 ms; a call runs
+/// 1054 × 1054, which `Bluestein` transforms in 124 ms and `Radix2` and
+/// `Auto`, padded on with zeros to 2048 × 2048, in 73 ms; a call runs
 /// three transforms. Where the image is periodic by nature, or the wrap at
 /// the edges does no harm, the cyclic convolution needs no padding at all:
 /// multiply the spectra with [`Spectrum::multiply`].
@@ -49,8 +49,8 @@ use crate::{SignedCoordinate, Size};
 /// 512 × 512 `MonoF32` image under `Clamp`, two runs agreeing: the direct
 /// path is faster up to about 15 × 15 (three times as fast at 9 × 9),
 /// this one by `Radix2` from about 21 × 21 (four and a half times as fast
-/// at 31 × 31, twenty-four times at 63 × 63); by `Auto`, which transforms
-/// the exact padded size, the two meet at about 21 × 21. Where they meet
+/// at 31 × 31, twenty-four times at 63 × 63); `Auto` pads as `Radix2` does
+/// and gives the same result. Where they meet
 /// depends on the machine and the image size. It is information for
 /// choosing, and no function switches on it.
 ///
@@ -225,6 +225,11 @@ mod tests {
                 let d = largest_difference(&direct, &through, $get);
                 assert!(d <= tol, "{name}: {d:e} > {tol:e}");
             }
+            // `Auto` pads as `Radix2` does, so the two agree to the bit
+            // (the v0.6.0 review's decision 11).
+            assert!(
+                convolve($img, $kernel, $border, Auto) == convolve($img, $kernel, $border, Radix2)
+            );
         }};
     }
 

@@ -941,10 +941,12 @@ mod tests {
         let radix2 = phase_correlate(&reference, &moving, radius, Radix2)
             .unwrap()
             .unwrap();
-        for other in [bluestein, radix2] {
-            let d = (other.shift() - auto.shift()).length().get();
-            assert!(d < 0.005, "{d}");
-        }
+        // `Auto` pads 100 x 100 to 128 x 128 as `Radix2` does, so the two
+        // agree to the bit (the v0.6.0 review's decision 11); Bluestein
+        // transforms the exact size, a different window and wrap.
+        assert_eq!(auto, radix2);
+        let d = (bluestein.shift() - auto.shift()).length().get();
+        assert!(d < 0.005, "{d}");
         assert!((auto.shift().x - 1.4).abs() < 0.005 && (auto.shift().y - 2.25).abs() < 0.005);
     }
 
