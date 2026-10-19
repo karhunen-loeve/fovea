@@ -11,7 +11,7 @@ use crate::error::{Error, ParameterError, Requirement, Value};
 use crate::features::Corner;
 use crate::geometry::{PixelSpace, Pixels};
 use crate::image::{Decimated, Image, ImageView, RasterImage, RasterImageMut};
-use crate::pixel::{FromLinear, LinearPixel, SingleChannel, ZeroablePixel};
+use crate::pixel::{ChannelwiseMath, FromLinear, LinearPixel, SingleChannel, ZeroablePixel};
 use crate::transform::{PixelMultiply, SeparableScratch, combine_images, sobel_x, sobel_y};
 use crate::{Sigma, Size};
 
@@ -822,6 +822,7 @@ where
         + Default
         + ZeroablePixel
         + SingleChannel
+        + ChannelwiseMath
         + FromLinear<Acc>
         + LinearPixel<f32, Accumulator = Acc>
         + Add<Output = Acc>

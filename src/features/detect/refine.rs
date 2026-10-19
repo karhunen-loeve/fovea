@@ -9,7 +9,7 @@ use crate::error::Error;
 use crate::features::Corner;
 use crate::geometry::Point;
 use crate::image::RasterImage;
-use crate::pixel::SingleChannel;
+use crate::pixel::{ChannelwiseMath, SingleChannel};
 
 use super::peaks::{NmsRadius, pixel_site};
 
@@ -193,7 +193,7 @@ pub fn refine_corners<IX, IY, P>(
 where
     IX: RasterImage<Pixel = P>,
     IY: RasterImage<Pixel = P, Space = IX::Space>,
-    P: SingleChannel,
+    P: SingleChannel + ChannelwiseMath,
     f64: From<P::Channel>,
 {
     if gx.size() != gy.size() {

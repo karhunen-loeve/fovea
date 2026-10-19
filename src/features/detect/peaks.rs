@@ -9,7 +9,7 @@ use crate::error::{ParameterError, Requirement, Value};
 use crate::features::Corner;
 use crate::geometry::{PixelSpace, Point};
 use crate::image::RasterImage;
-use crate::pixel::SingleChannel;
+use crate::pixel::{ChannelwiseMath, SingleChannel};
 use crate::{Coordinate, Error};
 
 /// A pixel-window radius that is **at least 1**: the half-side of the
@@ -146,7 +146,7 @@ impl NmsRadius {
 pub fn corner_peaks<I, P>(response: &I, threshold: f32, radius: usize) -> Vec<Corner<I::Space>>
 where
     I: RasterImage<Pixel = P>,
-    P: SingleChannel,
+    P: SingleChannel + ChannelwiseMath,
     P::Channel: PartialOrd + From<f32>,
     f64: From<P::Channel>,
 {
@@ -235,7 +235,7 @@ where
 pub fn interpolate_corners<I, P>(corners: &mut [Corner<I::Space>], response: &I) -> usize
 where
     I: RasterImage<Pixel = P>,
-    P: SingleChannel,
+    P: SingleChannel + ChannelwiseMath,
     f64: From<P::Channel>,
 {
     let mut fitted = 0;

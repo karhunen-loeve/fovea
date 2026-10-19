@@ -301,7 +301,7 @@ where
     IM: RasterImage<Pixel = P>,
     IX: RasterImage<Pixel = P, Space = IM::Space>,
     IY: RasterImage<Pixel = P, Space = IM::Space>,
-    P: SingleChannel,
+    P: SingleChannel + ChannelwiseMath,
     f64: From<P::Channel>,
 {
     if mask.size() != magnitude.size() {

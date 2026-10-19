@@ -504,10 +504,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `Clamp`; `image_statistics`, `squared_error`, `histogram`,
   `equalize_image` and `equalize_image_into`; `match_template` with `SAD`,
   `SSD` and `NCC`; and, because they call those, `canny`,
-  `otsu_binary_mask`, `ssim` and `ssim_map`. The channel-wise maximum of two
-  `Label32` images, the difference of two `Indexed8` images and a histogram
-  or Otsu threshold of palette indices compiled before and are compile
-  errors now. `BrightnessContrast` requires `ChannelwiseMath` on top of
+  `otsu_binary_mask`, `ssim` and `ssim_map`. Functions that required only
+  `SingleChannel` require `ChannelwiseMath` as well: `hysteresis_threshold`
+  and `hysteresis_threshold_into`, `image_moments`, the sub-pixel peak
+  interpolation (`interpolate_peak`, `interpolate_peak_along`,
+  `interpolate_ridge_points`, `interpolate_edge_points`,
+  `interpolate_corners`, `refine_corners`) and `corner_peaks`, with
+  `detect_corners` passing the bound to its response type. The
+  channel-wise maximum of two `Label32` images, the difference of two
+  `Indexed8` images, a histogram or Otsu threshold of palette indices, a
+  hysteresis threshold of indices and the moments of a label image compiled
+  before and are compile errors now. `dilate`, `erode` and `median_filter`
+  still accept labels through the pixel's `Ord`, as region growing on a
+  label image needs. `BrightnessContrast` requires `ChannelwiseMath` on top of
   `LinearPixel`, because its brightness is added to every channel: on
   `ComplexF32` and `ComplexF64` it landed in both the real and the
   imaginary part (`3 + 4i` plus 10 gave `13 + 14i`), and those two are now

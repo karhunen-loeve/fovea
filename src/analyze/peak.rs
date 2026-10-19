@@ -75,7 +75,7 @@
 use crate::error::Error;
 use crate::geometry::Point;
 use crate::image::RasterImage;
-use crate::pixel::SingleChannel;
+use crate::pixel::{ChannelwiseMath, SingleChannel};
 use crate::transform::{nms_sector, nms_sector_from_gradient};
 use crate::{Coordinate, Offset, Orientation};
 
@@ -221,6 +221,20 @@ pub fn parabola_vertex(before: f64, at: f64, after: f64, kind: Extremum) -> Opti
 /// // The same samples are not a maximum, and are refused as one.
 /// assert!(interpolate_peak(&scores, Coordinate::new(2, 2), Extremum::Maximum).is_none());
 /// ```
+///
+/// A paraboloid through palette indices has no meaning, so it does not
+/// compile; the surface must be [`ChannelwiseMath`]:
+///
+/// ```compile_fail
+/// use fovea::Coordinate;
+/// use fovea::analyze::peak::{interpolate_peak, Extremum};
+/// use fovea::image::Image;
+/// use fovea::pixel::Indexed8;
+///
+/// let palette = Image::fill(5, 5, Indexed8(3));
+/// // ERROR: `Indexed8: ChannelwiseMath` is not satisfied.
+/// let _ = interpolate_peak(&palette, Coordinate::new(2, 2), Extremum::Maximum);
+/// ```
 #[must_use]
 pub fn interpolate_peak<I, P>(
     surface: &I,
@@ -229,7 +243,7 @@ pub fn interpolate_peak<I, P>(
 ) -> Option<Point<I::Space>>
 where
     I: RasterImage<Pixel = P>,
-    P: SingleChannel,
+    P: SingleChannel + ChannelwiseMath,
     f64: From<P::Channel>,
 {
     // The window needs one pixel of margin on all four sides. Written with
@@ -379,7 +393,7 @@ pub fn interpolate_peak_along<I, P>(
 ) -> Option<Point<I::Space>>
 where
     I: RasterImage<Pixel = P>,
-    P: SingleChannel,
+    P: SingleChannel + ChannelwiseMath,
     f64: From<P::Channel>,
 {
     // Annotated rather than `f64::from`, which is ambiguous here: the
@@ -459,7 +473,7 @@ where
     IM: RasterImage<Pixel = P>,
     IX: RasterImage<Pixel = P, Space = IM::Space>,
     IY: RasterImage<Pixel = P, Space = IM::Space>,
-    P: SingleChannel,
+    P: SingleChannel + ChannelwiseMath,
     f64: From<P::Channel>,
 {
     if magnitude.size() != gx.size() {

@@ -20,7 +20,7 @@ use core::marker::PhantomData;
 use crate::common::AxialOrientation;
 use crate::geometry::{PixelSpace, Pixels, Point};
 use crate::image::RasterImage;
-use crate::pixel::SingleChannel;
+use crate::pixel::{ChannelwiseMath, SingleChannel};
 
 use super::summary::StatisticsChannel;
 
@@ -464,11 +464,27 @@ pub(crate) fn axis_eccentricity(mu20: f64, mu02: f64, mu11: f64) -> f64 {
 /// assert!(central.eccentricity() > 0.98, "{}", central.eccentricity());
 /// assert!(central.orientation().radians().abs() < 1e-9);
 /// ```
+///
+/// Moments weight positions by the pixel values, which component labels
+/// and palette indices are not, so they do not compile; the pixel must be
+/// [`ChannelwiseMath`]. The shape of each
+/// component is in its
+/// [`BlobMeasurements::central_moments`](crate::analyze::components::BlobMeasurements::central_moments):
+///
+/// ```compile_fail
+/// use fovea::analyze::statistics::image_moments;
+/// use fovea::image::Image;
+/// use fovea::pixel::Label32;
+///
+/// let labels = Image::fill(4, 4, Label32::default());
+/// // ERROR: `Label32: ChannelwiseMath` is not satisfied.
+/// let _ = image_moments(&labels);
+/// ```
 #[must_use]
 pub fn image_moments<I, P>(image: &I) -> ImageMoments<I::Space>
 where
     I: RasterImage<Pixel = P>,
-    P: SingleChannel,
+    P: SingleChannel + ChannelwiseMath,
     P::Channel: StatisticsChannel,
 {
     let mut moments = ImageMoments::default();

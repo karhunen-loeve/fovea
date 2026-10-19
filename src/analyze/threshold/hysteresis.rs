@@ -9,7 +9,7 @@ use crate::Error;
 use crate::analyze::components::{Connectivity8, connected_components};
 use crate::error::{ParameterError, Requirement, Value};
 use crate::image::{BinaryImage, Image, ImageView, RasterImage, RasterImageMut};
-use crate::pixel::{Label32, LabelPixel, SingleChannel};
+use crate::pixel::{ChannelwiseMath, Label32, LabelPixel, SingleChannel};
 
 /// A validated pair of hysteresis thresholds: `low <= high`.
 ///
@@ -188,13 +188,28 @@ impl<C: Copy> HysteresisThresholds<C> {
 /// assert!(!mask.pixel_at(2, 0)); // non-edge
 /// assert!(!mask.pixel_at(3, 0)); // weak but isolated → dropped
 /// ```
+///
+/// A threshold on palette indices or component labels has no meaning, so
+/// it does not compile; the pixel must be
+/// [`ChannelwiseMath`](crate::pixel::ChannelwiseMath):
+///
+/// ```compile_fail
+/// use fovea::analyze::threshold::{HysteresisThresholds, hysteresis_threshold};
+/// use fovea::image::Image;
+/// use fovea::pixel::Indexed8;
+///
+/// let palette = Image::fill(4, 4, Indexed8(3));
+/// let thresholds = HysteresisThresholds::try_new(1u8, 2u8).unwrap();
+/// // ERROR: `Indexed8: ChannelwiseMath` is not satisfied.
+/// let _ = hysteresis_threshold(&palette, thresholds);
+/// ```
 pub fn hysteresis_threshold<I, P>(
     image: &I,
     thresholds: HysteresisThresholds<P::Channel>,
 ) -> BinaryImage<I::Space>
 where
     I: RasterImage<Pixel = P>,
-    P: SingleChannel,
+    P: SingleChannel + ChannelwiseMath,
     P::Channel: PartialOrd + Copy + core::fmt::Debug,
 {
     // Owned variant allocates the output and delegates, matching the
@@ -220,7 +235,7 @@ pub fn hysteresis_threshold_into<I, P>(
     out: &mut BinaryImage<I::Space>,
 ) where
     I: RasterImage<Pixel = P>,
-    P: SingleChannel,
+    P: SingleChannel + ChannelwiseMath,
     P::Channel: PartialOrd + Copy + core::fmt::Debug,
 {
     assert_eq!(
