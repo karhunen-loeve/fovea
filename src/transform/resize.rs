@@ -48,7 +48,8 @@
 //! ## Implementing a custom resize strategy
 //!
 //! Implement [`ResizeMethod`] to plug in your own algorithm. The only requirement is to
-//! fill `out` (pre-sized to the target dimensions) from `img`. The pixel-level constraints
+//! fill `out` (pre-sized to the target dimensions) from `img`, and to return
+//! [`Error::EmptySource`] where `img` has no pixels and `out` has some. The pixel-level constraints
 //! live in each `impl` block, not in the trait itself, so you can express exactly the bounds
 //! your algorithm needs.
 
@@ -71,7 +72,28 @@ use super::interpolate::{Bilinear, CatmullRom, KeysBicubic, Lanczos2, Lanczos3};
 /// blocks, not in the trait definition itself.
 pub trait ResizeMethod<I: ImageView, O: ImageViewMut<Space = I::Space>> {
     /// Resizes `img` into `out`, which must already have the desired target dimensions.
-    fn resize_into(&self, img: &I, out: &mut O);
+    ///
+    /// # Errors
+    ///
+    /// [`Error::EmptySource`] if `img` has no pixels and `out` has some.
+    /// Implementations **must** report this case rather than read from the
+    /// empty source, so that calling the method directly fails as the free
+    /// [`resize_into`] does.
+    ///
+    /// # Example
+    /// ```
+    /// # use fovea::image::Image;
+    /// # use fovea::pixel::MonoF32;
+    /// # use fovea::transform::{Bilinear, ResizeMethod};
+    /// # use fovea::{Error, Size};
+    /// let empty = Image::<MonoF32>::zero(0, 3);
+    /// let mut out = Image::<MonoF32>::zero(4, 2);
+    /// assert_eq!(
+    ///     Bilinear.resize_into(&empty, &mut out),
+    ///     Err(Error::EmptySource { target: Size::new(4, 2) })
+    /// );
+    /// ```
+    fn resize_into(&self, img: &I, out: &mut O) -> Result<(), Error>;
 }
 
 /// Nearest Neighbor resizing method
@@ -90,8 +112,8 @@ where
     O: ImageViewMut<Space = I::Space>,
     I::Pixel: Into<O::Pixel> + Copy,
 {
-    fn resize_into(&self, img: &I, out: &mut O) {
-        resize_nearest_neighbor_into(img, out);
+    fn resize_into(&self, img: &I, out: &mut O) -> Result<(), Error> {
+        resize_nearest_neighbor_into(img, out)
     }
 }
 
@@ -107,8 +129,8 @@ where
     Q: LinearPixel<Accumulator = Q>,
     O::Pixel: FromLinear<Q>,
 {
-    fn resize_into(&self, img: &I, out: &mut O) {
-        resize_separable_into(self, img, out, false);
+    fn resize_into(&self, img: &I, out: &mut O) -> Result<(), Error> {
+        resize_separable_into(self, img, out, false)
     }
 }
 
@@ -122,8 +144,8 @@ where
     Q: LinearPixel<Accumulator = Q>,
     O::Pixel: FromLinear<Q>,
 {
-    fn resize_into(&self, img: &I, out: &mut O) {
-        resize_separable_into(&self.0, img, out, true);
+    fn resize_into(&self, img: &I, out: &mut O) -> Result<(), Error> {
+        resize_separable_into(&self.0, img, out, true)
     }
 }
 
@@ -196,11 +218,8 @@ where
     O: ImageViewMut<Space = I::Space>,
     M: ResizeMethod<I, O>,
 {
-    if img.size().area() == 0 && out.size().area() > 0 {
-        return Err(Error::EmptySource { target: out.size() });
-    }
-    method.resize_into(img, out);
-    Ok(())
+    source_not_empty(img.size(), out.size())?;
+    method.resize_into(img, out)
 }
 
 /// Resizes `img` to `new_size`, allocating and returning a new output image.
@@ -236,25 +255,23 @@ where
     P: ZeroablePixel,
     M: ResizeMethod<I, Image<P, I::Space>>,
 {
-    if img.size().area() == 0 && new_size.area() > 0 {
-        return Err(Error::EmptySource { target: new_size });
-    }
+    source_not_empty(img.size(), new_size)?;
     let mut out = Image::<P, _>::zero_in(new_size.width, new_size.height);
     resize_into(img, &mut out, method)?;
     Ok(out)
 }
 
-fn resize_nearest_neighbor_into<I, O>(img: &I, out: &mut O)
+fn resize_nearest_neighbor_into<I, O>(img: &I, out: &mut O) -> Result<(), Error>
 where
     I: ImageView,
     O: ImageViewMut<Space = I::Space>,
     I::Pixel: Into<O::Pixel> + Copy,
 {
     let (src, dst) = (img.size(), out.size());
+    source_not_empty(src, dst)?;
     if dst.width == 0 || dst.height == 0 {
-        return;
+        return Ok(());
     }
-    assert_source_not_empty(src, dst);
     // The source pixel whose extent [k, k + 1) contains (x + 0.5) · in / out.
     let pick = |x: usize, in_len: usize, out_len: usize| {
         (((x as f64 + 0.5) * in_len as f64 / out_len as f64) as usize).min(in_len - 1)
@@ -266,22 +283,26 @@ where
             *out.pixel_at_mut(x, y) = img.pixel_at(src_x, src_y).into();
         }
     }
+    Ok(())
 }
 
-fn assert_source_not_empty(src: Size, dst: Size) {
-    assert!(
-        src.width > 0 && src.height > 0,
-        "resize: the source is {}x{}, so there is no sample to fill the {}x{} target from",
-        src.width,
-        src.height,
-        dst.width,
-        dst.height
-    );
+/// An empty source has no sample to fill a target with pixels from.
+fn source_not_empty(src: Size, dst: Size) -> Result<(), Error> {
+    let empty = |size: Size| size.width == 0 || size.height == 0;
+    if empty(src) && !empty(dst) {
+        return Err(Error::EmptySource { target: dst });
+    }
+    Ok(())
 }
 
 /// The separable kernel engine: a horizontal pass into accumulator rows at
 /// the target width, then a vertical pass into the target.
-fn resize_separable_into<K, I, O, Q>(kernel: &K, img: &I, out: &mut O, widen: bool)
+fn resize_separable_into<K, I, O, Q>(
+    kernel: &K,
+    img: &I,
+    out: &mut O,
+    widen: bool,
+) -> Result<(), Error>
 where
     K: InterpolationKernel,
     I: ImageView,
@@ -291,10 +312,10 @@ where
     O::Pixel: FromLinear<Q>,
 {
     let (src, dst) = (img.size(), out.size());
+    source_not_empty(src, dst)?;
     if dst.width == 0 || dst.height == 0 {
-        return;
+        return Ok(());
     }
-    assert_source_not_empty(src, dst);
     let columns = AxisWeights::resize(kernel, src.width, dst.width, widen);
     let rows = AxisWeights::resize(kernel, src.height, dst.height, widen);
 
@@ -320,6 +341,7 @@ where
             *out.pixel_at_mut(x, y) = O::Pixel::from_linear(acc);
         }
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -332,7 +354,9 @@ mod tests {
         Mono32, Mono64, MonoF32, MonoF64, Rgb8, Rgb10, Rgb12, Rgb14, Rgb16, Rgb32, Rgb64, RgbF32,
         RgbF64, Rgba8, Rgba10, Rgba12, Rgba14, Rgba16, Rgba32, Rgba64, RgbaF32, RgbaF64,
     };
-    use crate::transform::{Bilinear, NearestNeighbor, resize, resize_into};
+    use crate::transform::{
+        Antialiased, Bilinear, Lanczos3, NearestNeighbor, ResizeMethod, resize, resize_into,
+    };
 
     #[test]
     fn an_empty_source_fills_no_target() {
@@ -347,6 +371,11 @@ mod tests {
             resize_into(&empty, &mut out, NearestNeighbor),
             Err(crate::Error::EmptySource { target })
         );
+        // The trait methods report it too, rather than panic.
+        let err = Err(crate::Error::EmptySource { target });
+        assert_eq!(NearestNeighbor.resize_into(&empty, &mut out), err);
+        assert_eq!(Bilinear.resize_into(&empty, &mut out), err);
+        assert_eq!(Antialiased(Lanczos3).resize_into(&empty, &mut out), err);
         // An empty target needs no source.
         let none: Image<MonoF32> = resize(&empty, crate::Size::new(0, 5), Bilinear).unwrap();
         assert_eq!(none.size(), crate::Size::new(0, 5));

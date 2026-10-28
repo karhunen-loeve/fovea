@@ -462,6 +462,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Error::EmptySource`, where it panicked before; `remap` under
   `Constant` fills such a target with the constant instead. Migration:
   add `?`, or `.expect(...)` where the source cannot be empty.
+  `ResizeMethod::resize_into` returns `Result<(), Error>` too, so calling
+  the method directly reports the empty source as the free function does;
+  an implementation outside the crate returns `Ok(())` and reports
+  `Error::EmptySource` itself.
 - **Breaking:** `Error::InvalidParameter` carries a `ParameterError`
   instead of a `String`. A caller or a test now asks which rule failed
   (`e.requirement()`) and with which value (`e.value()`) instead of
