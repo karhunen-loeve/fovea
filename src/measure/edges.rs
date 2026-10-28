@@ -995,8 +995,15 @@ mod tests {
             MonoF32::new(20.0 + 200.0 * hits as f32 / 64.0)
         });
         let radius = 40.0;
-        let cal =
-            Caliper::try_arc(Point::new(cx, cy), l(radius), -0.8, 1.6, l(2.0), l(0.25)).unwrap();
+        let cal = Caliper::try_arc(
+            Point::new(cx, cy),
+            l(radius),
+            crate::Angle::from_radians(-0.8).unwrap(),
+            crate::Angle::from_radians(1.6).unwrap(),
+            l(2.0),
+            l(0.25),
+        )
+        .unwrap();
         let prof = profile(&img, &cal, CatmullRom, &Skip).unwrap();
         let edges = prof.edges(Polarity::Either, sigma!(1.0), min_contrast!(50.0));
         let pairs = edges.pairs(Polarity::Either, Neighbors);

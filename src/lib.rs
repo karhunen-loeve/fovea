@@ -159,8 +159,8 @@ pub mod guide;
 
 // ── Core vocabulary types (module-agnostic, kept at root) ────────────────────
 pub use common::{
-    AxialOrientation, Coordinate, Extremum, OddWindowSide, Offset, Orientation, PixelDistance,
-    Rectangle, Sigma, SignedCoordinate, Size, Stride, Tolerance,
+    Angle, AxialOrientation, Coordinate, Extremum, OddWindowSide, Offset, Orientation,
+    PixelDistance, Rectangle, Sigma, SignedCoordinate, Size, Stride, Tolerance,
 };
 pub use error::Error;
 pub use geometry::{

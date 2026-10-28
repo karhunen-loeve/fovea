@@ -1311,9 +1311,122 @@ impl AxialOrientation {
     }
 }
 
+/// An **amount of turn** in the plane, in `f64` radians and not wrapped.
+///
+/// Use this where an angle says how far something turns rather than which
+/// way it points: the rotation of a calibration, the sweep of an arc, the
+/// angle between two lines. Three quarter turns and minus one quarter turn
+/// are different amounts, so unlike [`Orientation`] and
+/// [`AxialOrientation`] this type keeps the value as given.
+///
+/// Positive turns `+x` towards `+y`, as every angle in the crate, which in
+/// an image with `y` pointing down is clockwise on the screen.
+///
+/// The constructors name the unit, so a call ported from an API that takes
+/// degrees cannot pass them as radians, and an `Angle` cannot be passed
+/// where a scale or a length is expected.
+///
+/// # Example
+///
+/// ```
+/// use fovea::Angle;
+///
+/// let quarter = Angle::from_degrees(90.0)?;
+/// assert!((quarter.radians() - core::f64::consts::FRAC_PI_2).abs() < 1e-15);
+///
+/// // Not wrapped: three quarter turns stay three quarter turns.
+/// let sweep = Angle::from_degrees(270.0)?;
+/// assert!((sweep.degrees() - 270.0).abs() < 1e-12);
+/// # Ok::<(), fovea::Error>(())
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
+#[repr(transparent)]
+pub struct Angle(f64);
+
+impl Angle {
+    /// The angle of `radians`.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::InvalidParameter`] if `radians` is NaN or infinite.
+    pub fn from_radians(radians: f64) -> Result<Self, Error> {
+        if radians.is_finite() {
+            Ok(Self(radians))
+        } else {
+            Err(ParameterError::new("angle", Requirement::Finite, Value::F64(radians)).into())
+        }
+    }
+
+    /// The angle of `degrees`, converted to radians.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::InvalidParameter`] if `degrees` is NaN or infinite.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use fovea::Angle;
+    ///
+    /// assert!(Angle::from_degrees(f64::NAN).is_err());
+    /// assert!((Angle::from_degrees(-180.0)?.radians() + core::f64::consts::PI).abs() < 1e-15);
+    /// # Ok::<(), fovea::Error>(())
+    /// ```
+    pub fn from_degrees(degrees: f64) -> Result<Self, Error> {
+        if degrees.is_finite() {
+            Ok(Self(degrees.to_radians()))
+        } else {
+            Err(ParameterError::new("angle", Requirement::Finite, Value::F64(degrees)).into())
+        }
+    }
+
+    /// Wraps a value the crate computed and knows to be finite.
+    #[inline]
+    pub(crate) fn from_finite_radians(radians: f64) -> Self {
+        debug_assert!(radians.is_finite());
+        Self(radians)
+    }
+
+    /// Returns the angle in radians.
+    #[must_use]
+    #[inline]
+    pub const fn radians(self) -> f64 {
+        self.0
+    }
+
+    /// Returns the angle in degrees.
+    #[must_use]
+    #[inline]
+    pub fn degrees(self) -> f64 {
+        self.0.to_degrees()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn angle_keeps_the_value_unwrapped() {
+        let a = Angle::from_radians(5.0).unwrap();
+        assert_eq!(a.radians(), 5.0);
+        assert_eq!(Angle::from_radians(-5.0).unwrap().radians(), -5.0);
+        let d = Angle::from_degrees(270.0).unwrap();
+        assert_eq!(d.radians(), 270_f64.to_radians());
+        assert!((d.degrees() - 270.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn angle_rejects_non_finite_values() {
+        for v in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for e in [Angle::from_radians(v), Angle::from_degrees(v)] {
+                let Err(Error::InvalidParameter(p)) = e else {
+                    panic!("accepted {v}")
+                };
+                assert_eq!(p.requirement(), Requirement::Finite);
+            }
+        }
+    }
 
     #[test]
     fn sigma_valid_values_round_trip() {

@@ -740,9 +740,11 @@ impl<U: LengthUnit> Fit<Ellipse<U>> {
 /// in pixels when the calibration is conformal and convert the result with
 /// `Fit::map`, and convert the points first under any other calibration.
 ///
-/// The fit is deterministic. Under [`Huber`] and [`Tukey`] it reweights
-/// until no weight changes by more than 10⁻¹² between two rounds, or for at
-/// most 100 rounds, and the figures are those of the element it returns.
+/// The fit is deterministic. Under [`Huber`] it reweights until no weight
+/// changes by more than 10⁻¹² between two rounds, or for at most 100
+/// rounds. [`Tukey`] starts from that Huber fit and reweights again under
+/// the same limit, so up to 200 rounds in all. The figures are those of the
+/// element it returns.
 ///
 /// # Errors
 ///
@@ -1384,7 +1386,8 @@ mod tests {
         // A line under a rotation: the extent maps with it.
         let line_points: Vec<_> = (0..=10).map(|k| px(k as f64, 0.0)).collect();
         let line = fit(&line_points, TotalLeastSquares, AllPoints).unwrap();
-        let turn: Similarity<Pixels, Millimeter> = Similarity::try_linear(2.0, FRAC_PI_2).unwrap();
+        let turn: Similarity<Pixels, Millimeter> =
+            Similarity::try_linear(2.0, crate::Angle::from_radians(FRAC_PI_2).unwrap()).unwrap();
         let mapped = line.map(&turn);
         let extent = mapped.extent();
         assert!(extent.start.distance(Point::new(0.0, 0.0)).get() < 1e-12);

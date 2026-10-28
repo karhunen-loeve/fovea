@@ -125,6 +125,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   literals checked at compile time.
 - `error::Requirement::FiniteNonZero`, for a factor or a determinant that
   must not be zero.
+- **`Angle`, an amount of turn in `f64`**, at the crate root. Built by
+  `Angle::from_radians` or `Angle::from_degrees`, which reject a value
+  that is not finite, and not wrapped: three quarter turns stay three
+  quarter turns. It is the rotation of `Similarity::try_linear` and
+  `try_new`, the start and the sweep of `Caliper::try_arc`, and what
+  `Line::angle_to` returns, so a scale and an angle cannot change places
+  and the unit is written at the call site. `Orientation` and
+  `AxialOrientation` keep directions and axes.
 - **The caliper, `fovea::measure`.** A `Caliper` describes where to
   measure: a segment or an arc, a width to average across and a sampling
   step, with no default for either. `profile(&img, &caliper, kernel,
@@ -202,9 +210,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   picks it: at a circle's centre the point in the `+y` direction, on an
   ellipse the one on the positive side of its minor axis, which at the
   centre is the end of the minor axis. `Line::angle_to` returns the signed
-  angle that turns one line's direction onto the other's, in radians in
+  `Angle` that turns one line's direction onto the other's, in
   `(−π, π]`, positive from `+x` towards `+y` (clockwise on the screen in
-  an image); `Line::reversed` turns a line round. `Line::intersection`
+  an image); `Line::axis` returns the line's `AxialOrientation`, for the
+  angle between two lines regardless of direction; `Line::reversed` turns
+  a line round. `Line::intersection`
   returns where two lines meet, `None` for parallel lines.
   `Segment::distances_to(&line)` returns the smallest and largest
   distance of the segment from a line, so the extent of one fitted edge

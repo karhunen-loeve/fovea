@@ -10,6 +10,7 @@ use core::f64::consts::PI;
 use super::elements::{Circle, Ellipse, Line, Segment};
 use super::point::{Length, Point, Vector};
 use super::units::LengthUnit;
+use crate::{Angle, AxialOrientation};
 
 fn dot<U>(a: Vector<U>, b: Vector<U>) -> f64 {
     a.x * b.x + a.y * b.y
@@ -75,8 +76,8 @@ impl<U: LengthUnit> Line<U> {
         self.point() + self.direction() * self.along(p)
     }
 
-    /// The signed angle, in radians in `(−π, π]`, that turns this line's
-    /// direction onto `other`'s.
+    /// The signed angle, in `(−π, π]`, that turns this line's direction
+    /// onto `other`'s.
     ///
     /// Positive turns `+x` towards `+y`, as every angle in the crate, which in
     /// an image with `y` pointing down is clockwise on the screen. The angle
@@ -86,12 +87,11 @@ impl<U: LengthUnit> Line<U> {
     /// pointing up, changes the sign.
     ///
     /// The angle between the two lines' axes, regardless of direction, is
-    /// `θ.abs().min(π − θ.abs())`, in `[0, π/2]`.
+    /// the difference of their [`axis`](Self::axis) orientations.
     ///
     /// # Example
     ///
     /// ```
-    /// use core::f64::consts::PI;
     /// use fovea::{Line, Pixels, Point};
     ///
     /// // Two sides of a hexagon, both measured away from their corner.
@@ -101,21 +101,47 @@ impl<U: LengthUnit> Line<U> {
     /// let b: Line<Pixels> = Line::try_through(corner, Point::new(50.0 + 10.0 * c, 50.0 + 10.0 * s))?;
     ///
     /// let theta = a.angle_to(&b);
-    /// assert!((theta.to_degrees() - 120.0).abs() < 1e-12);
-    /// assert!((b.angle_to(&a).to_degrees() + 120.0).abs() < 1e-12);
+    /// assert!((theta.degrees() - 120.0).abs() < 1e-12);
+    /// assert!((b.angle_to(&a).degrees() + 120.0).abs() < 1e-12);
     ///
     /// // Without direction: the acute angle between the axes.
-    /// let axes = theta.abs().min(PI - theta.abs());
+    /// let axes = b.axis().signed_difference(a.axis()).abs();
     /// assert!((axes.to_degrees() - 60.0).abs() < 1e-12);
     /// # Ok::<(), fovea::Error>(())
     /// ```
     #[must_use]
-    pub fn angle_to(&self, other: &Self) -> f64 {
+    pub fn angle_to(&self, other: &Self) -> Angle {
         let (d, e) = (self.direction(), other.direction());
         let theta = cross(d, e).atan2(dot(d, e));
         // `atan2` returns −π for a negative zero beside a negative cosine;
         // the canonical range keeps +π.
-        if theta == -PI { PI } else { theta }
+        Angle::from_finite_radians(if theta == -PI { PI } else { theta })
+    }
+
+    /// The axis the line lies along, without its direction, in
+    /// `(−π/2, π/2]` from the `x` axis.
+    ///
+    /// A line and its [`reversed`](Self::reversed) twin share one axis. Two
+    /// axes are compared with
+    /// [`signed_difference`](AxialOrientation::signed_difference), which
+    /// wraps at a half turn.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use fovea::{Line, Pixels, Point};
+    ///
+    /// let a: Line<Pixels> = Line::try_through(Point::new(0.0, 0.0), Point::new(10.0, 10.0))?;
+    /// assert!((a.axis().radians().to_degrees() - 45.0).abs() < 1e-12);
+    /// assert!(a.axis().signed_difference(a.reversed().axis()).abs() < 1e-12);
+    /// # Ok::<(), fovea::Error>(())
+    /// ```
+    #[must_use]
+    pub fn axis(&self) -> AxialOrientation {
+        // The doubled angle of the unit direction, which a half turn leaves
+        // unchanged; `from_half_atan2` halves it back into (−π/2, π/2].
+        let d = self.direction();
+        AxialOrientation::from_half_atan2(2.0 * d.x * d.y, d.x * d.x - d.y * d.y)
     }
 
     /// Where the two lines meet, or `None` if they are parallel.
@@ -363,15 +389,18 @@ mod tests {
         ];
         for (to, expected) in cases {
             let other = line((0.0, 0.0), to);
-            assert!((east.angle_to(&other) - expected).abs() < 1e-15, "{to:?}");
+            assert!(
+                (east.angle_to(&other).radians() - expected).abs() < 1e-15,
+                "{to:?}"
+            );
         }
         // Opposite directions are +π, never −π, whichever way round.
         let west = east.reversed();
-        assert_eq!(east.angle_to(&west), PI);
-        assert_eq!(west.angle_to(&east), PI);
+        assert_eq!(east.angle_to(&west).radians(), PI);
+        assert_eq!(west.angle_to(&east).radians(), PI);
         // Reversing one line turns the angle by π.
         let north_east = line((0.0, 0.0), (1.0, 1.0));
-        let turned = east.angle_to(&north_east.reversed());
+        let turned = east.angle_to(&north_east.reversed()).radians();
         assert!((turned - (FRAC_PI_2 / 2.0 - PI)).abs() < 1e-15);
     }
 
@@ -379,7 +408,29 @@ mod tests {
     fn the_angle_does_not_depend_on_where_the_lines_lie() {
         let a = line((0.0, 0.0), (10.0, 0.0));
         let b = line((500.0, -300.0), (500.0, -290.0));
-        assert_eq!(a.angle_to(&b), FRAC_PI_2);
+        assert_eq!(a.angle_to(&b).radians(), FRAC_PI_2);
+    }
+
+    #[test]
+    fn the_axis_forgets_the_direction() {
+        let cases = [
+            ((10.0, 0.0), 0.0),
+            ((-10.0, 0.0), 0.0),
+            ((0.0, 10.0), FRAC_PI_2),
+            ((0.0, -10.0), FRAC_PI_2),
+            ((-10.0, 10.0), -FRAC_PI_2 / 2.0),
+        ];
+        for (to, expected) in cases {
+            let axis = line((0.0, 0.0), to).axis();
+            assert!((axis.radians() - expected).abs() < 1e-15, "{to:?}");
+        }
+        // The acute angle between two axes, which the directed angle would
+        // put at 3π/4.
+        let a = line((0.0, 0.0), (10.0, 0.0));
+        let b = line((0.0, 0.0), (-10.0, 10.0));
+        assert!((a.angle_to(&b).radians() - 3.0 * FRAC_PI_2 / 2.0).abs() < 1e-15);
+        let acute = b.axis().signed_difference(a.axis());
+        assert!((acute + FRAC_PI_2 / 2.0).abs() < 1e-15);
     }
 
     #[test]

@@ -109,7 +109,7 @@ where
 /// # Example
 ///
 /// ```
-/// use fovea::{Pixels, Point};
+/// use fovea::{Angle, Pixels, Point};
 /// use fovea::geometry::{AffineMap, Invertible, SourceLookup, SourceToDest, Similarity};
 ///
 /// // An `AffineMap` bound is enough for both.
@@ -117,7 +117,7 @@ where
 ///     m.invert().map_point(p)
 /// }
 ///
-/// let s: Similarity<Pixels, Pixels> = Similarity::try_linear(2.0, 0.0)?;
+/// let s: Similarity<Pixels, Pixels> = Similarity::try_linear(2.0, Angle::from_degrees(0.0)?)?;
 /// assert_eq!(back(&s, Point::new(4.0, 6.0)), Point::new(2.0, 3.0));
 /// assert_eq!(SourceToDest::new(s).source_of(Point::new(4.0, 6.0)), Some(Point::new(2.0, 3.0)));
 /// # Ok::<(), fovea::Error>(())
@@ -315,7 +315,8 @@ mod tests {
             let back = lookup.source_of(dest).unwrap();
             assert!(back.distance(p).get() < 1e-9);
         }
-        let s: Similarity<Pixels, Pixels> = Similarity::try_linear(2.0, 0.5).unwrap();
+        let s: Similarity<Pixels, Pixels> =
+            Similarity::try_linear(2.0, crate::Angle::from_radians(0.5).unwrap()).unwrap();
         let lookup = SourceToDest::new(s);
         let dest = s.try_map_point(Point::new(5.0, 7.0)).unwrap();
         assert!(
@@ -331,7 +332,8 @@ mod tests {
     #[test]
     fn the_affine_family_is_invertible_with_its_own_inverse() {
         // The v0.6.0 review's P4: the two traits named two inverses.
-        let s: Similarity<Pixels, Pixels> = Similarity::try_linear(2.0, 0.5).unwrap();
+        let s: Similarity<Pixels, Pixels> =
+            Similarity::try_linear(2.0, crate::Angle::from_radians(0.5).unwrap()).unwrap();
         assert_eq!(s.invert(), s.inverse());
         let a: Affine<Pixels, IdealPixels> =
             Affine::try_new([[2.0, 0.5], [0.0, 1.0]], Vector::new(1.0, 2.0)).unwrap();
@@ -349,7 +351,8 @@ mod tests {
 
     #[test]
     fn an_affine_bound_alone_gives_the_affine_inverse() {
-        let s: Similarity<Pixels, Pixels> = Similarity::try_linear(2.0, 0.0).unwrap();
+        let s: Similarity<Pixels, Pixels> =
+            Similarity::try_linear(2.0, crate::Angle::from_radians(0.0).unwrap()).unwrap();
         assert_eq!(back(&s, Point::new(4.0, 6.0)), Point::new(2.0, 3.0));
     }
 }

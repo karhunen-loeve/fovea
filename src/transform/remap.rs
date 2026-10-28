@@ -238,7 +238,7 @@ where
 /// # Example
 ///
 /// ```
-/// use fovea::{Pixels, Point, Size};
+/// use fovea::{Angle, Pixels, Point, Size};
 /// use fovea::border::Constant;
 /// use fovea::geometry::{DestToSource, Similarity};
 /// use fovea::image::{Image, ImageView};
@@ -250,7 +250,7 @@ where
 /// // A quarter turn about the origin, read from the destination: each
 /// // destination pixel (x, y) reads the source at (y, −x)…
 /// let turn: Similarity<Pixels, Pixels> =
-///     Similarity::try_linear(1.0, -core::f64::consts::FRAC_PI_2)?;
+///     Similarity::try_linear(1.0, Angle::from_degrees(-90.0)?)?;
 /// let out: Image<Mono8> =
 ///     remap(&img, &DestToSource(turn), Bilinear, &Constant(Mono8::new(0)), Size::new(8, 8))?;
 /// // …which lies inside the source only for x = 0.

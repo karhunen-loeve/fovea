@@ -10,8 +10,8 @@ use core::marker::PhantomData;
 use super::map::{AffineMap, ConformalMap, PlaneMap, sealed};
 use super::point::{Point, Vector};
 use super::units::LengthUnit;
-use crate::Error;
 use crate::error::{ParameterError, Requirement, Value};
+use crate::{Angle, Error};
 
 type Units<D, C> = PhantomData<fn() -> (D, C)>;
 
@@ -264,19 +264,18 @@ impl<D: LengthUnit, C: LengthUnit> AxisScale<D, C> {
 /// the machine axes. Conformal: lengths and circles convert, and angles are
 /// kept (their sign flips under a reflection).
 ///
-/// The angle is in radians and turns the `x` axis towards the `y` axis;
-/// with `y` pointing down, as in an image, that is clockwise on screen.
+/// The [`Angle`] turns the `x` axis towards the `y` axis; with `y`
+/// pointing down, as in an image, that is clockwise on screen.
 /// [`mirrored_y`](Self::mirrored_y) follows the mapping with `y ↦ −y`,
 /// which together with the rotation gives every reflection.
 ///
 /// # Example
 ///
 /// ```
-/// use std::f64::consts::FRAC_PI_2;
-/// use fovea::{Millimeter, Pixels, Point};
+/// use fovea::{Angle, Millimeter, Pixels, Point};
 /// use fovea::geometry::{AffineMap, ConformalMap, Similarity};
 ///
-/// let s = Similarity::<Pixels, Millimeter>::try_linear(0.01, FRAC_PI_2)?;
+/// let s = Similarity::<Pixels, Millimeter>::try_linear(0.01, Angle::from_degrees(90.0)?)?;
 /// let p = s.map_point(Point::new(100.0, 0.0));
 /// assert!(p.x.abs() < 1e-15 && (p.y - 1.0).abs() < 1e-15);
 /// assert_eq!(s.factor(), 0.01);
@@ -320,26 +319,24 @@ fn similarity_linear(scale: f64, u: [f64; 2], mirrored: bool, p: [f64; 2]) -> [f
 }
 
 impl<D: LengthUnit, C: LengthUnit> Similarity<D, C> {
-    /// The rotation by `angle` radians and scale by `scale` about the
-    /// origin.
+    /// The rotation by `angle` and scale by `scale` about the origin.
     ///
     /// # Errors
     ///
     /// [`Error::InvalidParameter`] if `scale` is not finite and positive,
-    /// or so small or large that its reciprocal is not normal, or if
-    /// `angle` is not finite.
-    pub fn try_linear(scale: f64, angle: f64) -> Result<Self, Error> {
+    /// or so small or large that its reciprocal is not normal.
+    pub fn try_linear(scale: f64, angle: Angle) -> Result<Self, Error> {
         Self::try_new(scale, angle, Vector::new(0.0, 0.0))
     }
 
-    /// The rotation by `angle` radians and scale by `scale`, followed by a
+    /// The rotation by `angle` and scale by `scale`, followed by a
     /// shift by `translation`, which is in the codomain's unit.
     ///
     /// # Errors
     ///
     /// As [`Self::try_linear`], and if the translation, or the inverse's
     /// translation, is not finite.
-    pub fn try_new(scale: f64, angle: f64, translation: Vector<C>) -> Result<Self, Error> {
+    pub fn try_new(scale: f64, angle: Angle, translation: Vector<C>) -> Result<Self, Error> {
         if !(scale > 0.0 && invertible(scale)) {
             return Err(ParameterError::new(
                 "scale",
@@ -348,12 +345,7 @@ impl<D: LengthUnit, C: LengthUnit> Similarity<D, C> {
             )
             .into());
         }
-        if !angle.is_finite() {
-            return Err(
-                ParameterError::new("angle", Requirement::Finite, Value::F64(angle)).into(),
-            );
-        }
-        let (sin, cos) = angle.sin_cos();
+        let (sin, cos) = angle.radians().sin_cos();
         let rotation = [cos, sin];
         let t = [translation.x, translation.y];
         // Inverse of p ↦ s·u·p + t: q ↦ (1/s)·conj(u)·(q − t).
@@ -996,8 +988,12 @@ mod tests {
 
     #[test]
     fn similarity_rotates_scales_and_inverts() {
-        let s: Similarity<Pixels, Millimeter> =
-            Similarity::try_new(0.01, FRAC_PI_2, Vector::new(5.0, 0.0)).unwrap();
+        let s: Similarity<Pixels, Millimeter> = Similarity::try_new(
+            0.01,
+            crate::Angle::from_radians(FRAC_PI_2).unwrap(),
+            Vector::new(5.0, 0.0),
+        )
+        .unwrap();
         assert!(close(
             s.map_point(px(100.0, 0.0)),
             Point::new(5.0, 1.0),
@@ -1012,8 +1008,12 @@ mod tests {
         assert!(!s.reverses_orientation());
         check_affine(&s, 1e-9);
 
-        let tilted: Similarity<Pixels, Millimeter> =
-            Similarity::try_new(0.02, FRAC_PI_6, Vector::new(-3.0, 7.0)).unwrap();
+        let tilted: Similarity<Pixels, Millimeter> = Similarity::try_new(
+            0.02,
+            crate::Angle::from_radians(FRAC_PI_6).unwrap(),
+            Vector::new(-3.0, 7.0),
+        )
+        .unwrap();
         check_affine(&tilted, 1e-9);
         let v = Vector::new(3.0, 4.0);
         assert!((tilted.length_of(v).get() - 0.1).abs() < 1e-15, "conformal");
@@ -1021,8 +1021,12 @@ mod tests {
 
     #[test]
     fn mirrored_similarity_reflects_and_inverts() {
-        let s: Similarity<Pixels, Millimeter> =
-            Similarity::try_new(0.02, FRAC_PI_6, Vector::new(-3.0, 7.0)).unwrap();
+        let s: Similarity<Pixels, Millimeter> = Similarity::try_new(
+            0.02,
+            crate::Angle::from_radians(FRAC_PI_6).unwrap(),
+            Vector::new(-3.0, 7.0),
+        )
+        .unwrap();
         let m = s.mirrored_y();
         assert!(m.reverses_orientation());
         for (x, y) in SAMPLES {
@@ -1037,18 +1041,10 @@ mod tests {
 
     #[test]
     fn similarity_rejects_bad_parameters() {
-        let e = Similarity::<Pixels, Millimeter>::try_linear(0.0, 0.0).unwrap_err();
+        let zero = crate::Angle::from_radians(0.0).unwrap();
+        let e = Similarity::<Pixels, Millimeter>::try_linear(0.0, zero).unwrap_err();
         assert_eq!(requirement_of(e).1, Requirement::FinitePositive);
-        let e = Similarity::<Pixels, Millimeter>::try_linear(1.0, f64::INFINITY).unwrap_err();
-        assert_eq!(
-            requirement_of(e),
-            (
-                "angle",
-                Requirement::Finite,
-                Value::F64(f64::INFINITY),
-                None
-            )
-        );
+        // A non-finite angle cannot reach the constructor: `Angle` rejects it.
     }
 
     #[test]
@@ -1093,8 +1089,12 @@ mod tests {
             UniformScale::try_new(0.5, Vector::new(1.0, 2.0)).unwrap();
         let x: AxisScale<Pixels, Millimeter> =
             AxisScale::try_new(0.5, -2.0, Vector::new(1.0, 2.0)).unwrap();
-        let s: Similarity<Pixels, Millimeter> =
-            Similarity::try_new(1.5, 0.7, Vector::new(-1.0, 3.0)).unwrap();
+        let s: Similarity<Pixels, Millimeter> = Similarity::try_new(
+            1.5,
+            crate::Angle::from_radians(0.7).unwrap(),
+            Vector::new(-1.0, 3.0),
+        )
+        .unwrap();
         let m = s.mirrored_y();
         let (au, ax, as_, am) = (
             Affine::from(u),

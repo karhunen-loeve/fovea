@@ -751,7 +751,8 @@ mod tests {
         let s: Segment<Pixels> = Segment::new(px(0.0, 0.0), px(100.0, 0.0));
         assert_eq!(shear.map_segment(s).end, shear.map_point(px(100.0, 0.0)));
 
-        let turn: Similarity<Pixels, Millimeter> = Similarity::try_linear(0.5, 1.0).unwrap();
+        let turn: Similarity<Pixels, Millimeter> =
+            Similarity::try_linear(0.5, crate::Angle::from_radians(1.0).unwrap()).unwrap();
         let c: Circle<Pixels> = Circle::try_new(px(4.0, 0.0), Length::new(10.0)).unwrap();
         let mapped = turn.map_circle(c);
         assert!((mapped.radius().get() - 5.0).abs() < 1e-15);

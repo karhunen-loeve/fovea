@@ -3,7 +3,6 @@
 use core::f64::consts::TAU;
 use core::marker::PhantomData;
 
-use crate::Error;
 use crate::analyze::sampling::sample;
 use crate::border::BorderPolicy;
 use crate::error::{ParameterError, Requirement, Value};
@@ -11,6 +10,7 @@ use crate::geometry::{Length, PixelSpace, Pixels, Point};
 use crate::image::ImageView;
 use crate::pixel::{HomogeneousPixel, LinearPixel, LinearSpace, SingleChannel};
 use crate::transform::InterpolationKernel;
+use crate::{Angle, Error};
 
 /// The most samples a caliper takes along its path, and the most lines
 /// on each side of its centre line across it.
@@ -201,32 +201,32 @@ impl<S: PixelSpace> Caliper<S> {
     }
 
     /// A caliper along the circular arc about `centre` of radius `radius`,
-    /// from `start_angle` over `sweep` radians.
+    /// from `start_angle` over `sweep`.
     ///
-    /// Angles are in radians and turn the `x` axis towards the `y` axis,
-    /// which with `y` pointing down is clockwise on screen. A negative
-    /// `sweep` runs the other way. The width is measured radially.
+    /// Angles turn the `x` axis towards the `y` axis, which with `y`
+    /// pointing down is clockwise on screen. A negative `sweep` runs the
+    /// other way. The width is measured radially.
     ///
     /// # Errors
     ///
-    /// [`Error::InvalidParameter`] if the centre or `start_angle` is not
-    /// finite, `radius` is not finite and positive, `sweep` is zero, not
-    /// finite or a full turn or more, half the width is not below the
+    /// [`Error::InvalidParameter`] if the centre is not finite, `radius` is
+    /// not finite and positive, `sweep` is zero or a full turn or more,
+    /// half the width is not below the
     /// radius, or a parameter is rejected as in [`Self::try_segment`].
     ///
     /// # Example
     ///
     /// ```
     /// use std::f64::consts::PI;
-    /// use fovea::{Length, Point};
+    /// use fovea::{Angle, Length, Point};
     /// use fovea::measure::Caliper;
     ///
     /// // A quarter circle of radius 20 px about (32, 32), starting at +x.
     /// let cal: Caliper = Caliper::try_arc(
     ///     Point::new(32.0, 32.0),
     ///     Length::new(20.0),
-    ///     0.0,
-    ///     PI / 2.0,
+    ///     Angle::from_degrees(0.0)?,
+    ///     Angle::from_degrees(90.0)?,
     ///     Length::new(2.0),
     ///     Length::new(0.5),
     /// )?;
@@ -238,8 +238,8 @@ impl<S: PixelSpace> Caliper<S> {
     pub fn try_arc(
         centre: Point<S>,
         radius: Length<S>,
-        start_angle: f64,
-        sweep: f64,
+        start_angle: Angle,
+        sweep: Angle,
         width: Length<S>,
         step: Length<S>,
     ) -> Result<Self, Error> {
@@ -252,12 +252,7 @@ impl<S: PixelSpace> Caliper<S> {
             Requirement::FinitePositive,
             Value::F64(r),
         )?;
-        check(
-            start_angle.is_finite(),
-            "start angle",
-            Requirement::Finite,
-            Value::F64(start_angle),
-        )?;
+        let (start_angle, sweep) = (start_angle.radians(), sweep.radians());
         check(
             sweep.is_normal(),
             "sweep",
@@ -532,6 +527,10 @@ mod tests {
     use crate::transform::{Bilinear, CatmullRom};
     use core::f64::consts::PI;
 
+    fn rad(radians: f64) -> Angle {
+        Angle::from_radians(radians).unwrap()
+    }
+
     fn p(x: f64, y: f64) -> Point<Pixels> {
         Point::new(x, y)
     }
@@ -572,8 +571,9 @@ mod tests {
 
     #[test]
     fn an_arc_runs_either_way() {
-        let cw = Caliper::try_arc(p(0.0, 0.0), l(10.0), 0.0, PI, l(0.0), l(1.0)).unwrap();
-        let ccw = Caliper::try_arc(p(0.0, 0.0), l(10.0), 0.0, -PI, l(0.0), l(1.0)).unwrap();
+        let cw = Caliper::try_arc(p(0.0, 0.0), l(10.0), rad(0.0), rad(PI), l(0.0), l(1.0)).unwrap();
+        let ccw =
+            Caliper::try_arc(p(0.0, 0.0), l(10.0), rad(0.0), rad(-PI), l(0.0), l(1.0)).unwrap();
         let q = cw.point_at(l(5.0 * PI));
         assert!(q.x.abs() < 1e-12 && (q.y - 10.0).abs() < 1e-12);
         let q = ccw.point_at(l(5.0 * PI));
@@ -610,7 +610,8 @@ mod tests {
                 Requirement::AtMost(MAX_CALIPER_SAMPLES)
             )
         );
-        let arc = |r, sweep, w| Caliper::try_arc(p(0.0, 0.0), l(r), 0.0, sweep, l(w), l(1.0));
+        let arc =
+            |r, sweep, w| Caliper::try_arc(p(0.0, 0.0), l(r), rad(0.0), rad(sweep), l(w), l(1.0));
         assert_eq!(
             rejected(arc(0.0, 1.0, 0.0)),
             ("radius", Requirement::FinitePositive)

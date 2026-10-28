@@ -85,6 +85,12 @@ fovea has two types for them, and they differ in their modulus:
 Both take differences on the circle through `signed_difference`, and neither
 implements an ordering.
 
+An amount of turn is a different quantity: the rotation of a calibration,
+the sweep of an arc, the angle between two lines. Three quarter turns and
+minus one quarter turn are different amounts, so `Angle` keeps the value as
+given, in `f64`, and orders like a number. Its constructors name the unit,
+`Angle::from_degrees(90.0)` or `Angle::from_radians(..)`.
+
 ```rust
 use fovea::{AxialOrientation, Orientation};
 
