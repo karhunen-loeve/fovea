@@ -466,6 +466,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the method directly reports the empty source as the free function does;
   an implementation outside the crate returns `Ok(())` and reports
   `Error::EmptySource` itself.
+- **Breaking:** `Error` is `#[non_exhaustive]`. It gained eight variants
+  in this release, each breaking every exhaustive `match`; from here on a
+  new variant can arrive in a patch release. Migration: end a `match` on
+  `Error` with a wildcard arm, `_ => ...`.
 - **Breaking:** `Error::InvalidParameter` carries a `ParameterError`
   instead of a `String`. A caller or a test now asks which rule failed
   (`e.requirement()`) and with which value (`e.value()`) instead of

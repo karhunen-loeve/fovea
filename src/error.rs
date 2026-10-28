@@ -17,6 +17,22 @@ use core::fmt;
 /// | 2 | `Result<T, Error>` | Data failure — caller-supplied data doesn't fit |
 /// | 3 | `panic!` | Programmer bug — violated precondition (e.g. output size mismatch) |
 ///
+/// The enum is `#[non_exhaustive]`: a later release may add a variant, so a
+/// `match` outside this crate ends with a wildcard arm.
+///
+/// ```
+/// use fovea::Error;
+///
+/// fn describe(err: &Error) -> &'static str {
+///     match err {
+///         Error::SizeMismatch { .. } => "the images differ in size",
+///         Error::EmptySource { .. } => "the source has no pixels",
+///         _ => "another failure",
+///     }
+/// }
+/// # assert_eq!(describe(&Error::EmptyPyramid), "another failure");
+/// ```
+///
 /// # Examples
 ///
 /// ```
@@ -30,6 +46,7 @@ use core::fmt;
 /// );
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Error {
     /// Two images that must have identical dimensions do not.
     ///
