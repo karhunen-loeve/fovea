@@ -169,6 +169,27 @@ impl<U: LengthUnit> Vector<U> {
     pub fn length(self) -> Length<U> {
         Length::new(self.x.hypot(self.y))
     }
+
+    /// The vector of length one in the same direction, or `None` for a
+    /// vector without a direction: zero length, or a component that is not
+    /// finite.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use fovea::Pixels;
+    /// use fovea::geometry::Vector;
+    ///
+    /// let v: Vector<Pixels> = Vector::new(3.0, -4.0);
+    /// assert_eq!(v.normalized(), Some(Vector::new(0.6, -0.8)));
+    /// assert_eq!(Vector::<Pixels>::new(0.0, 0.0).normalized(), None);
+    /// ```
+    #[must_use]
+    #[inline]
+    pub fn normalized(self) -> Option<Self> {
+        let length = self.x.hypot(self.y);
+        (length > 0.0 && length.is_finite()).then(|| Self::new(self.x / length, self.y / length))
+    }
 }
 
 impl<U: LengthUnit> Length<U> {
@@ -428,6 +449,29 @@ mod tests {
         assert_eq!(b - v, a);
         assert_eq!(a.distance(b), Length::new(5.0));
         assert_eq!(b.distance(a), Length::new(5.0));
+    }
+
+    #[test]
+    fn normalized_keeps_the_direction_and_rejects_none() {
+        let v: Vector<Pixels> = Vector::new(-5.0, 12.0);
+        let u = v.normalized().unwrap();
+        assert!((u.length().get() - 1.0).abs() < 1e-15);
+        assert!((u.x * 13.0 + 5.0).abs() < 1e-14 && (u.y * 13.0 - 12.0).abs() < 1e-14);
+        // Tiny and huge vectors keep their direction: no underflow or
+        // overflow in the length.
+        let tiny: Vector<Pixels> = Vector::new(3e-320, 4e-320);
+        assert!((tiny.normalized().unwrap().length().get() - 1.0).abs() < 1e-3);
+        let huge: Vector<Pixels> = Vector::new(3e307, 4e307);
+        let h = huge.normalized().unwrap();
+        assert!((h.x - 0.6).abs() < 1e-15 && (h.y - 0.8).abs() < 1e-15);
+        for none in [
+            Vector::new(0.0, 0.0),
+            Vector::new(-0.0, 0.0),
+            Vector::new(f64::NAN, 1.0),
+            Vector::new(f64::INFINITY, 1.0),
+        ] {
+            assert_eq!(none.normalized(), None::<Vector<Pixels>>, "{none:?}");
+        }
     }
 
     #[test]

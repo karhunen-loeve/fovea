@@ -132,7 +132,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `try_new`, the start and the sweep of `Caliper::try_arc`, and what
   `Line::angle_to` returns, so a scale and an angle cannot change places
   and the unit is written at the call site. `Orientation` and
-  `AxialOrientation` keep directions and axes.
+  `AxialOrientation` keep directions and axes, and gain `degrees()`
+  beside `radians()`.
+- `Vector::normalized`, the vector of length one in the same direction,
+  `None` for a zero or non-finite vector.
 - **The caliper, `fovea::measure`.** A `Caliper` describes where to
   measure: a segment or an arc, a width to average across and a sampling
   step, with no default for either. `profile(&img, &caliper, kernel,

@@ -1137,6 +1137,22 @@ impl Orientation {
         self.0
     }
 
+    /// Returns the angle in degrees, in `(−180, 180]`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use fovea::Orientation;
+    ///
+    /// let down = Orientation::from_atan2(1.0, 0.0);
+    /// assert!((down.degrees() - 90.0).abs() < 1e-5);
+    /// ```
+    #[must_use]
+    #[inline]
+    pub fn degrees(self) -> f32 {
+        self.0.to_degrees()
+    }
+
     /// Returns the signed angle **from `other` to `self`**, in `(−π, π]`.
     ///
     /// Wraps across the ±π seam, so the result is always the shorter of the
@@ -1281,6 +1297,23 @@ impl AxialOrientation {
     #[inline]
     pub const fn radians(self) -> f64 {
         self.0
+    }
+
+    /// Returns the angle in degrees, in `(−90, 90]`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use fovea::AxialOrientation;
+    ///
+    /// let axis = AxialOrientation::from_radians(170_f64.to_radians())?;
+    /// assert!((axis.degrees() + 10.0).abs() < 1e-12);
+    /// # Ok::<(), fovea::Error>(())
+    /// ```
+    #[must_use]
+    #[inline]
+    pub fn degrees(self) -> f64 {
+        self.0.to_degrees()
     }
 
     /// Returns the signed angle **from `other` to `self`**, in
