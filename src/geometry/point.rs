@@ -5,6 +5,7 @@ use core::marker::PhantomData;
 use core::ops::{Add, Mul, Neg, Sub};
 
 use super::units::{LengthUnit, Meter, Prefix, rescale};
+use crate::Angle;
 
 /// A position in the plane, in the unit `U`.
 ///
@@ -189,6 +190,36 @@ impl<U: LengthUnit> Vector<U> {
     pub fn normalized(self) -> Option<Self> {
         let length = self.x.hypot(self.y);
         (length > 0.0 && length.is_finite()).then(|| Self::new(self.x / length, self.y / length))
+    }
+
+    /// The vector of polar coordinates: `length` along the direction
+    /// `angle` from the `+x` axis.
+    ///
+    /// The components are Cartesian the moment it is built, as every
+    /// `Vector`'s are; the name says what goes in, as
+    /// [`Orientation::from_atan2`](crate::Orientation::from_atan2) does.
+    /// The angle turns `+x` towards `+y`, which in an image with `y`
+    /// pointing down is clockwise on screen, and carries no unit: a
+    /// quarter turn is the same amount in pixels and in millimetres. A
+    /// negative length points the other way.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use fovea::geometry::Vector;
+    /// use fovea::{Angle, Length, Pixels, Point};
+    ///
+    /// // A radial caliper start: 15 px from the centre, 45° down-right.
+    /// let centre: Point<Pixels> = Point::new(160.0, 70.0);
+    /// let start = centre + Vector::from_polar(Length::new(15.0), Angle::from_degrees(45.0)?);
+    /// assert!((start.x - 170.6066).abs() < 1e-4);
+    /// assert!((start.y - 80.6066).abs() < 1e-4);
+    /// # Ok::<(), fovea::Error>(())
+    /// ```
+    #[must_use]
+    pub fn from_polar(length: Length<U>, angle: Angle) -> Self {
+        let (sin, cos) = angle.radians().sin_cos();
+        Self::new(length.get() * cos, length.get() * sin)
     }
 }
 
@@ -449,6 +480,26 @@ mod tests {
         assert_eq!(b - v, a);
         assert_eq!(a.distance(b), Length::new(5.0));
         assert_eq!(b.distance(a), Length::new(5.0));
+    }
+
+    #[test]
+    fn from_polar_covers_the_quadrants_and_signs() {
+        let r = Length::<Pixels>::new(2.0);
+        let deg = |d: f64| crate::Angle::from_degrees(d).unwrap();
+        let close =
+            |v: Vector<Pixels>, x: f64, y: f64| (v.x - x).abs() < 1e-15 && (v.y - y).abs() < 1e-15;
+        assert_eq!(Vector::from_polar(r, deg(0.0)), Vector::new(2.0, 0.0));
+        // +90° turns +x towards +y: downwards in an image.
+        assert!(close(Vector::from_polar(r, deg(90.0)), 0.0, 2.0));
+        assert!(close(Vector::from_polar(r, deg(-90.0)), 0.0, -2.0));
+        assert!(close(Vector::from_polar(r, deg(180.0)), -2.0, 0.0));
+        // The length comes back, the angle is not wrapped on the way in.
+        assert!((Vector::from_polar(r, deg(300.0)).length().get() - 2.0).abs() < 1e-15);
+        assert!(close(
+            Vector::from_polar(Length::new(-2.0), deg(0.0)),
+            -2.0,
+            0.0
+        ));
     }
 
     #[test]

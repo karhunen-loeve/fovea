@@ -136,6 +136,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   beside `radians()`.
 - `Vector::normalized`, the vector of length one in the same direction,
   `None` for a zero or non-finite vector.
+- `Vector::from_polar(length, angle)`, the vector of polar coordinates:
+  `length` along the direction `angle` from the `+x` axis. The length
+  carries the unit, the `Angle` none, and the components are Cartesian
+  the moment it is built, as every `Vector`'s are.
 - **The caliper, `fovea::measure`.** A `Caliper` describes where to
   measure: a segment or an arc, a width to average across and a sampling
   step, with no default for either. `profile(&img, &caliper, kernel,
