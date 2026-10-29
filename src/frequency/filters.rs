@@ -751,7 +751,7 @@ impl Frequency<CyclesPerPixel> {
     /// // 120° and −60° are one axis.
     /// let a = Frequency::cycles_per_pixel(-0.05, 0.0866).axis().unwrap();
     /// let b = Frequency::cycles_per_pixel(0.05, -0.0866).axis().unwrap();
-    /// assert!(a.signed_difference(b).abs() < 1e-12);
+    /// assert!(a.signed_difference(b).abs().radians() < 1e-12);
     /// assert!(Frequency::cycles_per_pixel(0.0, 0.0).axis().is_none());
     /// ```
     #[must_use]
@@ -1087,7 +1087,7 @@ mod tests {
         let deg = |d: f64| d.to_radians();
         let a = cpp(deg(120.0).cos(), deg(120.0).sin()).axis().unwrap();
         let b = cpp(deg(-60.0).cos(), deg(-60.0).sin()).axis().unwrap();
-        assert!(a.signed_difference(b).abs() < 1e-12);
+        assert!(a.signed_difference(b).abs().radians() < 1e-12);
         assert!(cpp(0.0, 0.0).axis().is_none());
         // Vertical stripes: their frequencies lie on the horizontal axis.
         let img = Image::generate(32, 32, |x, _| MonoF64::new((x % 4) as f64));
@@ -1100,6 +1100,7 @@ mod tests {
                 .unwrap()
                 .signed_difference(AxialOrientation::from_radians(0.0).unwrap())
                 .abs()
+                .radians()
                 < 1e-15
         );
     }

@@ -479,6 +479,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the method directly reports the empty source as the free function does;
   an implementation outside the crate returns `Ok(())` and reports
   `Error::EmptySource` itself.
+- **Breaking:** `Orientation::signed_difference` and
+  `AxialOrientation::signed_difference` return an `Angle` instead of bare
+  radians (`f32` and `f64`). The difference of two directions or two axes
+  is an amount of turn, the quantity `Angle` carries; `Angle::abs()` gives
+  its magnitude. Migration: append `.radians()` where the raw number is
+  wanted, so `a.signed_difference(b).abs() < 1e-6` becomes
+  `a.signed_difference(b).abs().radians() < 1e-6`; a printed
+  `.to_degrees()` becomes `.degrees()`. For `Orientation` the wrap still
+  runs in `f32` and the exact result is widened, so no value changes.
 - **Breaking:** `Error` is `#[non_exhaustive]`. It gained eight variants
   in this release, each breaking every exhaustive `match`; from here on a
   new variant can arrive in a patch release. Migration: end a `match` on

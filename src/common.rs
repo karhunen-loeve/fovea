@@ -1069,12 +1069,12 @@ pub enum Extremum {
 /// let half = Orientation::from_radians(core::f32::consts::PI)?;
 /// // Compare by difference, not `==`: wrapping rounds, so these agree to
 /// // within an ULP rather than bit-exactly.
-/// assert!(turned.signed_difference(half).abs() < 1e-6);
+/// assert!(turned.signed_difference(half).abs().radians() < 1e-6);
 ///
 /// // The ±π seam is 2 degrees wide, not 358.
 /// let east = Orientation::from_radians(179_f32.to_radians())?;
 /// let west = Orientation::from_radians((-179_f32).to_radians())?;
-/// let apart = east.signed_difference(west).abs().to_degrees();
+/// let apart = east.signed_difference(west).abs().degrees();
 /// assert!((apart - 2.0).abs() < 1e-3, "got {apart}");
 /// # Ok::<(), fovea::Error>(())
 /// ```
@@ -1153,10 +1153,14 @@ impl Orientation {
         self.0.to_degrees()
     }
 
-    /// Returns the signed angle **from `other` to `self`**, in `(−π, π]`.
+    /// Returns the signed [`Angle`] **from `other` to `self`**, in
+    /// `(−π, π]`.
     ///
     /// Wraps across the ±π seam, so the result is always the shorter of the
-    /// two ways round and its magnitude never exceeds π.
+    /// two ways round and its magnitude never exceeds π. The difference is
+    /// an amount of turn, so it comes back as an [`Angle`]: the direction
+    /// types wrap and compare on the circle, a difference orders like a
+    /// number.
     ///
     /// # Example
     ///
@@ -1165,13 +1169,15 @@ impl Orientation {
     ///
     /// let a = Orientation::from_radians(0.5)?;
     /// let b = Orientation::from_radians(0.2)?;
-    /// assert!((a.signed_difference(b) - 0.3).abs() < 1e-6);
+    /// assert!((a.signed_difference(b).radians() - 0.3).abs() < 1e-6);
     /// # Ok::<(), fovea::Error>(())
     /// ```
     #[must_use]
     #[inline]
-    pub fn signed_difference(self, other: Self) -> f32 {
-        wrap_two_pi(self.0 - other.0)
+    pub fn signed_difference(self, other: Self) -> Angle {
+        // The wrap runs in f32, where the orientations live; the exact
+        // f32 result is then widened, so no new rounding enters.
+        Angle::from_finite_radians(f64::from(wrap_two_pi(self.0 - other.0)))
     }
 
     /// Discards the sense of direction, yielding the undirected axis this
@@ -1196,7 +1202,7 @@ impl Orientation {
     /// let north = Orientation::from_radians(core::f32::consts::FRAC_PI_2)?;
     /// let south = Orientation::from_radians(-core::f32::consts::FRAC_PI_2)?;
     /// // Opposite directions, one axis.
-    /// assert!(north.to_axial().signed_difference(south.to_axial()).abs() < 1e-6);
+    /// assert!(north.to_axial().signed_difference(south.to_axial()).abs().radians() < 1e-6);
     /// # Ok::<(), fovea::Error>(())
     /// ```
     #[must_use]
@@ -1236,7 +1242,7 @@ impl Orientation {
 /// let a = AxialOrientation::from_radians(80_f64.to_radians())?;
 /// let b = AxialOrientation::from_radians((-100_f64).to_radians())?;
 /// // Same axis, reached from opposite directions.
-/// assert!(a.signed_difference(b).abs() < 1e-12);
+/// assert!(a.signed_difference(b).abs().radians() < 1e-12);
 /// # Ok::<(), fovea::Error>(())
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1333,14 +1339,14 @@ impl AxialOrientation {
     /// let b = AxialOrientation::from_radians((-80_f64).to_radians())?;
     /// // 20° apart, not 160°. (The sign says which way round: the axis at
     /// // 80° is a fifth of a quarter-turn clockwise of the one at −80°.)
-    /// let apart = a.signed_difference(b).abs().to_degrees();
+    /// let apart = a.signed_difference(b).abs().degrees();
     /// assert!((apart - 20.0).abs() < 1e-9, "got {apart}");
     /// # Ok::<(), fovea::Error>(())
     /// ```
     #[must_use]
     #[inline]
-    pub fn signed_difference(self, other: Self) -> f64 {
-        wrap_pi(self.0 - other.0)
+    pub fn signed_difference(self, other: Self) -> Angle {
+        Angle::from_finite_radians(wrap_pi(self.0 - other.0))
     }
 }
 
@@ -1432,6 +1438,23 @@ impl Angle {
     #[inline]
     pub fn degrees(self) -> f64 {
         self.0.to_degrees()
+    }
+
+    /// The angle's magnitude: the same amount of turn, without its sense.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use fovea::Angle;
+    ///
+    /// let back = Angle::from_degrees(-90.0)?;
+    /// assert_eq!(back.abs(), Angle::from_degrees(90.0)?);
+    /// # Ok::<(), fovea::Error>(())
+    /// ```
+    #[must_use]
+    #[inline]
+    pub fn abs(self) -> Self {
+        Self(self.0.abs())
     }
 }
 
@@ -1599,7 +1622,7 @@ mod tests {
         // rounds, which is why the documented comparison is by difference.
         let three_halves = Orientation::from_radians(3.0 * PI32).unwrap();
         let half = Orientation::from_radians(PI32).unwrap();
-        assert!(three_halves.signed_difference(half).abs() < 1e-6);
+        assert!(three_halves.signed_difference(half).abs().radians() < 1e-6);
     }
 
     #[test]
@@ -1632,7 +1655,7 @@ mod tests {
         // The bug this type exists to prevent: 2° apart, not 358°.
         let east = Orientation::from_radians(179_f32.to_radians()).unwrap();
         let west = Orientation::from_radians((-179_f32).to_radians()).unwrap();
-        let delta = east.signed_difference(west).to_degrees();
+        let delta = east.signed_difference(west).degrees();
         assert!((delta.abs() - 2.0).abs() < 1e-3, "got {delta}");
     }
 
@@ -1640,9 +1663,9 @@ mod tests {
     fn orientation_signed_difference_is_signed_and_directed() {
         let a = Orientation::from_radians(0.5).unwrap();
         let b = Orientation::from_radians(0.2).unwrap();
-        assert!((a.signed_difference(b) - 0.3).abs() < 1e-6);
-        assert!((b.signed_difference(a) + 0.3).abs() < 1e-6);
-        assert_eq!(a.signed_difference(a), 0.0);
+        assert!((a.signed_difference(b).radians() - 0.3).abs() < 1e-6);
+        assert!((b.signed_difference(a).radians() + 0.3).abs() < 1e-6);
+        assert_eq!(a.signed_difference(a).radians(), 0.0);
     }
 
     #[test]
@@ -1651,9 +1674,9 @@ mod tests {
             let a = Orientation::from_radians(degrees.to_radians()).unwrap();
             let b = Orientation::from_radians(0.0).unwrap();
             assert!(
-                a.signed_difference(b).abs() <= PI32 + 1e-6,
+                a.signed_difference(b).abs().radians() <= f64::from(PI32) + 1e-6,
                 "{degrees}° → {}",
-                a.signed_difference(b)
+                a.signed_difference(b).radians()
             );
         }
     }
@@ -1666,14 +1689,31 @@ mod tests {
         // axis, which is precisely what `signed_difference` sees.
         let north = Orientation::from_radians(PI32 / 2.0).unwrap();
         let south = Orientation::from_radians(-PI32 / 2.0).unwrap();
-        assert!(north.to_axial().signed_difference(south.to_axial()).abs() < 1e-6);
+        assert!(
+            north
+                .to_axial()
+                .signed_difference(south.to_axial())
+                .abs()
+                .radians()
+                < 1e-6
+        );
 
         let east = Orientation::from_radians(0.0).unwrap();
         let west = Orientation::from_radians(PI32).unwrap();
-        assert!(east.to_axial().signed_difference(west.to_axial()).abs() < 1e-6);
+        assert!(
+            east.to_axial()
+                .signed_difference(west.to_axial())
+                .abs()
+                .radians()
+                < 1e-6
+        );
 
         // ...and the two axes are a quarter turn apart, not the same.
-        let apart = north.to_axial().signed_difference(east.to_axial()).abs();
+        let apart = north
+            .to_axial()
+            .signed_difference(east.to_axial())
+            .abs()
+            .radians();
         assert!((apart - PI64 / 2.0).abs() < 1e-6, "got {apart}");
     }
 
@@ -1713,12 +1753,12 @@ mod tests {
         // An axis has no head or tail: θ and θ + π are equal.
         let a = AxialOrientation::from_radians(0.4).unwrap();
         let b = AxialOrientation::from_radians(0.4 + PI64).unwrap();
-        assert!(a.signed_difference(b).abs() < 1e-12);
+        assert!(a.signed_difference(b).abs().radians() < 1e-12);
 
         // 80° and −100° are the same axis, reached the other way round.
         let c = AxialOrientation::from_radians(80_f64.to_radians()).unwrap();
         let d = AxialOrientation::from_radians((-100_f64).to_radians()).unwrap();
-        assert!(c.signed_difference(d).abs() < 1e-12);
+        assert!(c.signed_difference(d).abs().radians() < 1e-12);
     }
 
     #[test]
@@ -1757,16 +1797,16 @@ mod tests {
         let b = AxialOrientation::from_radians((-80_f64).to_radians()).unwrap();
         // 20° apart, not 160°. The sign is negative: the axis at 80° is
         // reached from the one at −80° (≡ 100°) by turning back 20°.
-        let delta = a.signed_difference(b).to_degrees();
+        let delta = a.signed_difference(b).degrees();
         assert!((delta.abs() - 20.0).abs() < 1e-9, "got {delta}");
 
         for degrees in [0.0_f64, 10.0, 89.0, 91.0, 170.0, 269.0] {
             let x = AxialOrientation::from_radians(degrees.to_radians()).unwrap();
             let y = AxialOrientation::from_radians(0.0).unwrap();
             assert!(
-                x.signed_difference(y).abs() <= PI64 / 2.0 + 1e-12,
+                x.signed_difference(y).abs().radians() <= PI64 / 2.0 + 1e-12,
                 "{degrees}° → {}",
-                x.signed_difference(y)
+                x.signed_difference(y).radians()
             );
         }
     }

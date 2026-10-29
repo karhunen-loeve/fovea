@@ -426,7 +426,7 @@ mod tests {
         let m = from_pixels(&pixels);
         let expected = AxialOrientation::from_radians(PI / 4.0).unwrap();
         assert!(
-            m.orientation().signed_difference(expected).abs() < 1e-9,
+            m.orientation().signed_difference(expected).abs().radians() < 1e-9,
             "got {:?}",
             m.orientation()
         );
@@ -436,7 +436,7 @@ mod tests {
         let m = from_pixels(&pixels);
         let expected = AxialOrientation::from_radians(-PI / 4.0).unwrap();
         assert!(
-            m.orientation().signed_difference(expected).abs() < 1e-9,
+            m.orientation().signed_difference(expected).abs().radians() < 1e-9,
             "got {:?}",
             m.orientation()
         );

@@ -97,12 +97,12 @@ use fovea::{AxialOrientation, Orientation};
 // Directions: 179° and -179° are 2° apart.
 let east = Orientation::from_radians(179_f32.to_radians())?;
 let west = Orientation::from_radians((-179_f32).to_radians())?;
-assert!((east.signed_difference(west).abs().to_degrees() - 2.0).abs() < 1e-3);
+assert!((east.signed_difference(west).abs().degrees() - 2.0).abs() < 1e-3);
 
 // Axes: 10° and 190° are the same axis.
 let a = AxialOrientation::from_radians(10_f64.to_radians())?;
 let b = AxialOrientation::from_radians(190_f64.to_radians())?;
-assert!(a.signed_difference(b).abs() < 1e-9);
+assert!(a.signed_difference(b).abs().radians() < 1e-9);
 # Ok::<(), fovea::Error>(())
 ```
 

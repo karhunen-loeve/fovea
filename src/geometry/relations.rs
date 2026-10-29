@@ -106,7 +106,7 @@ impl<U: LengthUnit> Line<U> {
     ///
     /// // Without direction: the acute angle between the axes.
     /// let axes = b.axis().signed_difference(a.axis()).abs();
-    /// assert!((axes.to_degrees() - 60.0).abs() < 1e-12);
+    /// assert!((axes.degrees() - 60.0).abs() < 1e-12);
     /// # Ok::<(), fovea::Error>(())
     /// ```
     #[must_use]
@@ -133,7 +133,7 @@ impl<U: LengthUnit> Line<U> {
     ///
     /// let a: Line<Pixels> = Line::try_through(Point::new(0.0, 0.0), Point::new(10.0, 10.0))?;
     /// assert!((a.axis().radians().to_degrees() - 45.0).abs() < 1e-12);
-    /// assert!(a.axis().signed_difference(a.reversed().axis()).abs() < 1e-12);
+    /// assert!(a.axis().signed_difference(a.reversed().axis()).abs().radians() < 1e-12);
     /// # Ok::<(), fovea::Error>(())
     /// ```
     #[must_use]
@@ -429,7 +429,7 @@ mod tests {
         let a = line((0.0, 0.0), (10.0, 0.0));
         let b = line((0.0, 0.0), (-10.0, 10.0));
         assert!((a.angle_to(&b).radians() - 3.0 * FRAC_PI_2 / 2.0).abs() < 1e-15);
-        let acute = b.axis().signed_difference(a.axis());
+        let acute = b.axis().signed_difference(a.axis()).radians();
         assert!((acute + FRAC_PI_2 / 2.0).abs() < 1e-15);
     }
 

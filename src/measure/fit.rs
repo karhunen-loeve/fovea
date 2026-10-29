@@ -1298,7 +1298,7 @@ mod tests {
             assert!((e.semi_minor().get() - 8.0).abs() < 1e-9, "{phi}: {e:?}");
             let expected = AxialOrientation::from_radians(phi).unwrap();
             assert!(
-                e.orientation().signed_difference(expected).abs() < 1e-9,
+                e.orientation().signed_difference(expected).abs().radians() < 1e-9,
                 "{phi}: {e:?}"
             );
             assert!(found.max_residual().get() < 1e-9);
@@ -1406,6 +1406,7 @@ mod tests {
                 .orientation()
                 .signed_difference(vertical)
                 .abs()
+                .radians()
                 < 1e-9
         );
     }
