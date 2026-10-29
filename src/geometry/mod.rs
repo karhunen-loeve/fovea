@@ -180,5 +180,5 @@ pub use map::{AffineMap, ConformalMap, PlaneMap};
 pub use point::{Length, Point, Vector};
 pub use units::{
     IdealPixels, LengthUnit, Meter, Micro, Micrometer, Milli, Millimeter, PixelSpace, Pixels,
-    Prefix, Unit,
+    Prefix, SpectrumPixels, Unit,
 };

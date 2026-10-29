@@ -128,6 +128,35 @@ impl FrequencyIndex {
     pub const fn new(kx: isize, ky: isize) -> Self {
         Self { kx, ky }
     }
+
+    /// The bin that pixel `(x, y)` of a centred spectrum view shows, for a
+    /// view of `size`: the inverse of the layout of
+    /// [`Spectrum::centered`](super::Spectrum::centered), as numpy's
+    /// `ifftshift` is of `fftshift`.
+    ///
+    /// A peak found at pixel `(x, y)` of
+    /// [`magnitude`](super::Spectrum::magnitude) is the bin
+    /// `(x − ⌊W/2⌋, y − ⌊H/2⌋)`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use fovea::Size;
+    /// use fovea::frequency::FrequencyIndex;
+    ///
+    /// let size = Size::new(8, 6);
+    /// // The middle pixel of the view shows the zero frequency.
+    /// assert_eq!(FrequencyIndex::from_centered(4, 3, size), FrequencyIndex::new(0, 0));
+    /// // The top-left pixel shows the most negative bin of each axis.
+    /// assert_eq!(FrequencyIndex::from_centered(0, 0, size), FrequencyIndex::new(-4, -3));
+    /// ```
+    #[must_use]
+    pub const fn from_centered(x: usize, y: usize, size: Size) -> Self {
+        Self {
+            kx: x as isize - (size.width / 2) as isize,
+            ky: y as isize - (size.height / 2) as isize,
+        }
+    }
 }
 
 /// A frequency in the plane, in the unit `U`: [`Bins`] or

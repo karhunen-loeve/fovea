@@ -142,6 +142,37 @@ pub struct IdealPixels;
 impl LengthUnit for IdealPixels {}
 impl PixelSpace for IdealPixels {}
 
+/// The pixels of a centred spectrum view: the images
+/// [`Spectrum::centered`], [`magnitude`], [`power`] and [`phase`] return.
+///
+/// A position in this space names a frequency, with the zero frequency at
+/// `(⌊W/2⌋, ⌊H/2⌋)`. It is a space of its own so that a position found on
+/// a spectrum view cannot slip into an API that expects a position on the
+/// image, and the other way round; the step back to a frequency is
+/// [`FrequencyIndex::from_centered`].
+///
+/// ```compile_fail
+/// use fovea::frequency::{Auto, dft};
+/// use fovea::image::Image;
+/// use fovea::pixel::MonoF32;
+/// use fovea::transform::abs_diff;
+///
+/// let img = Image::fill(8, 8, MonoF32::new(1.0));
+/// // An image and its spectrum view lie in different spaces.
+/// let _ = abs_diff(&img, &dft(&img, Auto).magnitude());
+/// ```
+///
+/// [`Spectrum::centered`]: crate::frequency::Spectrum::centered
+/// [`magnitude`]: crate::frequency::Spectrum::magnitude
+/// [`power`]: crate::frequency::Spectrum::power
+/// [`phase`]: crate::frequency::Spectrum::phase
+/// [`FrequencyIndex::from_centered`]: crate::frequency::FrequencyIndex::from_centered
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct SpectrumPixels;
+
+impl LengthUnit for SpectrumPixels {}
+impl PixelSpace for SpectrumPixels {}
+
 mod sealed {
     pub trait Sealed {}
 }

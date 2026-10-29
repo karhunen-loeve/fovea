@@ -315,7 +315,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `magnitude()`, `power()` (the squared magnitude) and `phase()` are real
   images in the same layout, of the source's real type
   `SpectrumSource::Real`, so a later complex source adds without changing
-  them. All four are in the spectrum's space.
+  them. All four lie in `SpectrumPixels`, a space of their own at the
+  crate root: a position on a view names a frequency, so it cannot slip
+  into an API that expects a position on the image, and
+  `FrequencyIndex::from_centered(x, y, size)` is the step back to the bin
+  a view pixel shows.
 - **Filters in the frequency domain.** `spectrum.filter(&transfer)`
   multiplies every bin by the real gain of a transfer function, a value
   of the open trait `TransferFunction`: `LowPass`, `HighPass`,

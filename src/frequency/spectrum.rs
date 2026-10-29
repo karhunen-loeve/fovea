@@ -5,7 +5,7 @@ use super::method::DftMethod;
 use super::units::{Frequency, FrequencyIndex, FrequencyUnit, canonical, convert, frequency_in};
 use core::marker::PhantomData;
 
-use crate::geometry::{PixelSpace, Pixels};
+use crate::geometry::{PixelSpace, Pixels, SpectrumPixels};
 use crate::image::{Image, RasterImage};
 use crate::pixel::{ComplexF32, ComplexF64, MonoF32, MonoF64};
 use crate::{Error, Size};
@@ -444,7 +444,10 @@ impl<P: SpectrumSource, S: PixelSpace> Spectrum<P, S> {
     /// Pixel `(x, y)` holds the bin `(x − ⌊W/2⌋, y − ⌊H/2⌋)`, so the
     /// columns run through the canonical range from `−⌊W/2⌋`. The result
     /// is an ordinary complex image and leaves the spectrum: it is the way
-    /// to look at a spectrum, and there is no way back from it.
+    /// to look at a spectrum. Its space is [`SpectrumPixels`], since a
+    /// position on it names a frequency, and
+    /// [`FrequencyIndex::from_centered`] turns one back into the bin it
+    /// shows; there is no way back to the spectrum itself.
     ///
     /// # Example
     ///
@@ -459,7 +462,7 @@ impl<P: SpectrumSource, S: PixelSpace> Spectrum<P, S> {
     /// assert_eq!(shown.pixel_at(2, 2), ComplexF32::new(20.0, 0.0));
     /// ```
     #[must_use]
-    pub fn centered(&self) -> Image<P::Bin, S> {
+    pub fn centered(&self) -> Image<P::Bin, SpectrumPixels> {
         let Size { width, height } = self.source_size;
         let (cx, cy) = ((width / 2) as isize, (height / 2) as isize);
         Image::generate_in(width, height, |x, y| {
@@ -487,7 +490,7 @@ impl<P: SpectrumSource, S: PixelSpace> Spectrum<P, S> {
     /// assert_eq!(magnitude.pixel_at(0, 4), MonoF32::new(64.0));
     /// ```
     #[must_use]
-    pub fn magnitude(&self) -> Image<P::Real, S> {
+    pub fn magnitude(&self) -> Image<P::Real, SpectrumPixels> {
         self.centered_map(f64::hypot)
     }
 
@@ -510,7 +513,7 @@ impl<P: SpectrumSource, S: PixelSpace> Spectrum<P, S> {
     /// assert_eq!(power.pixel_at(2, 2), MonoF64::new(64.0));
     /// ```
     #[must_use]
-    pub fn power(&self) -> Image<P::Real, S> {
+    pub fn power(&self) -> Image<P::Real, SpectrumPixels> {
         self.centered_map(|re, im| re * re + im * im)
     }
 
@@ -535,12 +538,12 @@ impl<P: SpectrumSource, S: PixelSpace> Spectrum<P, S> {
     /// assert!((phase.pixel_at(5, 0).0 - step).abs() < 1e-15);
     /// ```
     #[must_use]
-    pub fn phase(&self) -> Image<P::Real, S> {
+    pub fn phase(&self) -> Image<P::Real, SpectrumPixels> {
         self.centered_map(|re, im| im.atan2(re))
     }
 
     /// `value(re, im)` of every bin, in the layout of `centered`.
-    fn centered_map(&self, value: impl Fn(f64, f64) -> f64) -> Image<P::Real, S> {
+    fn centered_map(&self, value: impl Fn(f64, f64) -> f64) -> Image<P::Real, SpectrumPixels> {
         let Size { width, height } = self.source_size;
         let (cx, cy) = ((width / 2) as isize, (height / 2) as isize);
         Image::generate_in(width, height, |x, y| {
@@ -1001,7 +1004,8 @@ mod tests {
         }
         let back: Result<Image<MonoF64, IdealPixels>, Error> = spectrum.inverse(Radix2);
         assert!(back.is_err(), "6 x 5 is no power of two");
-        let centered: Image<ComplexF64, IdealPixels> = spectrum.centered();
+        // The views leave the source's space: they lie in SpectrumPixels.
+        let centered: Image<ComplexF64, SpectrumPixels> = spectrum.centered();
         assert_eq!(centered.size(), ideal.size());
     }
 
@@ -1010,9 +1014,10 @@ mod tests {
         use crate::IdealPixels;
         let ideal: Image<MonoF32, IdealPixels> = Image::fill(4, 4, MonoF32::new(1.0)).into_space();
         let spectrum = dft(&ideal, Auto);
-        let magnitude: Image<<MonoF32 as SpectrumSource>::Real, IdealPixels> = spectrum.magnitude();
-        let power: Image<MonoF32, IdealPixels> = spectrum.power();
-        let phase: Image<MonoF32, IdealPixels> = spectrum.phase();
+        let magnitude: Image<<MonoF32 as SpectrumSource>::Real, SpectrumPixels> =
+            spectrum.magnitude();
+        let power: Image<MonoF32, SpectrumPixels> = spectrum.power();
+        let phase: Image<MonoF32, SpectrumPixels> = spectrum.phase();
         assert_eq!(magnitude.pixel_at(2, 2), MonoF32::new(16.0));
         assert_eq!(power.pixel_at(2, 2), MonoF32::new(256.0));
         assert_eq!(phase.pixel_at(2, 2), MonoF32::new(0.0));

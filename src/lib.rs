@@ -165,5 +165,5 @@ pub use common::{
 pub use error::Error;
 pub use geometry::{
     Circle, Ellipse, IdealPixels, Length, Line, Meter, Micrometer, Millimeter, Pixels, Point,
-    Segment,
+    Segment, SpectrumPixels,
 };
