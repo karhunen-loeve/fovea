@@ -51,7 +51,9 @@ fn checked_inverse(m: [[f64; 2]; 2]) -> Option<[[f64; 2]; 2]> {
     }
     let n = [[a / s, b / s], [c / s, d / s]];
     let det_n = n[0][0] * n[1][1] - n[0][1] * n[1][0];
-    if !(det_n.abs() >= DET_EPSILON) {
+    // The normalized entries are finite by the check above, so det_n is
+    // never NaN and the plain comparison is total here.
+    if det_n.abs() < DET_EPSILON {
         return None;
     }
     // inv(M) = adj(M / s) / (det_n · s), every intermediate near one.
