@@ -17,8 +17,53 @@ type Units<D, C> = PhantomData<fn() -> (D, C)>;
 
 /// Whether a factor and its reciprocal are both normal, so that the mapping
 /// and its inverse have finite, non-zero coefficients.
+///
+/// The matrix criterion below, specialized to a conformal or diagonal
+/// matrix, where the normalized determinant is 1 and the inverse's largest
+/// coefficient is the reciprocal of the smallest factor.
 const fn invertible(factor: f64) -> bool {
     factor.is_normal() && (1.0 / factor).is_normal()
+}
+
+/// Dimensionless lower bound on `|det(M / s)|`, the determinant of a matrix
+/// divided by its largest entry magnitude `s`: the invertibility criterion
+/// every class's constructor specializes (v0.6.0 review C11).
+///
+/// Normalizing first makes the verdict scale-invariant, so a mapping and
+/// the `Affine` built from it agree, and the determinant neither overflows
+/// nor underflows on the way. The bound rejects matrices whose condition
+/// number exceeds about 10¹², where the inverse's coefficients carry no
+/// usable precision; for the conformal classes and the axis scale the
+/// normalized determinant is the ratio of the smallest to the largest
+/// factor, so a factor alone never trips it. Precedent: `RANK_EPSILON` in
+/// the corner refinement, the same dimensionless determinant measure.
+const DET_EPSILON: f64 = 1e-12;
+
+/// The inverse of `m` under the matrix criterion, or `None` where the
+/// mapping does not certify one: the largest entry of `m` is not normal,
+/// the normalized determinant is below [`DET_EPSILON`] in magnitude, or
+/// the inverse's own largest coefficient is not normal.
+fn checked_inverse(m: [[f64; 2]; 2]) -> Option<[[f64; 2]; 2]> {
+    let [[a, b], [c, d]] = m;
+    let s = a.abs().max(b.abs()).max(c.abs()).max(d.abs());
+    if !s.is_normal() {
+        return None;
+    }
+    let n = [[a / s, b / s], [c / s, d / s]];
+    let det_n = n[0][0] * n[1][1] - n[0][1] * n[1][0];
+    if !(det_n.abs() >= DET_EPSILON) {
+        return None;
+    }
+    // inv(M) = adj(M / s) / (det_n · s), every intermediate near one.
+    let inverse = [
+        [n[1][1] / det_n / s, -n[0][1] / det_n / s],
+        [-n[1][0] / det_n / s, n[0][0] / det_n / s],
+    ];
+    let largest = inverse
+        .as_flattened()
+        .iter()
+        .fold(0.0f64, |acc, v| acc.max(v.abs()));
+    (largest.is_normal() && inverse.as_flattened().iter().all(|v| v.is_finite())).then_some(inverse)
 }
 
 fn finite_pair(v: [f64; 2]) -> bool {
@@ -183,7 +228,12 @@ impl<D: LengthUnit, C: LengthUnit> AxisScale<D, C> {
     /// macro for literals and [`Self::try_linear`] for computed values.
     #[must_use]
     pub const fn linear(x_factor: f64, y_factor: f64) -> Option<Self> {
-        if invertible(x_factor) && invertible(y_factor) {
+        // The matrix criterion for a diagonal: the normalized determinant
+        // is the ratio of the smaller factor magnitude to the larger.
+        let ax = if x_factor < 0.0 { -x_factor } else { x_factor };
+        let ay = if y_factor < 0.0 { -y_factor } else { y_factor };
+        let (min, max) = if ax < ay { (ax, ay) } else { (ay, ax) };
+        if invertible(x_factor) && invertible(y_factor) && min / max >= DET_EPSILON {
             Some(Self {
                 factors: [x_factor, y_factor],
                 inverse_factors: [1.0 / x_factor, 1.0 / y_factor],
@@ -201,7 +251,10 @@ impl<D: LengthUnit, C: LengthUnit> AxisScale<D, C> {
     /// # Errors
     ///
     /// [`Error::InvalidParameter`] naming the factor that is zero, not
-    /// finite, or so small that its reciprocal overflows.
+    /// finite, or so small that its reciprocal overflows; or naming the
+    /// normalized determinant where the factors differ by more than twelve
+    /// orders of magnitude, which counts as singular under the one
+    /// criterion all the classes share.
     pub fn try_linear(x_factor: f64, y_factor: f64) -> Result<Self, Error> {
         for (name, value) in [("x factor", x_factor), ("y factor", y_factor)] {
             if !invertible(value) {
@@ -213,7 +266,15 @@ impl<D: LengthUnit, C: LengthUnit> AxisScale<D, C> {
                 .into());
             }
         }
-        Ok(Self::linear(x_factor, y_factor).expect("both factors were just checked"))
+        Self::linear(x_factor, y_factor).ok_or_else(|| {
+            let (ax, ay) = (x_factor.abs(), y_factor.abs());
+            ParameterError::new(
+                "normalized determinant",
+                Requirement::FiniteNonZero,
+                Value::F64(ax.min(ay) / ax.max(ay)),
+            )
+            .into()
+        })
     }
 
     /// The scale by `x_factor` and `y_factor` followed by a shift by
@@ -347,6 +408,17 @@ impl<D: LengthUnit, C: LengthUnit> Similarity<D, C> {
         }
         let (sin, cos) = angle.radians().sin_cos();
         let rotation = [cos, sin];
+        // The matrix criterion on the similarity's own matrix, so the
+        // verdict matches Affine::try_new of the same mapping; the exact
+        // conjugate-based inverse below is what the type stores.
+        if checked_inverse(similarity_matrix(scale, rotation, false)).is_none() {
+            return Err(ParameterError::new(
+                "scale",
+                Requirement::FinitePositive,
+                Value::F64(scale),
+            )
+            .into());
+        }
         let t = [translation.x, translation.y];
         // Inverse of p ↦ s·u·p + t: q ↦ (1/s)·conj(u)·(q − t).
         let inverse_rotation = conj(rotation);
@@ -439,8 +511,13 @@ impl<D: LengthUnit, C: LengthUnit> Affine<D, C> {
     /// # Errors
     ///
     /// [`Error::InvalidParameter`] if an entry is not finite (its index,
-    /// row-major, is recorded), or if the determinant is zero, not finite,
-    /// or so small that the inverse overflows.
+    /// row-major, is recorded), or if the mapping counts as singular: the
+    /// matrix's largest entry is not normal, the determinant divided by
+    /// that entry squared is below 10⁻¹² in magnitude (a condition number
+    /// beyond about 10¹², whose inverse carries no usable precision), or
+    /// the inverse's largest coefficient is not normal. The criterion is
+    /// scale-invariant, so the verdict matches the one the other classes
+    /// give the same mapping.
     pub fn try_linear(matrix: [[f64; 2]; 2]) -> Result<Self, Error> {
         Self::try_new(matrix, Vector::new(0.0, 0.0))
     }
@@ -462,16 +539,19 @@ impl<D: LengthUnit, C: LengthUnit> Affine<D, C> {
             );
         }
         let [[a, b], [c, d]] = matrix;
-        let det = a * d - b * c;
-        let inverse_matrix = [[d / det, -b / det], [-c / det, a / det]];
-        if !invertible(det) || !inverse_matrix.iter().flatten().all(|v| v.is_finite()) {
+        let Some(inverse_matrix) = checked_inverse(matrix) else {
+            // The normalized determinant, which counts as zero below
+            // DET_EPSILON; computed as checked_inverse does, so the
+            // reported value never under- or overflows.
+            let s = a.abs().max(b.abs()).max(c.abs()).max(d.abs());
+            let det_n = (a / s) * (d / s) - (b / s) * (c / s);
             return Err(ParameterError::new(
-                "determinant",
+                "normalized determinant",
                 Requirement::FiniteNonZero,
-                Value::F64(det),
+                Value::F64(det_n),
             )
             .into());
-        }
+        };
         let t = [translation.x, translation.y];
         let moved = matrix_mul(inverse_matrix, t);
         let inverse_t = [-moved[0], -moved[1]];
@@ -662,8 +742,12 @@ impl<D: LengthUnit, C: LengthUnit> AffineMap for Affine<D, C> {
         }
     }
     fn reverses_orientation(&self) -> bool {
+        // Normalized by the largest entry (normal by construction), so the
+        // determinant of an extreme but valid mapping does not underflow
+        // to a zero whose sign says nothing.
         let [[a, b], [c, d]] = self.matrix;
-        a * d - b * c < 0.0
+        let s = a.abs().max(b.abs()).max(c.abs()).max(d.abs());
+        (a / s) * (d / s) - (b / s) * (c / s) < 0.0
     }
 }
 
@@ -1070,7 +1154,7 @@ mod tests {
         assert_eq!(
             requirement_of(e),
             (
-                "determinant",
+                "normalized determinant",
                 Requirement::FiniteNonZero,
                 Value::F64(0.0),
                 None
@@ -1079,8 +1163,46 @@ mod tests {
         let e = Affine::<Pixels, Pixels>::try_linear([[1.0, 0.0], [f64::NAN, 1.0]]).unwrap_err();
         let (name, req, _, index) = requirement_of(e);
         assert_eq!((name, req, index), ("matrix", Requirement::Finite, Some(2)));
-        let e = Affine::<Pixels, Pixels>::try_linear([[1e-200, 0.0], [0.0, 1e-200]]).unwrap_err();
-        assert_eq!(requirement_of(e).0, "determinant", "det underflows to zero");
+        // Nearly singular counts as singular: the normalized determinant is
+        // below the criterion's bound, though far from zero in f64.
+        let e = Affine::<Pixels, Pixels>::try_linear([[1.0, 1.0], [1.0, 1.0 + 1e-13]]).unwrap_err();
+        assert_eq!(requirement_of(e).0, "normalized determinant");
+        // A subnormal inverse coefficient no longer slips through: the
+        // normalized determinant underflows and counts as zero.
+        let e = Affine::<Pixels, Pixels>::try_linear([[1e308, 0.0], [0.0, 1e-300]]).unwrap_err();
+        assert_eq!(requirement_of(e).0, "normalized determinant");
+    }
+
+    #[test]
+    fn one_invertibility_criterion_across_the_classes() {
+        // v0.6.0 review C11: the same mapping gets the same verdict and the
+        // same answers on every path, however extreme its scale.
+        let u = UniformScale::<Pixels, Millimeter>::try_linear(1e-155).unwrap();
+        let a: Affine<Pixels, Millimeter> =
+            Affine::try_linear([[1e-155, 0.0], [0.0, 1e-155]]).unwrap();
+        assert_eq!(Affine::from(u).linear_part(), a.linear_part());
+
+        // The sign of the reflection question survives a determinant that
+        // would underflow unnormalized.
+        let x = AxisScale::<Pixels, Millimeter>::try_linear(1e-170, -1e-170).unwrap();
+        assert!(x.reverses_orientation());
+        assert!(Affine::from(x).reverses_orientation());
+
+        // What From builds, try_new accepts: the certificate holds for
+        // every valid member, at the extremes included.
+        for factors in [(1e-155, 1e-155), (1e-170, -1e-170), (2.3e-308, 1e-300)] {
+            let x = AxisScale::<Pixels, Millimeter>::try_linear(factors.0, factors.1);
+            if let Ok(x) = x {
+                let a = Affine::from(x);
+                assert!(
+                    Affine::<Pixels, Millimeter>::try_new(a.linear_part(), a.translation()).is_ok(),
+                    "{factors:?}"
+                );
+            }
+        }
+        // The anisotropy bound is the diagonal's normalized determinant.
+        assert!(AxisScale::<Pixels, Millimeter>::try_linear(1.0, 1e-11).is_ok());
+        assert!(AxisScale::<Pixels, Millimeter>::try_linear(1.0, 1e-13).is_err());
     }
 
     #[test]

@@ -113,7 +113,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sensors), `Similarity` (a camera at an angle) and `Affine`, each from one
   unit to another, with an optional translation and reflections allowed:
   `axis_scale!(0.02, -0.02)` maps an image's y-down frame to a y-up machine
-  frame. Each stores its inverse, computed and checked at construction.
+  frame. Each stores its inverse, computed and checked at construction
+  under one scale-invariant criterion, shared by every class and the
+  homography: the matrix normalized by its largest entry must have a
+  determinant of at least 10⁻¹² in magnitude, and the inverse's largest
+  coefficient must be normal. The same mapping therefore gets the same
+  verdict on every path, `Affine::from` of a valid member is always a
+  valid `Affine`, and the reflection question is answered on the
+  normalized matrix, so it survives a determinant that would underflow.
   The class decides what a mapping converts: every `PlaneMap` converts
   points, every `AffineMap` also displacements and their lengths
   (`length_of`), and only a `ConformalMap`, the uniform scale and the

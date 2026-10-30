@@ -88,8 +88,11 @@ impl<D: LengthUnit, C: LengthUnit> Homography<D, C> {
     /// # Errors
     ///
     /// [`Error::InvalidParameter`] if an entry is not finite, the index
-    /// counting row by row, or if the matrix is singular or so close to it
-    /// that its inverse is not finite.
+    /// counting row by row, or if the matrix counts as singular: its
+    /// determinant, with the entries first divided by the largest
+    /// magnitude, is below 10⁻¹² in magnitude, or the inverse's largest
+    /// coefficient is not normal. A homography is defined up to scale, so
+    /// the criterion sees the shape of the matrix, never its magnitude.
     pub fn try_new(rows: [[f64; 3]; 3]) -> Result<Self, Error> {
         let entries = rows.as_flattened();
         if let Some(i) = entries.iter().position(|v| !v.is_finite()) {
@@ -101,14 +104,27 @@ impl<D: LengthUnit, C: LengthUnit> Homography<D, C> {
             .at(i)
             .into());
         }
-        let det = determinant(&rows);
-        let inverse = invert(&rows, det);
-        let invertible = det.is_normal() && inverse.as_flattened().iter().all(|v| v.is_finite());
+        // The matrix criterion of the affine classes, with the entries
+        // normalized by the largest magnitude first (v0.6.0 review C11):
+        // scale-invariant, as a homography is defined up to scale anyway,
+        // and free of under- and overflow in the determinant.
+        let s = entries.iter().fold(0.0f64, |acc, v| acc.max(v.abs()));
+        let normalized = rows.map(|r| r.map(|v| v / s));
+        let det_n = determinant(&normalized);
+        let inverse = invert(&normalized, det_n).map(|r| r.map(|v| v / s));
+        let largest_inverse = inverse
+            .as_flattened()
+            .iter()
+            .fold(0.0f64, |acc, v| acc.max(v.abs()));
+        let invertible = s.is_normal()
+            && det_n.abs() >= 1e-12
+            && largest_inverse.is_normal()
+            && inverse.as_flattened().iter().all(|v| v.is_finite());
         if !invertible {
             return Err(ParameterError::new(
-                "homography determinant",
+                "normalized homography determinant",
                 Requirement::FiniteNonZero,
-                Value::F64(det),
+                Value::F64(det_n),
             )
             .into());
         }
@@ -189,8 +205,13 @@ mod tests {
             panic!("a singular matrix was accepted");
         };
         assert_eq!(e.requirement(), Requirement::FiniteNonZero);
+        // A homography is defined up to scale, and the criterion sees the
+        // shape of the matrix: a tiny multiple of the identity maps as the
+        // identity does.
         let tiny = [[1e-200, 0.0, 0.0], [0.0, 1e-200, 0.0], [0.0, 0.0, 1e-200]];
-        assert!(Homography::<Pixels, Pixels>::try_new(tiny).is_err());
+        let h = Homography::<Pixels, Pixels>::try_new(tiny).unwrap();
+        let q = h.try_map_point(px(3.0, -7.0)).unwrap();
+        assert!((q.x - 3.0).abs() < 1e-12 && (q.y + 7.0).abs() < 1e-12);
     }
 
     #[test]
