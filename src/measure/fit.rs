@@ -649,7 +649,8 @@ impl<U: LengthUnit> Fit<Line<U>> {
 
     /// The fit in the codomain of a conformal mapping: the line, its extent
     /// and every residual figure convert, since every distance scales by the
-    /// mapping's factor.
+    /// mapping's factor. `None` where the mapped line is none
+    /// ([`AffineMap::map_line`](crate::geometry::AffineMap::map_line)).
     ///
     /// # Example
     ///
@@ -661,7 +662,7 @@ impl<U: LengthUnit> Fit<Line<U>> {
     /// let points: [Point<Pixels>; 3] = [Point::new(0.0, 0.0), Point::new(40.0, 1.0), Point::new(80.0, 0.0)];
     /// let line = fit(&points, TotalLeastSquares, AllPoints)?;
     /// let scale: UniformScale<Pixels, Millimeter> = fovea::uniform_scale!(0.025);
-    /// let in_mm = line.map(&scale);
+    /// let in_mm = line.map(&scale).expect("millimetres per pixel keep the line finite");
     /// assert!((in_mm.peak_to_valley().get() - line.peak_to_valley().get() * 0.025).abs() < 1e-15);
     /// # Ok::<(), fovea::Error>(())
     /// ```
@@ -680,15 +681,16 @@ impl<U: LengthUnit> Fit<Line<U>> {
     /// let _ = line.map(&scale);
     /// ```
     #[must_use]
-    pub fn map<M: ConformalMap<Domain = U>>(&self, mapping: &M) -> Fit<Line<M::Codomain>> {
-        self.mapped(mapping.map_line(self.element), mapping.factor())
+    pub fn map<M: ConformalMap<Domain = U>>(&self, mapping: &M) -> Option<Fit<Line<M::Codomain>>> {
+        Some(self.mapped(mapping.map_line(self.element)?, mapping.factor()))
     }
 }
 
 impl<U: LengthUnit> Fit<Circle<U>> {
     /// The fit in the codomain of a conformal mapping: the circle and every
     /// residual figure convert, since every distance scales by the mapping's
-    /// factor.
+    /// factor. `None` where the mapped circle is none
+    /// ([`ConformalMap::map_circle`]).
     ///
     /// # Example
     ///
@@ -700,7 +702,8 @@ impl<U: LengthUnit> Fit<Circle<U>> {
     /// let points: [Point<Pixels>; 3] = [Point::new(160.0, 0.0), Point::new(0.0, 160.0), Point::new(-160.0, 0.0)];
     /// let circle = fit(&points, Taubin, AllPoints)?;
     /// let scale: UniformScale<Pixels, Millimeter> = fovea::uniform_scale!(0.0125);
-    /// assert!((circle.map(&scale).element().radius().get() - 2.0).abs() < 1e-12);
+    /// let in_mm = circle.map(&scale).expect("millimetres per pixel keep the radius finite");
+    /// assert!((in_mm.element().radius().get() - 2.0).abs() < 1e-12);
     /// # Ok::<(), fovea::Error>(())
     /// ```
     ///
@@ -718,18 +721,25 @@ impl<U: LengthUnit> Fit<Circle<U>> {
     /// let _ = circle.map(&scale);
     /// ```
     #[must_use]
-    pub fn map<M: ConformalMap<Domain = U>>(&self, mapping: &M) -> Fit<Circle<M::Codomain>> {
-        self.mapped(mapping.map_circle(self.element), mapping.factor())
+    pub fn map<M: ConformalMap<Domain = U>>(
+        &self,
+        mapping: &M,
+    ) -> Option<Fit<Circle<M::Codomain>>> {
+        Some(self.mapped(mapping.map_circle(self.element)?, mapping.factor()))
     }
 }
 
 impl<U: LengthUnit> Fit<Ellipse<U>> {
     /// The fit in the codomain of a conformal mapping: the ellipse and every
     /// residual figure convert, since every distance scales by the mapping's
-    /// factor.
+    /// factor. `None` where the mapped ellipse is none
+    /// ([`AffineMap::map_ellipse`](crate::geometry::AffineMap::map_ellipse)).
     #[must_use]
-    pub fn map<M: ConformalMap<Domain = U>>(&self, mapping: &M) -> Fit<Ellipse<M::Codomain>> {
-        self.mapped(mapping.map_ellipse(self.element), mapping.factor())
+    pub fn map<M: ConformalMap<Domain = U>>(
+        &self,
+        mapping: &M,
+    ) -> Option<Fit<Ellipse<M::Codomain>>> {
+        Some(self.mapped(mapping.map_ellipse(self.element)?, mapping.factor()))
     }
 }
 
@@ -1377,7 +1387,7 @@ mod tests {
             .collect();
         let found = fit(&points, Taubin, AllPoints).unwrap();
         let scale: UniformScale<Pixels, Millimeter> = crate::uniform_scale!(0.0125);
-        let mm = found.map(&scale);
+        let mm = found.map(&scale).unwrap();
         assert!((mm.element().center().x - 0.5).abs() < 1e-12);
         assert!((mm.element().center().y - 0.25).abs() < 1e-12);
         assert!((mm.peak_to_valley().get() - 0.5 * 0.0125).abs() < 1e-14);
@@ -1388,7 +1398,7 @@ mod tests {
         let line = fit(&line_points, TotalLeastSquares, AllPoints).unwrap();
         let turn: Similarity<Pixels, Millimeter> =
             Similarity::try_linear(2.0, crate::Angle::from_radians(FRAC_PI_2).unwrap()).unwrap();
-        let mapped = line.map(&turn);
+        let mapped = line.map(&turn).unwrap();
         let extent = mapped.extent();
         assert!(extent.start.distance(Point::new(0.0, 0.0)).get() < 1e-12);
         assert!(extent.end.distance(Point::new(0.0, 20.0)).get() < 1e-12);
@@ -1397,7 +1407,7 @@ mod tests {
             .map(|k| ellipse_point(0.0, 0.0, 20.0, 8.0, 0.0, TAU * k as f64 / 12.0))
             .collect();
         let ellipse = fit(&ellipse_points, Fitzgibbon, AllPoints).unwrap();
-        let mapped = ellipse.map(&turn);
+        let mapped = ellipse.map(&turn).unwrap();
         assert!((mapped.element().semi_major().get() - 40.0).abs() < 1e-8);
         let vertical = AxialOrientation::from_radians(FRAC_PI_2).unwrap();
         assert!(

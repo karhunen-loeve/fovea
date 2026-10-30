@@ -118,7 +118,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   points, every `AffineMap` also displacements and their lengths
   (`length_of`), and only a `ConformalMap`, the uniform scale and the
   similarity, converts a length without a direction, so a radius cannot
-  pass through an axis scale. `AffineMap` and `ConformalMap` are sealed,
+  pass through an axis scale. `map_line`, `map_circle`, `map_ellipse`
+  and `Fit::map` return `Option`: `None` where the image of the element
+  would break the element's own certificate, a radius or axis beyond
+  `f64` or underflowed to zero, instead of a `Circle` carrying a value
+  `Circle::try_new` rejects. The unvalidated carriers (`Point`,
+  `Vector`, `Length`, `Segment`) map totally, and `map_ellipse` computes
+  its axes normalized by the largest component, so axes near the ends of
+  the `f64` range map exactly like ordinary ones. `AffineMap` and `ConformalMap` are sealed,
   since conversions such as `Fit::map` rely on what they certify; an
   affine calibration of one's own is an `Affine` value, and `PlaneMap`
   stays open for other models. `uniform_scale!` and `axis_scale!` are

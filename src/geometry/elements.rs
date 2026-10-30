@@ -555,6 +555,36 @@ mod tests {
         Ellipse::try_new(px(cx, cy), Length::new(a), Length::new(b), axis(phi)).unwrap()
     }
 
+    #[test]
+    fn extreme_but_finite_elements_map_or_say_no() {
+        use crate::geometry::{AffineMap, ConformalMap};
+        // v0.6.0 review C11: the mapped element satisfies its own
+        // certificate, or there is no element.
+        let grow: crate::geometry::UniformScale<Pixels, Millimeter> = crate::uniform_scale!(1e10);
+        let shrink: crate::geometry::UniformScale<Pixels, Millimeter> = crate::uniform_scale!(1e-5);
+        let huge = Circle::try_new(px(0.0, 0.0), Length::new(1e300)).unwrap();
+        assert!(
+            grow.map_circle(huge).is_none(),
+            "an infinite radius is no circle"
+        );
+        let tiny = Circle::try_new(px(0.0, 0.0), Length::new(1e-320)).unwrap();
+        assert!(
+            shrink.map_circle(tiny).is_none(),
+            "a radius underflowed to zero is no circle"
+        );
+
+        // The intermediate squares of map_ellipse neither overflow nor
+        // underflow where the true axes fit: the review's 1e-170 and 1e160.
+        let double: crate::geometry::AxisScale<Pixels, Millimeter> = crate::axis_scale!(2.0, 2.0);
+        for a in [1e-170, 1e160] {
+            let round = ellipse(0.0, 0.0, a, a, 0.0);
+            let mapped = double.map_ellipse(round).unwrap();
+            let rel = |got: f64| (got / (2.0 * a) - 1.0).abs();
+            assert!(rel(mapped.semi_major().get()) < 1e-12, "major at {a}");
+            assert!(rel(mapped.semi_minor().get()) < 1e-12, "minor at {a}");
+        }
+    }
+
     fn on_ellipse(e: &Ellipse<Pixels>, t: f64) -> Point<Pixels> {
         let (sin, cos) = e.orientation().radians().sin_cos();
         let (u, v) = (
@@ -736,10 +766,10 @@ mod tests {
         let shear: Affine<Pixels, Millimeter> =
             Affine::try_new([[0.02, 0.007], [-0.003, 0.05]], Vector::new(1.0, -2.0)).unwrap();
         let e = ellipse(30.0, -10.0, 15.0, 6.0, 0.9);
-        let mapped = shear.map_ellipse(e);
+        let mapped = shear.map_ellipse(e).unwrap();
         assert!(mapped.semi_major() >= mapped.semi_minor());
         let l: Line<Pixels> = Line::try_through(px(1.0, 2.0), px(7.0, -3.0)).unwrap();
-        let mapped_line = shear.map_line(l);
+        let mapped_line = shear.map_line(l).unwrap();
         assert!((mapped_line.direction().length().get() - 1.0).abs() < 1e-15);
         for k in 0..32 {
             let t = TAU * k as f64 / 32.0;
@@ -754,7 +784,7 @@ mod tests {
         let turn: Similarity<Pixels, Millimeter> =
             Similarity::try_linear(0.5, crate::Angle::from_radians(1.0).unwrap()).unwrap();
         let c: Circle<Pixels> = Circle::try_new(px(4.0, 0.0), Length::new(10.0)).unwrap();
-        let mapped = turn.map_circle(c);
+        let mapped = turn.map_circle(c).unwrap();
         assert!((mapped.radius().get() - 5.0).abs() < 1e-15);
         assert_eq!(mapped.center(), turn.map_point(px(4.0, 0.0)));
     }

@@ -161,7 +161,9 @@ pub trait AffineMap: PlaneMap + sealed::Affine {
     fn inverse(&self) -> Self::Inverse;
 
     /// The image of the line `l`: the line through the image of its point,
-    /// along the image of its direction.
+    /// along the image of its direction; `None` when that image is no
+    /// line, because the mapped direction left the finite range or
+    /// underflowed to zero, so no unit direction certifies it.
     ///
     /// # Example
     ///
@@ -171,16 +173,15 @@ pub trait AffineMap: PlaneMap + sealed::Affine {
     ///
     /// let scale: AxisScale<Pixels, Millimeter> = fovea::axis_scale!(0.02, 0.05);
     /// let diagonal: Line<Pixels> = Line::try_through(Point::new(0.0, 0.0), Point::new(5.0, 2.0))?;
-    /// let mapped = scale.map_line(diagonal);
+    /// let mapped = scale.map_line(diagonal).expect("millimetres per pixel keep the line finite");
     /// // (5, 2) px is (0.1, 0.1) mm: the diagonal of the image is one on the part.
     /// let d = mapped.direction();
     /// assert!((d.x - d.y).abs() < 1e-15);
     /// # Ok::<(), fovea::Error>(())
     /// ```
-    fn map_line(&self, l: Line<Self::Domain>) -> Line<Self::Codomain> {
-        let v = self.map_vector(l.direction());
-        let n = v.length().get();
-        Line::from_parts(self.map_point(l.point()), Vector::new(v.x / n, v.y / n))
+    fn map_line(&self, l: Line<Self::Domain>) -> Option<Line<Self::Codomain>> {
+        let direction = self.map_vector(l.direction()).normalized()?;
+        Some(Line::from_parts(self.map_point(l.point()), direction))
     }
 
     /// The image of the segment `s`, from the image of its start to the image
@@ -189,7 +190,9 @@ pub trait AffineMap: PlaneMap + sealed::Affine {
         Segment::new(self.map_point(s.start), self.map_point(s.end))
     }
 
-    /// The image of the ellipse `e`, which is an ellipse.
+    /// The image of the ellipse `e`, which is an ellipse; `None` when that
+    /// image is none, because an axis left the finite range or underflowed
+    /// to zero, so [`Ellipse::try_new`] would reject it.
     ///
     /// The images of the two semi-axes are conjugate semi-diameters of the
     /// image, which gives its semi-axes and orientation in closed form. A
@@ -210,7 +213,7 @@ pub trait AffineMap: PlaneMap + sealed::Affine {
     ///     Length::new(100.0),
     ///     AxialOrientation::from_radians(0.0)?,
     /// )?;
-    /// let on_part = scale.map_ellipse(hole);
+    /// let on_part = scale.map_ellipse(hole).expect("millimetres per pixel keep the axes finite");
     /// assert!((on_part.semi_major().get() - 5.0).abs() < 1e-12);
     /// assert!((on_part.semi_minor().get() - 2.0).abs() < 1e-12);
     /// // The major axis runs along y, the feed direction.
@@ -218,11 +221,22 @@ pub trait AffineMap: PlaneMap + sealed::Affine {
     /// assert!((angle - core::f64::consts::FRAC_PI_2).abs() < 1e-12);
     /// # Ok::<(), fovea::Error>(())
     /// ```
-    fn map_ellipse(&self, e: Ellipse<Self::Domain>) -> Ellipse<Self::Codomain> {
+    fn map_ellipse(&self, e: Ellipse<Self::Domain>) -> Option<Ellipse<Self::Codomain>> {
         let (sin, cos) = e.orientation().radians().sin_cos();
         let (a, b) = (e.semi_major().get(), e.semi_minor().get());
         let u = self.map_vector(Vector::new(a * cos, a * sin));
         let v = self.map_vector(Vector::new(-b * sin, b * cos));
+        // The squares below would overflow or underflow far inside the range
+        // the axes themselves fit in. Dividing by the largest component
+        // first keeps them near one, and the factor returns at the end; a
+        // zero or non-finite largest component means the image is no
+        // ellipse.
+        let s = u.x.abs().max(u.y.abs()).max(v.x.abs()).max(v.y.abs());
+        if !(s > 0.0 && s.is_finite()) {
+            return None;
+        }
+        let u = Vector::<Self::Codomain>::new(u.x / s, u.y / s);
+        let v = Vector::<Self::Codomain>::new(v.x / s, v.y / s);
         // The image is M·(unit circle) with M = [u v]; its semi-axes are the
         // singular values of M, the square roots of the eigenvalues of M·Mᵀ.
         let sxx = u.x * u.x + v.x * v.x;
@@ -230,16 +244,18 @@ pub trait AffineMap: PlaneMap + sealed::Affine {
         let sxy = u.x * u.y + v.x * v.y;
         let mean = 0.5 * (sxx + syy);
         let half_gap = 0.5 * (sxx - syy).hypot(2.0 * sxy);
-        let major = (mean + half_gap).sqrt();
+        let root = (mean + half_gap).sqrt();
         // The product of the semi-axes is |det M|, which keeps the smaller
         // one accurate when the image is very elongated.
-        let minor = (u.x * v.y - u.y * v.x).abs() / major;
-        Ellipse::from_parts(
+        let minor = s * ((u.x * v.y - u.y * v.x).abs() / root);
+        let major = s * root;
+        Ellipse::try_new(
             self.map_point(e.center()),
-            major,
-            minor.min(major),
+            Length::new(major),
+            Length::new(minor.min(major)),
             AxialOrientation::from_half_atan2(2.0 * sxy, sxx - syy),
         )
+        .ok()
     }
 
     /// Whether the mapping is a reflection composed with a rotation and a
@@ -296,7 +312,9 @@ pub trait ConformalMap: AffineMap + sealed::Conformal {
         Length::new(l.get() * self.factor())
     }
 
-    /// The image of the circle `c`, which is a circle.
+    /// The image of the circle `c`, which is a circle; `None` when that
+    /// image is none, because its radius left the finite range or
+    /// underflowed to zero, so [`Circle::try_new`] would reject it.
     ///
     /// # Example
     ///
@@ -306,7 +324,7 @@ pub trait ConformalMap: AffineMap + sealed::Conformal {
     ///
     /// let scale: UniformScale<Pixels, Millimeter> = fovea::uniform_scale!(0.0125);
     /// let hole: Circle<Pixels> = Circle::try_new(Point::new(400.0, 240.0), Length::new(160.0))?;
-    /// let on_part = scale.map_circle(hole);
+    /// let on_part = scale.map_circle(hole).expect("millimetres per pixel keep the radius finite");
     /// assert_eq!(on_part.center(), Point::new(5.0, 3.0));
     /// assert_eq!(on_part.radius().get(), 2.0);
     /// # Ok::<(), fovea::Error>(())
@@ -323,7 +341,7 @@ pub trait ConformalMap: AffineMap + sealed::Conformal {
     /// let hole: Circle<Pixels> = Circle::try_new(Point::new(0.0, 0.0), Length::new(1.0)).unwrap();
     /// let _ = scale.map_circle(hole);
     /// ```
-    fn map_circle(&self, c: Circle<Self::Domain>) -> Circle<Self::Codomain> {
-        Circle::from_parts(self.map_point(c.center()), self.map_length(c.radius()))
+    fn map_circle(&self, c: Circle<Self::Domain>) -> Option<Circle<Self::Codomain>> {
+        Circle::try_new(self.map_point(c.center()), self.map_length(c.radius())).ok()
     }
 }
