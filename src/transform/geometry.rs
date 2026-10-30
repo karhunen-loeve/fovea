@@ -29,10 +29,11 @@
 //! row-major and are cache-friendly by construction.
 //!
 //! [`rotate_90`], [`rotate_270`], and [`transpose`] cannot be sequential
-//! on both sides. The implementation iterates the input row-major (sequential
-//! reads) and writes to scattered output positions. For images up to roughly
-//! 512 × 512 the working set fits in L2 and the naïve loop is fast enough;
-//! a blocked variant is deferred (YAGNI for performance).
+//! on both sides. [`transpose`] moves the image in square blocks of 32 × 32
+//! pixels, so the rows it reads and the rows it writes stay in cache.
+//! [`rotate_90`] and [`rotate_270`] iterate the input row-major (sequential
+//! reads) and write to scattered output positions; for images up to roughly
+//! 512 × 512 the working set fits in L2 and that loop is fast enough.
 //!
 //! ## Measured throughput
 //!
@@ -47,16 +48,16 @@
 //! | `rotate_180`   |  ~3.1 GiB/s   |   ~3.0 GiB/s   |  ~2.5 GiB/s    |
 //! | `rotate_90`    |  660 MiB/s    |   220 MiB/s    |  130 MiB/s     |
 //! | `rotate_270`   |  655 MiB/s    |   265 MiB/s    |  129 MiB/s     |
-//! | `transpose`    |  640 MiB/s    |   280 MiB/s    |  125 MiB/s     |
+//! | `transpose`    |  1.37 GiB/s   |   1.23 GiB/s   |  524 MiB/s     |
 //!
 //! `flip_v` is `memcpy`-bound. `flip_h` / `rotate_180` are partially
-//! auto-vectorised reverse-copies. `rotate_90` / `rotate_270` /
-//! `transpose` collapse once the output working set exceeds L2 because
-//! every store hits a different cache line. The textbook fix is the
-//! blocked variant is deferred until there is a clear API need. The benchmark
-//! suite contains a per-implementation breakdown including an
-//! `transpose_row_cached` alternative that buys roughly 2× below DRAM size
-//! but does not solve the cliff at ≥16 MiB.
+//! auto-vectorised reverse-copies. `rotate_90` / `rotate_270` collapse once
+//! the output working set exceeds L2 because every store hits a different
+//! cache line. `transpose` avoids that cliff by moving square blocks; its
+//! row was measured on 2026-10-05, at 3.2, 5.9 and 6.5 times the speed of
+//! the unblocked loop it replaced (428 MiB/s, 211 MiB/s and 80 MiB/s on
+//! the same machine). The benchmark suite also contains a
+//! `transpose_row_cached` alternative for comparison.
 
 use crate::Size;
 use crate::image::{Image, RasterImage, RasterImageMut};
@@ -89,7 +90,7 @@ use crate::pixel::ZeroablePixel;
 pub fn flip_h_into<I, O>(img: &I, out: &mut O)
 where
     I: RasterImage,
-    O: RasterImageMut<Pixel = I::Pixel>,
+    O: RasterImageMut<Pixel = I::Pixel, Space = I::Space>,
 {
     assert_eq!(
         img.size(),
@@ -124,12 +125,12 @@ where
 /// assert_eq!(dst.pixel_at(0, 0), Mono8::new(2));
 /// ```
 #[must_use]
-pub fn flip_h<I>(img: &I) -> Image<I::Pixel>
+pub fn flip_h<I>(img: &I) -> Image<I::Pixel, I::Space>
 where
     I: RasterImage,
     I::Pixel: ZeroablePixel,
 {
-    let mut out = Image::<I::Pixel>::zero(img.width(), img.height());
+    let mut out = Image::<I::Pixel, _>::zero_in(img.width(), img.height());
     flip_h_into(img, &mut out);
     out
 }
@@ -161,7 +162,7 @@ where
 pub fn flip_v_into<I, O>(img: &I, out: &mut O)
 where
     I: RasterImage,
-    O: RasterImageMut<Pixel = I::Pixel>,
+    O: RasterImageMut<Pixel = I::Pixel, Space = I::Space>,
 {
     assert_eq!(
         img.size(),
@@ -194,12 +195,12 @@ where
 /// assert_eq!(dst.pixel_at(0, 0), Mono8::new(2));
 /// ```
 #[must_use]
-pub fn flip_v<I>(img: &I) -> Image<I::Pixel>
+pub fn flip_v<I>(img: &I) -> Image<I::Pixel, I::Space>
 where
     I: RasterImage,
     I::Pixel: ZeroablePixel,
 {
-    let mut out = Image::<I::Pixel>::zero(img.width(), img.height());
+    let mut out = Image::<I::Pixel, _>::zero_in(img.width(), img.height());
     flip_v_into(img, &mut out);
     out
 }
@@ -234,7 +235,7 @@ where
 pub fn rotate_90_into<I, O>(img: &I, out: &mut O)
 where
     I: RasterImage,
-    O: RasterImageMut<Pixel = I::Pixel>,
+    O: RasterImageMut<Pixel = I::Pixel, Space = I::Space>,
 {
     let expected = Size::new(img.height(), img.width());
     assert_eq!(
@@ -273,12 +274,12 @@ where
 /// assert_eq!(dst.height(), 2);
 /// ```
 #[must_use]
-pub fn rotate_90<I>(img: &I) -> Image<I::Pixel>
+pub fn rotate_90<I>(img: &I) -> Image<I::Pixel, I::Space>
 where
     I: RasterImage,
     I::Pixel: ZeroablePixel,
 {
-    let mut out = Image::<I::Pixel>::zero(img.height(), img.width());
+    let mut out = Image::<I::Pixel, _>::zero_in(img.height(), img.width());
     rotate_90_into(img, &mut out);
     out
 }
@@ -309,7 +310,7 @@ where
 pub fn rotate_180_into<I, O>(img: &I, out: &mut O)
 where
     I: RasterImage,
-    O: RasterImageMut<Pixel = I::Pixel>,
+    O: RasterImageMut<Pixel = I::Pixel, Space = I::Space>,
 {
     assert_eq!(
         img.size(),
@@ -343,12 +344,12 @@ where
 /// assert_eq!(dst.pixel_at(0, 0), Mono8::new(2));
 /// ```
 #[must_use]
-pub fn rotate_180<I>(img: &I) -> Image<I::Pixel>
+pub fn rotate_180<I>(img: &I) -> Image<I::Pixel, I::Space>
 where
     I: RasterImage,
     I::Pixel: ZeroablePixel,
 {
-    let mut out = Image::<I::Pixel>::zero(img.width(), img.height());
+    let mut out = Image::<I::Pixel, _>::zero_in(img.width(), img.height());
     rotate_180_into(img, &mut out);
     out
 }
@@ -383,7 +384,7 @@ where
 pub fn rotate_270_into<I, O>(img: &I, out: &mut O)
 where
     I: RasterImage,
-    O: RasterImageMut<Pixel = I::Pixel>,
+    O: RasterImageMut<Pixel = I::Pixel, Space = I::Space>,
 {
     let expected = Size::new(img.height(), img.width());
     assert_eq!(
@@ -422,12 +423,12 @@ where
 /// assert_eq!(dst.height(), 2);
 /// ```
 #[must_use]
-pub fn rotate_270<I>(img: &I) -> Image<I::Pixel>
+pub fn rotate_270<I>(img: &I) -> Image<I::Pixel, I::Space>
 where
     I: RasterImage,
     I::Pixel: ZeroablePixel,
 {
-    let mut out = Image::<I::Pixel>::zero(img.height(), img.width());
+    let mut out = Image::<I::Pixel, _>::zero_in(img.height(), img.width());
     rotate_270_into(img, &mut out);
     out
 }
@@ -461,7 +462,7 @@ where
 pub fn transpose_into<I, O>(img: &I, out: &mut O)
 where
     I: RasterImage,
-    O: RasterImageMut<Pixel = I::Pixel>,
+    O: RasterImageMut<Pixel = I::Pixel, Space = I::Space>,
 {
     let expected = Size::new(img.height(), img.width());
     assert_eq!(
@@ -471,16 +472,30 @@ where
         expected,
         out.size()
     );
-    let h = img.height();
-    // (x, y) → (y, x). Iterate input row-major for sequential reads.
-    for y in 0..h {
-        let src = img.row(y);
-        for (x, &p) in src.iter().enumerate() {
-            *out.pixel_at_mut(y, x) = p;
+    let (w, h) = (img.width(), img.height());
+    // (x, y) → (y, x), in square blocks: the block's input rows and output
+    // rows both stay in cache, and each output row segment is written
+    // contiguously.
+    for by in (0..h).step_by(TRANSPOSE_BLOCK) {
+        let y_end = (by + TRANSPOSE_BLOCK).min(h);
+        for bx in (0..w).step_by(TRANSPOSE_BLOCK) {
+            let x_end = (bx + TRANSPOSE_BLOCK).min(w);
+            let mut rows: [&[I::Pixel]; TRANSPOSE_BLOCK] = [&[]; TRANSPOSE_BLOCK];
+            for (slot, y) in rows.iter_mut().zip(by..y_end) {
+                *slot = &img.row(y)[bx..x_end];
+            }
+            for x in bx..x_end {
+                let dst = &mut out.row_mut(x)[by..y_end];
+                for (d, row) in dst.iter_mut().zip(&rows) {
+                    *d = row[x - bx];
+                }
+            }
         }
     }
-    // PERF: blocked variant deferred (YAGNI).
 }
+
+/// Side of the square blocks [`transpose_into`] moves at a time.
+const TRANSPOSE_BLOCK: usize = 32;
 
 /// Returns the matrix transpose of `img`.
 ///
@@ -499,12 +514,12 @@ where
 /// assert_eq!(dst.height(), 2);
 /// ```
 #[must_use]
-pub fn transpose<I>(img: &I) -> Image<I::Pixel>
+pub fn transpose<I>(img: &I) -> Image<I::Pixel, I::Space>
 where
     I: RasterImage,
     I::Pixel: ZeroablePixel,
 {
-    let mut out = Image::<I::Pixel>::zero(img.height(), img.width());
+    let mut out = Image::<I::Pixel, _>::zero_in(img.height(), img.width());
     transpose_into(img, &mut out);
     out
 }

@@ -128,7 +128,7 @@ where
     <P as LinearPixel<f32>>::Accumulator: Default,
     K: Kernel<Weight = f32>,
     B: BorderPolicy<I>,
-    O: RasterImageMut<Pixel = Out>,
+    O: RasterImageMut<Pixel = Out, Space = I::Space>,
     Out: FromLinear<<P as LinearPixel<f32>>::Accumulator>,
 {
     // True convolution = correlation with a 180°-rotated kernel.
@@ -176,8 +176,13 @@ where
 /// **Note:** Convolution flips the kernel before applying it. For the
 /// unflipped variant (cross-correlation), see [`correlate`]. The
 /// [module docs](crate::transform) explain the mathematical distinction.
+///
+/// For a large kernel on a float image,
+/// [`frequency::convolve`](crate::frequency::convolve) computes the same
+/// convolution through the Fourier transform, faster from about 21 × 21;
+/// its documentation gives the measurements.
 #[must_use]
-pub fn convolve<I, K, B, P, Out>(image: &I, kernel: &K, border: &B) -> Image<Out>
+pub fn convolve<I, K, B, P, Out>(image: &I, kernel: &K, border: &B) -> Image<Out, I::Space>
 where
     I: RasterImage<Pixel = P>,
     P: Copy + LinearPixel<f32>,
@@ -245,7 +250,7 @@ where
     <P as LinearPixel<f32>>::Accumulator: Default,
     K: Kernel<Weight = f32>,
     B: BorderPolicy<I>,
-    O: RasterImageMut<Pixel = Out>,
+    O: RasterImageMut<Pixel = Out, Space = I::Space>,
     Out: FromLinear<<P as LinearPixel<f32>>::Accumulator>,
 {
     fold_neighborhood_into(
@@ -287,7 +292,7 @@ where
 /// flipped variant (true convolution), see [`convolve`]. The
 /// [module docs](crate::transform) explain the mathematical distinction.
 #[must_use]
-pub fn correlate<I, K, B, P, Out>(image: &I, kernel: &K, border: &B) -> Image<Out>
+pub fn correlate<I, K, B, P, Out>(image: &I, kernel: &K, border: &B) -> Image<Out, I::Space>
 where
     I: RasterImage<Pixel = P>,
     P: Copy + LinearPixel<f32>,

@@ -17,6 +17,22 @@ use core::fmt;
 /// | 2 | `Result<T, Error>` | Data failure — caller-supplied data doesn't fit |
 /// | 3 | `panic!` | Programmer bug — violated precondition (e.g. output size mismatch) |
 ///
+/// The enum is `#[non_exhaustive]`: a later release may add a variant, so a
+/// `match` outside this crate ends with a wildcard arm.
+///
+/// ```
+/// use fovea::Error;
+///
+/// fn describe(err: &Error) -> &'static str {
+///     match err {
+///         Error::SizeMismatch { .. } => "the images differ in size",
+///         Error::EmptySource { .. } => "the source has no pixels",
+///         _ => "another failure",
+///     }
+/// }
+/// # assert_eq!(describe(&Error::EmptyPyramid), "another failure");
+/// ```
+///
 /// # Examples
 ///
 /// ```
@@ -30,6 +46,7 @@ use core::fmt;
 /// );
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Error {
     /// Two images that must have identical dimensions do not.
     ///
@@ -48,10 +65,14 @@ pub enum Error {
     ///
     /// Returned by [`Image::from_vec`](crate::image::sequential::Image::from_vec),
     /// [`ImageRef::new`](crate::image::sequential::ImageRef::new), and similar
-    /// constructors where `data.len() != width * height`.
+    /// constructors where `data.len() != width * height`, and by
+    /// [`ImageRef::from_strided`](crate::image::sequential::ImageRef::from_strided)
+    /// and its mutable twin where `data` is shorter than the view needs.
     LengthMismatch {
         /// The number of elements required (`width * height`, or
-        /// `width * height * pixel_size` for byte constructors).
+        /// `width * height * pixel_size` for byte constructors). For a
+        /// strided view, the least length it needs,
+        /// `(height - 1) * row_stride + width`.
         expected: usize,
         /// The number of elements actually provided.
         actual: usize,
@@ -129,7 +150,7 @@ pub enum Error {
         child: Size,
     },
 
-    /// A computed value violates a parameter type's invariant.
+    /// A value violates a parameter's invariant.
     ///
     /// Returned by the `try_new` constructors of the invariant-carrying
     /// parameter types — [`Sigma`](crate::Sigma),
@@ -142,12 +163,25 @@ pub enum Error {
     /// [`SegmentTest`](crate::features::detect::SegmentTest),
     /// [`NmsRadius`](crate::features::detect::NmsRadius),
     /// [`PeakValue`](crate::analyze::quality::PeakValue),
-    /// [`BayerGains`](crate::transform::BayerGains) and their kin — and by
-    /// validating functions whose parameter is a plain value. What
-    /// "invalid" means is the type's own invariant: a sign or finiteness
-    /// condition for the float parameters, a parity or at-least-one
-    /// condition for the integer ones, an ordering relation between two
-    /// values for the pairs. The constructor's documentation states it.
+    /// [`BayerGains`](crate::transform::BayerGains) and their kin — by
+    /// validating functions whose parameter is a plain value, and by a
+    /// [`BinningStrategy`](crate::analyze::histogram::BinningStrategy)
+    /// whose own configuration is invalid.
+    ///
+    /// The [`ParameterError`] says which parameter was rejected, which
+    /// [`Requirement`] it broke and which [`Value`] was received, so a caller
+    /// can react to the failure without reading the message:
+    ///
+    /// ```
+    /// use fovea::{Error, Sigma};
+    /// use fovea::error::{Requirement, Value};
+    ///
+    /// let Err(Error::InvalidParameter(e)) = Sigma::try_new(-1.0) else {
+    ///     unreachable!("a negative sigma is rejected");
+    /// };
+    /// assert_eq!(e.requirement(), Requirement::FinitePositive);
+    /// assert_eq!(e.value(), Value::F32(-1.0));
+    /// ```
     ///
     /// This is the *computed-value* path, for parameters derived from data
     /// at run time. A literal parameter does not need it: the types carry
@@ -156,12 +190,8 @@ pub enum Error {
     /// [`pixel_distance!`](crate::pixel_distance),
     /// [`tolerance!`](crate::tolerance), [`window!`](crate::window),
     /// [`harris!`](crate::harris), [`peak!`](crate::peak)) that rejects a
-    /// bad literal at compile time.
-    ///
-    /// The contained string describes the specific reason. Treat it as
-    /// human-readable diagnostic text, not as a stable machine-readable
-    /// tag.
-    InvalidParameter(String),
+    /// bad literal at compile time, with the same wording.
+    InvalidParameter(ParameterError),
 
     /// The template is larger than the image in one or both dimensions.
     ///
@@ -185,18 +215,111 @@ pub enum Error {
         template_size: Size,
     },
 
-    /// A caller-supplied binning strategy contains invalid parameters.
+    /// A sliding window is larger than the image in one or both
+    /// dimensions, so no position has the whole window inside the frame.
     ///
-    /// Returned by [`histogram`](crate::analyze::histogram::histogram()) when
-    /// the strategy's `validate()` rejects its own configuration — for
-    /// example, `LinearBins` with `min >= max`, non-finite bounds, a
-    /// `bin_count` of zero, or `CustomBins` whose edges are not strictly
-    /// increasing.
+    /// Returned by [`ssim`](crate::analyze::quality::ssim) and
+    /// [`ssim_map`](crate::analyze::quality::ssim_map), whose window size
+    /// follows from the σ in their parameters.
+    WindowLargerThanImage {
+        /// The dimensions of the window.
+        window: Size,
+        /// The dimensions of the image.
+        image: Size,
+    },
+
+    /// A caliper's footprint leaves the image, and the border policy does
+    /// not extend it.
     ///
-    /// The contained string describes the specific reason. Treat it as
-    /// human-readable diagnostic text, not as a stable machine-readable
-    /// tag.
-    InvalidBinningStrategy(String),
+    /// Returned by [`profile`](crate::measure::profile) under
+    /// [`Skip`](crate::border::Skip), where an interpolation tap outside
+    /// the image has no value, and under every policy for a position more
+    /// than 2⁵² pixels from the origin. Where a part lies is data, so this
+    /// is an error and not a profile with gaps.
+    CaliperOutsideImage {
+        /// The first position along the path, counted in sampling steps
+        /// from its start, at which a tap falls outside the image.
+        sample: usize,
+    },
+
+    /// A fit has fewer points than its estimator needs to determine an
+    /// element: 2 for a line, 3 for a circle, 5 for an ellipse.
+    ///
+    /// Returned by [`fit`](crate::measure::fit), both when the input
+    /// is too short and when the outlier handling leaves too few points to
+    /// shape the element.
+    TooFewPoints {
+        /// The estimator's minimum.
+        required: usize,
+        /// The number of points there were, or that the outlier handling
+        /// kept.
+        actual: usize,
+    },
+
+    /// The points determine no unique element of the kind being fitted.
+    ///
+    /// Returned by [`fit`](crate::measure::fit) when the points
+    /// coincide or spread equally in every direction (a line), lie on one
+    /// line (a circle or an ellipse), admit no ellipse, or lie so far apart
+    /// that the fit overflows `f64`. Where the points lie is data, so this
+    /// is an error and not a panic.
+    DegeneratePoints,
+
+    /// An iterative inverse did not reach its tolerance.
+    ///
+    /// Returned by
+    /// [`BrownConrady::undistort_point`](crate::geometry::BrownConrady::undistort_point)
+    /// when no ideal point distorts onto the measured one within the
+    /// tolerance, which in practice means the point lies outside the field
+    /// the lens model was calibrated over, where the model folds back on
+    /// itself.
+    DidNotConverge {
+        /// The number of steps taken before giving up.
+        steps: usize,
+    },
+
+    /// An image without pixels was asked to fill a result that has some.
+    ///
+    /// Returned by [`pad`](crate::transform::pad),
+    /// [`resize`](crate::transform::resize),
+    /// [`resize_into`](crate::transform::resize_into),
+    /// [`remap`](crate::transform::remap) and
+    /// [`DestToSourceTable::remap`](crate::transform::DestToSourceTable::remap)
+    /// when the source is empty, its border policy copies from the image
+    /// (`Clamp`, `Mirror`, `Wrap`) or there is none, and the result is not
+    /// empty. Under [`Constant`](crate::border::Constant), which needs no
+    /// pixel, `pad` and `remap` fill the result with its value instead.
+    EmptySource {
+        /// The size of the result that could not be filled.
+        target: Size,
+    },
+
+    /// A DFT method does not transform images of this size.
+    ///
+    /// Returned by [`dft`](crate::frequency::dft) and
+    /// [`Spectrum::inverse`](crate::frequency::Spectrum::inverse) under
+    /// [`Radix2`](crate::frequency::Radix2) when a side is not a power of
+    /// two. The size is data, so this is an error; padding to the method's
+    /// [`next_size`](crate::frequency::Radix2::next_size) first, or a
+    /// method that accepts every size, avoids it.
+    UnsupportedDftSize {
+        /// The method's name.
+        method: &'static str,
+        /// The size of the image or of the spectrum's source.
+        size: Size,
+    },
+
+    /// [`pad`](crate::transform::pad) was asked for a target smaller than
+    /// the image along a side.
+    ///
+    /// Padding never crops: an image larger than the target is reported,
+    /// not cut down.
+    PadTargetTooSmall {
+        /// The size of the image.
+        source: Size,
+        /// The rejected target size.
+        target: Size,
+    },
 
     /// The chosen accumulator type cannot hold the worst-case sum for an
     /// image of this size.
@@ -245,6 +368,288 @@ pub enum Error {
         /// foreground label the type can represent.
         label_capacity: u32,
     },
+}
+
+/// Which parameter was rejected, which rule it broke, and what was
+/// received.
+///
+/// The payload of [`Error::InvalidParameter`]. The three parts are data
+/// rather than text, so a caller or a test matches on
+/// [`requirement`](Self::requirement) and [`value`](Self::value) instead of
+/// searching the message. The [`parameter`](Self::parameter) name is for
+/// the message.
+///
+/// A [`BinningStrategy`](crate::analyze::histogram::BinningStrategy)
+/// implemented outside this crate builds one with [`new`](Self::new) to
+/// report its own invalid configuration.
+///
+/// # Example
+///
+/// ```
+/// use fovea::Error;
+/// use fovea::error::{ParameterError, Requirement, Value};
+///
+/// let e = ParameterError::new("bin width", Requirement::FinitePositive, Value::F64(0.0));
+/// assert_eq!(
+///     Error::from(e).to_string(),
+///     "invalid parameter: bin width must be finite and strictly positive, got 0"
+/// );
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ParameterError {
+    parameter: &'static str,
+    requirement: Requirement,
+    value: Value,
+    index: Option<usize>,
+}
+
+impl ParameterError {
+    /// Creates the payload for `parameter`, which broke `requirement` with
+    /// `value`.
+    #[must_use]
+    pub const fn new(parameter: &'static str, requirement: Requirement, value: Value) -> Self {
+        Self {
+            parameter,
+            requirement,
+            value,
+            index: None,
+        }
+    }
+
+    /// Records where in a sequence the rejected element sits: the channel
+    /// of a pixel, the position in a list of edges.
+    #[must_use]
+    pub const fn at(self, index: usize) -> Self {
+        Self {
+            index: Some(index),
+            ..self
+        }
+    }
+
+    /// The name of the rejected parameter, as the message prints it.
+    #[must_use]
+    pub const fn parameter(&self) -> &'static str {
+        self.parameter
+    }
+
+    /// The rule the value broke.
+    #[must_use]
+    pub const fn requirement(&self) -> Requirement {
+        self.requirement
+    }
+
+    /// The value that was received.
+    #[must_use]
+    pub const fn value(&self) -> Value {
+        self.value
+    }
+
+    /// Where in a sequence the rejected element sits, if the parameter is
+    /// one element of several.
+    #[must_use]
+    pub const fn index(&self) -> Option<usize> {
+        self.index
+    }
+}
+
+impl From<ParameterError> for Error {
+    #[inline]
+    fn from(e: ParameterError) -> Self {
+        Error::InvalidParameter(e)
+    }
+}
+
+impl fmt::Display for ParameterError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.parameter)?;
+        if let Some(index) = self.index {
+            write!(f, " {index}")?;
+        }
+        write!(f, " {}", self.requirement)?;
+        if self.value != Value::NotRecorded {
+            write!(f, ", got {}", self.value)?;
+        }
+        Ok(())
+    }
+}
+
+/// The rule a rejected parameter broke.
+///
+/// Each variant is a whole invariant as a type documents it, so a NaN σ
+/// and a negative σ both report [`FinitePositive`](Self::FinitePositive).
+///
+/// Equality compares the float bounds of
+/// [`OpenInterval`](Self::OpenInterval) by bit pattern, which keeps `Eq`
+/// lawful.
+#[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
+pub enum Requirement {
+    /// Neither NaN nor infinite.
+    Finite,
+    /// Finite and greater than zero.
+    FinitePositive,
+    /// Finite and not below zero.
+    FiniteNonNegative,
+    /// Finite and not zero. A subnormal value counts as zero, because its
+    /// reciprocal overflows.
+    FiniteNonZero,
+    /// An odd integer (which excludes zero).
+    Odd,
+    /// An integer not below the bound.
+    AtLeast(usize),
+    /// An integer not above the bound.
+    AtMost(usize),
+    /// An integer in `min..=max`.
+    InRange {
+        /// The smallest accepted value.
+        min: usize,
+        /// The largest accepted value.
+        max: usize,
+    },
+    /// A number strictly between the bounds, both excluded.
+    OpenInterval {
+        /// The excluded lower bound.
+        low: f64,
+        /// The excluded upper bound.
+        high: f64,
+    },
+    /// A pair with `low <= high`.
+    Ordered,
+    /// A pair with `low < high`.
+    StrictlyOrdered,
+    /// Exactly zero: a value the model does not use, accepted only where it
+    /// changes nothing.
+    Zero,
+    /// One of the listed counts.
+    OneOf(&'static [usize]),
+    /// A whole multiple of the bound, such as a byte count that must hold
+    /// whole pixels.
+    MultipleOf(usize),
+}
+
+impl Requirement {
+    /// The wording of the requirement, without its bounds.
+    ///
+    /// `const`, so the literal macros can use it in their compile-time
+    /// check and a rejected literal reads the same as a rejected runtime
+    /// value. [`Display`](fmt::Display) appends the bounds of the variants
+    /// that carry them.
+    #[must_use]
+    pub const fn text(self) -> &'static str {
+        match self {
+            Requirement::Finite => "must be finite",
+            Requirement::FinitePositive => "must be finite and strictly positive",
+            Requirement::FiniteNonNegative => "must be finite and non-negative",
+            Requirement::FiniteNonZero => "must be finite and non-zero",
+            Requirement::Odd => "must be odd",
+            Requirement::AtLeast(_) => "must be at least",
+            Requirement::AtMost(_) => "must be at most",
+            Requirement::InRange { .. } => "must lie in the inclusive range",
+            Requirement::OpenInterval { .. } => "must lie strictly between",
+            Requirement::Ordered => "must satisfy low <= high",
+            Requirement::StrictlyOrdered => "must satisfy low < high",
+            Requirement::Zero => "must be zero",
+            Requirement::OneOf(_) => "must be one of",
+            Requirement::MultipleOf(_) => "must be a multiple of",
+        }
+    }
+}
+
+impl PartialEq for Requirement {
+    fn eq(&self, other: &Self) -> bool {
+        use Requirement::*;
+        match (*self, *other) {
+            (Finite, Finite)
+            | (FinitePositive, FinitePositive)
+            | (FiniteNonNegative, FiniteNonNegative)
+            | (FiniteNonZero, FiniteNonZero)
+            | (Odd, Odd)
+            | (Ordered, Ordered)
+            | (StrictlyOrdered, StrictlyOrdered)
+            | (Zero, Zero) => true,
+            (AtLeast(a), AtLeast(b)) | (AtMost(a), AtMost(b)) | (MultipleOf(a), MultipleOf(b)) => {
+                a == b
+            }
+            (OneOf(a), OneOf(b)) => a == b,
+            (InRange { min: a, max: b }, InRange { min: c, max: d }) => a == c && b == d,
+            (OpenInterval { low: a, high: b }, OpenInterval { low: c, high: d }) => {
+                a.to_bits() == c.to_bits() && b.to_bits() == d.to_bits()
+            }
+            _ => false,
+        }
+    }
+}
+
+impl Eq for Requirement {}
+
+impl fmt::Display for Requirement {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.text())?;
+        match *self {
+            Requirement::AtLeast(bound)
+            | Requirement::AtMost(bound)
+            | Requirement::MultipleOf(bound) => write!(f, " {bound}"),
+            Requirement::InRange { min, max } => write!(f, " {min}..={max}"),
+            Requirement::OpenInterval { low, high } => write!(f, " {low} and {high}"),
+            Requirement::OneOf(counts) => {
+                for (i, c) in counts.iter().enumerate() {
+                    write!(f, "{}{c}", if i == 0 { " " } else { ", " })?;
+                }
+                Ok(())
+            }
+            _ => Ok(()),
+        }
+    }
+}
+
+/// The value a rejected parameter received.
+///
+/// Equality compares floats by bit pattern, so a `Value` holding NaN equals
+/// itself and `assert_eq!` works for every input a constructor rejects. The
+/// flip side: `0.0` and `-0.0` are different values here.
+#[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
+pub enum Value {
+    /// A single `f32`.
+    F32(f32),
+    /// A single `f64`.
+    F64(f64),
+    /// A single count, length or index.
+    Usize(usize),
+    /// Two `f64` that are checked together, such as a range or an offset.
+    F64Pair(f64, f64),
+    /// The value has a generic type the error cannot hold; the caller
+    /// passed it and still has it.
+    NotRecorded,
+}
+
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        match (*self, *other) {
+            (Value::F32(a), Value::F32(b)) => a.to_bits() == b.to_bits(),
+            (Value::F64(a), Value::F64(b)) => a.to_bits() == b.to_bits(),
+            (Value::Usize(a), Value::Usize(b)) => a == b,
+            (Value::F64Pair(a, b), Value::F64Pair(c, d)) => {
+                a.to_bits() == c.to_bits() && b.to_bits() == d.to_bits()
+            }
+            (Value::NotRecorded, Value::NotRecorded) => true,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for Value {}
+
+impl fmt::Display for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            Value::F32(v) => write!(f, "{v}"),
+            Value::F64(v) => write!(f, "{v}"),
+            Value::Usize(v) => write!(f, "{v}"),
+            Value::F64Pair(a, b) => write!(f, "({a}, {b})"),
+            Value::NotRecorded => f.write_str("not recorded"),
+        }
+    }
 }
 
 // `std::error::Error` is implemented manually (not via `thiserror`) to
@@ -321,8 +726,8 @@ impl fmt::Display for Error {
                     parent.height / 2 + parent.height % 2
                 )
             }
-            Error::InvalidParameter(reason) => {
-                write!(f, "invalid parameter: {}", reason)
+            Error::InvalidParameter(e) => {
+                write!(f, "invalid parameter: {e}")
             }
             Error::EmptyTemplate { template_size } => {
                 write!(
@@ -341,8 +746,57 @@ impl fmt::Display for Error {
                     template_size.width, template_size.height, image_size.width, image_size.height
                 )
             }
-            Error::InvalidBinningStrategy(reason) => {
-                write!(f, "invalid binning strategy: {}", reason)
+            Error::WindowLargerThanImage { window, image } => {
+                write!(
+                    f,
+                    "window {}x{} is larger than image {}x{}",
+                    window.width, window.height, image.width, image.height
+                )
+            }
+            Error::CaliperOutsideImage { sample } => {
+                write!(
+                    f,
+                    "caliper footprint leaves the image at sample {sample} along its path"
+                )
+            }
+            Error::TooFewPoints { required, actual } => {
+                write!(
+                    f,
+                    "too few points: the fit needs at least {required}, got {actual}"
+                )
+            }
+            Error::DegeneratePoints => {
+                write!(
+                    f,
+                    "degenerate points: they determine no unique element of this kind"
+                )
+            }
+            Error::DidNotConverge { steps } => {
+                write!(
+                    f,
+                    "did not converge: no solution within the tolerance after {steps} steps"
+                )
+            }
+            Error::EmptySource { target } => {
+                write!(
+                    f,
+                    "empty source: the image has no pixel to fill the {}x{} result from",
+                    target.width, target.height
+                )
+            }
+            Error::UnsupportedDftSize { method, size } => {
+                write!(
+                    f,
+                    "unsupported DFT size: {method} does not transform a {}x{} image",
+                    size.width, size.height
+                )
+            }
+            Error::PadTargetTooSmall { source, target } => {
+                write!(
+                    f,
+                    "pad target too small: {}x{} is smaller than the {}x{} image along a side",
+                    target.width, target.height, source.width, source.height
+                )
             }
             Error::AccumulatorOverflow {
                 required_capacity,
@@ -380,6 +834,88 @@ mod tests {
         assert_eq!(
             err.to_string(),
             "size mismatch: expected 640x480, got 320x240"
+        );
+    }
+
+    #[test]
+    fn display_caliper_outside_image() {
+        let err = Error::CaliperOutsideImage { sample: 17 };
+        assert_eq!(
+            err.to_string(),
+            "caliper footprint leaves the image at sample 17 along its path"
+        );
+    }
+
+    #[test]
+    fn display_fit_errors() {
+        let err = Error::TooFewPoints {
+            required: 5,
+            actual: 4,
+        };
+        assert_eq!(
+            err.to_string(),
+            "too few points: the fit needs at least 5, got 4"
+        );
+        assert_eq!(
+            Error::DegeneratePoints.to_string(),
+            "degenerate points: they determine no unique element of this kind"
+        );
+        assert_eq!(
+            Error::DidNotConverge { steps: 20 }.to_string(),
+            "did not converge: no solution within the tolerance after 20 steps"
+        );
+    }
+
+    #[test]
+    fn display_zero_and_one_of() {
+        let e =
+            ParameterError::new("distortion coefficient", Requirement::Zero, Value::F64(0.5)).at(5);
+        assert_eq!(
+            e.to_string(),
+            "distortion coefficient 5 must be zero, got 0.5"
+        );
+        let e = ParameterError::new(
+            "distortion coefficient count",
+            Requirement::OneOf(&[4, 5, 8]),
+            Value::Usize(6),
+        );
+        assert_eq!(
+            e.to_string(),
+            "distortion coefficient count must be one of 4, 5, 8, got 6"
+        );
+        assert_eq!(Requirement::OneOf(&[4, 5]), Requirement::OneOf(&[4, 5]));
+        assert_ne!(Requirement::OneOf(&[4, 5]), Requirement::OneOf(&[4]));
+        assert_ne!(Requirement::Zero, Requirement::Finite);
+    }
+
+    #[test]
+    fn display_empty_source() {
+        let err = Error::EmptySource {
+            target: Size::new(64, 48),
+        };
+        assert_eq!(
+            err.to_string(),
+            "empty source: the image has no pixel to fill the 64x48 result from"
+        );
+    }
+
+    #[test]
+    fn display_dft_and_pad_errors() {
+        let err = Error::UnsupportedDftSize {
+            method: "Radix2",
+            size: Size::new(1920, 1080),
+        };
+        assert_eq!(
+            err.to_string(),
+            "unsupported DFT size: Radix2 does not transform a 1920x1080 image"
+        );
+        let err = Error::PadTargetTooSmall {
+            source: Size::new(640, 480),
+            target: Size::new(512, 512),
+        };
+        assert_eq!(
+            err.to_string(),
+            "pad target too small: 512x512 is smaller than the 640x480 image along a side"
         );
     }
 
@@ -510,11 +1046,146 @@ mod tests {
 
     #[test]
     fn display_invalid_parameter() {
-        let err = Error::InvalidParameter("sigma must be positive, got -1".to_string());
+        let err = Error::from(ParameterError::new(
+            "sigma",
+            Requirement::FinitePositive,
+            Value::F32(-1.0),
+        ));
         assert_eq!(
             err.to_string(),
-            "invalid parameter: sigma must be positive, got -1"
+            "invalid parameter: sigma must be finite and strictly positive, got -1"
         );
+    }
+
+    #[test]
+    fn display_invalid_parameter_with_bounds_and_index() {
+        let cases = [
+            (
+                ParameterError::new("radius", Requirement::AtLeast(1), Value::Usize(0)),
+                "radius must be at least 1, got 0",
+            ),
+            (
+                ParameterError::new(
+                    "palette length",
+                    Requirement::AtMost(256),
+                    Value::Usize(257),
+                ),
+                "palette length must be at most 256, got 257",
+            ),
+            (
+                ParameterError::new("row stride", Requirement::MultipleOf(2), Value::Usize(15)),
+                "row stride must be a multiple of 2, got 15",
+            ),
+            (
+                ParameterError::new(
+                    "arc length",
+                    Requirement::InRange { min: 9, max: 16 },
+                    Value::Usize(8),
+                ),
+                "arc length must lie in the inclusive range 9..=16, got 8",
+            ),
+            (
+                ParameterError::new(
+                    "k",
+                    Requirement::OpenInterval {
+                        low: 0.0,
+                        high: 0.25,
+                    },
+                    Value::F32(0.3),
+                ),
+                "k must lie strictly between 0 and 0.25, got 0.3",
+            ),
+            (
+                ParameterError::new(
+                    "range",
+                    Requirement::StrictlyOrdered,
+                    Value::F64Pair(2.0, 1.0),
+                ),
+                "range must satisfy low < high, got (2, 1)",
+            ),
+            (
+                ParameterError::new("clamp channel", Requirement::Ordered, Value::NotRecorded)
+                    .at(1),
+                "clamp channel 1 must satisfy low <= high",
+            ),
+        ];
+        for (e, expected) in cases {
+            assert_eq!(e.to_string(), expected);
+        }
+    }
+
+    #[test]
+    fn parameter_error_accessors() {
+        let e = ParameterError::new("edge", Requirement::Finite, Value::F64(f64::NAN)).at(3);
+        assert_eq!(e.parameter(), "edge");
+        assert_eq!(e.requirement(), Requirement::Finite);
+        assert_eq!(e.value(), Value::F64(f64::NAN));
+        assert_eq!(e.index(), Some(3));
+        assert_eq!(
+            ParameterError::new("edge", Requirement::Finite, Value::F64(1.0)).index(),
+            None
+        );
+    }
+
+    #[test]
+    fn a_nan_payload_equals_itself() {
+        // The reason floats compare by bit pattern: under IEEE equality this
+        // error would be unequal to itself, and `assert_eq!` would fail for
+        // exactly the inputs the constructors exist to reject.
+        let nan = ParameterError::new("sigma", Requirement::FinitePositive, Value::F32(f32::NAN));
+        assert_eq!(nan, nan);
+        assert_eq!(Error::from(nan), Error::from(nan));
+        assert_eq!(Value::F64Pair(f64::NAN, 1.0), Value::F64Pair(f64::NAN, 1.0));
+        assert_ne!(Value::F64Pair(f64::NAN, 1.0), Value::F64Pair(1.0, f64::NAN));
+    }
+
+    #[test]
+    fn value_equality_is_by_bit_pattern_and_by_type() {
+        assert_ne!(Value::F64(0.0), Value::F64(-0.0));
+        assert_ne!(Value::F32(1.0), Value::F64(1.0));
+        assert_ne!(Value::Usize(1), Value::F64(1.0));
+        assert_eq!(Value::NotRecorded, Value::NotRecorded);
+    }
+
+    #[test]
+    fn requirement_equality_compares_bounds() {
+        assert_eq!(Requirement::AtLeast(3), Requirement::AtLeast(3));
+        assert_ne!(Requirement::AtLeast(3), Requirement::AtMost(3));
+        assert_eq!(Requirement::MultipleOf(2), Requirement::MultipleOf(2));
+        assert_ne!(Requirement::MultipleOf(2), Requirement::AtLeast(2));
+        assert_ne!(
+            Requirement::InRange { min: 9, max: 16 },
+            Requirement::InRange { min: 9, max: 15 }
+        );
+        let open = Requirement::OpenInterval {
+            low: 0.0,
+            high: 0.25,
+        };
+        assert_eq!(open, open);
+        assert_ne!(
+            open,
+            Requirement::OpenInterval {
+                low: 0.0,
+                high: 0.5
+            }
+        );
+        assert_ne!(Requirement::Ordered, Requirement::StrictlyOrdered);
+    }
+
+    #[test]
+    fn display_value_variants() {
+        assert_eq!(Value::F32(1.5).to_string(), "1.5");
+        assert_eq!(Value::F64(f64::INFINITY).to_string(), "inf");
+        assert_eq!(Value::Usize(7).to_string(), "7");
+        assert_eq!(Value::F64Pair(0.5, f64::NAN).to_string(), "(0.5, NaN)");
+        assert_eq!(Value::NotRecorded.to_string(), "not recorded");
+    }
+
+    #[test]
+    fn requirement_text_is_const() {
+        // The literal macros read the wording in a `const` block.
+        const TEXT: &str = Requirement::FinitePositive.text();
+        assert_eq!(TEXT, "must be finite and strictly positive");
     }
 
     #[test]
@@ -538,6 +1209,15 @@ mod tests {
     }
 
     #[test]
+    fn display_window_larger_than_image() {
+        let err = Error::WindowLargerThanImage {
+            window: Size::new(11, 11),
+            image: Size::new(8, 20),
+        };
+        assert_eq!(err.to_string(), "window 11x11 is larger than image 8x20");
+    }
+
+    #[test]
     fn different_variants_not_equal() {
         let size_err = Error::SizeMismatch {
             expected: Size::new(10, 10),
@@ -548,12 +1228,6 @@ mod tests {
             actual: 25,
         };
         assert_ne!(size_err, length_err);
-    }
-
-    #[test]
-    fn display_invalid_binning_strategy() {
-        let err = Error::InvalidBinningStrategy("min >= max".to_string());
-        assert_eq!(err.to_string(), "invalid binning strategy: min >= max");
     }
 
     #[test]
@@ -605,15 +1279,6 @@ mod tests {
         let c = Error::LabelOverflow {
             label_capacity: 65_535,
         };
-        assert_eq!(a, b);
-        assert_ne!(a, c);
-    }
-
-    #[test]
-    fn invalid_binning_strategy_equality_and_clone() {
-        let a = Error::InvalidBinningStrategy("bin_count == 0".to_string());
-        let b = a.clone();
-        let c = Error::InvalidBinningStrategy("non-finite edge".to_string());
         assert_eq!(a, b);
         assert_ne!(a, c);
     }

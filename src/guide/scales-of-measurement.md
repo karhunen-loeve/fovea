@@ -1,0 +1,182 @@
+# Scales of measurement
+
+A pixel type says how the bytes are laid out and what they mean. This page is
+about the second half: which operations a value admits. Two images with the
+same layout can admit very different operations. A `Mono8` intensity and a
+`Label32` component ID are both one unsigned integer per pixel, yet averaging
+two intensities is meaningful and averaging two IDs is not.
+
+The systematic answer comes from measurement theory. S. S. Stevens ("On the
+Theory of Scales of Measurement", *Science* 103, 1946) defined the level of a
+scale by the transformations that leave its meaning intact. What survives
+every such transformation is meaningful; what does not is an artefact of an
+arbitrary choice.
+
+This page describes three families of scales and how fovea's types map onto
+them, and then the same question asked of positions: in which space a value
+lies.
+
+## 1. Linear scales
+
+For a single real quantity, Stevens' levels form a chain. Each level admits
+everything the one before it admits.
+
+| Level | Admissible transformations | Meaningful operations | Examples in fovea |
+|---|---|---|---|
+| Nominal | any renaming (a bijection) | equal or not equal, counting | `Label32`, `Indexed8` |
+| Ordinal | any strictly increasing function | order: minimum, maximum, thresholds, median | |
+| Interval | `x → a·x + b`, with `a > 0` | differences, means | gamma-encoded values such as `Srgb8`, raw sensor samples before the black level is subtracted |
+| Ratio | `x → a·x`, with `a > 0` | ratios and scaling as well | linear intensities: `Mono8`, `MonoF32`, `Rgb8`, `RgbF32` |
+
+Two consequences run through the crate:
+
+- **Linearity is its own question.** A gamma-encoded `Srgb8` channel is an
+  ordered quantity whose differences mean something in encoded space, but its
+  mean is not the mean of the light. That is why `Srgb8` does not implement
+  `LinearSpace` and interpolation on it does not compile. The level of a
+  channel and the linearity of its encoding are separate properties.
+- **An ID is nominal.** A component label or a palette index can be compared
+  for equality and counted, and nothing else. `Label32` and `Indexed8`
+  implement none of the arithmetic traits for this reason. Counting pixels per
+  label is what `connected_components_with_stats` reports.
+
+Per-channel operations, such as a channel-wise maximum or a gradient
+magnitude, apply a scalar operation to each channel on its own. They are
+meaningful only when each channel on its own is a quantity on one of these
+levels. Two traits keep the two questions apart. `HomogeneousPixel` guarantees
+the layout: every channel has the same type. `ChannelwiseMath` states that
+every channel is at least an interval-scale quantity on its own, and the
+channel-wise operations (maxima, differences, gradients, thresholds,
+statistics, histograms) require it. `Label32` and `Indexed8` have a
+homogeneous layout and do not implement `ChannelwiseMath`, so the channel-wise
+maximum of two label images does not compile:
+
+```rust,compile_fail
+use fovea::image::Image;
+use fovea::pixel::Label32;
+use fovea::transform::{Max, combine_images};
+
+let labels = Image::fill(4, 4, Label32::new(7));
+// ERROR: `Label32: ChannelwiseMath` is not satisfied.
+let _ = combine_images(&labels, &labels, Max);
+```
+
+One marker covers every level from interval upward, which is stricter than the
+systematic requires in two places. A histogram only needs to count (nominal)
+or to bin (ordinal), and a maximum or a threshold only needs an order, yet both
+require `ChannelwiseMath`. No pixel type in the crate is ordinal without being
+interval, so the second case excludes nothing today. For the first, counting
+pixels per label is what `connected_components_with_stats` reports. A custom
+pixel type opts in with `#[derive(ChannelwiseMath)]`.
+
+## 2. Circular scales
+
+Angles and directions are not on a line. The difference between 179° and
+−179° is 2°, not 358°, and there is no smallest angle. Stevens' chain does not
+cover them.
+
+fovea has two types for them, and they differ in their modulus:
+
+- `Orientation`: a direction, modulo 2π. A gradient direction distinguishes
+  a direction from its opposite.
+- `AxialOrientation`: an axis, modulo π. The orientation of a line or of a
+  stripe pattern does not.
+
+Both take differences on the circle through `signed_difference`, and neither
+implements an ordering.
+
+An amount of turn is a different quantity: the rotation of a calibration,
+the sweep of an arc, the angle between two lines. Three quarter turns and
+minus one quarter turn are different amounts, so `Angle` keeps the value as
+given, in `f64`, and orders like a number. Its constructors name the unit,
+`Angle::from_degrees(90.0)` or `Angle::from_radians(..)`.
+
+```rust
+use fovea::{AxialOrientation, Orientation};
+
+// Directions: 179° and -179° are 2° apart.
+let east = Orientation::from_radians(179_f32.to_radians())?;
+let west = Orientation::from_radians((-179_f32).to_radians())?;
+assert!((east.signed_difference(west).abs().degrees() - 2.0).abs() < 1e-3);
+
+// Axes: 10° and 190° are the same axis.
+let a = AxialOrientation::from_radians(10_f64.to_radians())?;
+let b = AxialOrientation::from_radians(190_f64.to_radians())?;
+assert!(a.signed_difference(b).abs().radians() < 1e-9);
+# Ok::<(), fovea::Error>(())
+```
+
+## 3. Vector quantities
+
+Some values have several components that only mean something together. The
+standard example is a complex amplitude, such as a bin of a Fourier spectrum.
+Its real and imaginary parts are coordinates in a basis, but the basis has no
+physical meaning: rotating every value by the same phase changes nothing that
+can be observed. The admissible transformations are `z → c·z` for any
+non-zero complex `c`, which scales and rotates at once.
+
+What survives them is meaningful:
+
+- sums, differences and means, and every linear operation,
+- the magnitude `|z|`, which is an ordinary ratio-scale quantity,
+- quotients `z₁ / z₂`, which carry a magnitude ratio and a phase difference
+  (phase correlation relies on exactly this).
+
+What does not survive is not:
+
+- order: no ordering of complex numbers is compatible with rotation,
+- a single component on its own, such as the real part,
+- an absolute phase, and anything computed per component nonlinearly.
+
+Complex values therefore sit outside Stevens' chain. They behave like a ratio
+scale without being ordinal, which the one-dimensional chain assumes cannot
+happen. The principle behind the chain still applies: a value's meaningful
+operations are the ones that are invariant under its admissible
+transformations. Derived quantities fall back into the families above: the
+magnitude is a ratio scale, the phase is a circular scale.
+
+In fovea these values are `ComplexF32` and `ComplexF64`. Their layout is two
+floats, so they are `HomogeneousPixel` and an image of them splits into
+planes. They are `LinearSpace`, so blurring, resizing and blending work. They
+are not `ChannelwiseMath` and have no `PartialOrd`, so a channel-wise maximum,
+difference or gradient magnitude of a complex image does not compile. The
+conversions `ComplexMagnitude` and `ComplexPhase` lead to the ratio and the
+circular scale. `RealPart` and `ImaginaryPart` are for the cases where the
+phase reference is fixed by construction, such as the real part of an
+analytic signal, which is the signal itself.
+
+## 4. Where a value lies: spaces
+
+The scales above say what a value admits. A position raises the same
+question about where it lies. fovea answers it with one rule: a space is a
+type when moving into it changes which operations are correct, and a step
+that changes only the bookkeeping is a mapping.
+
+The image as stored, `Pixels`, and the ideal image of a lens model,
+`IdealPixels`, differ in what is correct. Through a distorting lens a
+straight edge bends in `Pixels`, so a line fitted there is wrong; in
+`IdealPixels` it is straight. They are therefore different types, carried by
+images as `Image<P, S>` and by every position measured on them as
+`Point<S>`. A remap through the lens model is the step between them.
+Comparing a camera image with an undistorted one, or correcting a point
+twice, does not compile, and stating that two spaces may be compared is a
+named step, `as_space`.
+
+A region of interest, a pyramid level, a resized or flipped image and a
+second camera keep every operation as correct as before; only combining
+values from two of them is wrong. That is bookkeeping, carried by the
+mapping between them (an offset, `Decimated::to_base`, a calibration) and
+not by a type fovea defines. A caller who wants the compiler to keep two
+such spaces apart defines a marker of their own: `PixelSpace` is open.
+
+## Summary
+
+| Family | Defined by | Examples |
+|---|---|---|
+| Linear | Stevens' chain: nominal, ordinal, interval, ratio | intensities, encoded values, IDs |
+| Circular | a modulus: 2π for directions, π for axes | `Orientation`, `AxialOrientation` |
+| Vector | the group of admissible transformations | complex amplitudes: `ComplexF32`, `ComplexF64` |
+
+When an operation looks questionable on some pixel type, the useful question
+is which family and level the value belongs to, and whether the operation
+survives that level's transformations.

@@ -4,12 +4,15 @@
 //! - [`Mono8`], [`Mono16`], [`Mono32`], [`Mono64`] — fixed-depth wrappers
 //! - [`MonoF32`], [`MonoF64`] — floating-point monochrome
 
-use fovea_derive::{HomogeneousPixel, LinearPixel, PlainPixel, WhiteChannel, ZeroablePixel};
+use fovea_derive::{
+    ChannelwiseMath, HomogeneousPixel, LinearPixel, PlainPixel, WhiteChannel, ZeroablePixel,
+};
 
 use crate::pixel::{
-    FromLinear, HomogeneousPixel, IntegralPixel, IntegralSquaredPixel, LinearChannel, LinearPixel,
-    LinearSpace, OriginInvariantPixel, PlainChannel, PlainPixel, SingleChannel, WhiteChannel,
-    ZeroablePixel, impl_origin_invariant_pixel, impl_single_channel, single_channel_sealed,
+    ChannelwiseMath, FromLinear, HomogeneousPixel, IntegralPixel, IntegralSquaredPixel,
+    LinearChannel, LinearPixel, LinearSpace, OriginInvariantPixel, PlainChannel, PlainPixel,
+    SingleChannel, WhiteChannel, ZeroablePixel, impl_origin_invariant_pixel, impl_single_channel,
+    single_channel_sealed,
 };
 use std::{
     hash::{Hash, Hasher},
@@ -233,6 +236,7 @@ impl<const BITS: usize> std::ops::DivAssign<&u16> for Mono<BITS> {
     PartialOrd,
     PlainPixel,
     HomogeneousPixel,
+    ChannelwiseMath,
     ZeroablePixel,
     LinearPixel,
     WhiteChannel,
@@ -296,6 +300,7 @@ impl Mul<f32> for &Mono8 {
     PartialOrd,
     PlainPixel,
     HomogeneousPixel,
+    ChannelwiseMath,
     ZeroablePixel,
     LinearPixel,
     WhiteChannel,
@@ -341,6 +346,7 @@ impl From<u16> for Mono16 {
     PartialOrd,
     PlainPixel,
     HomogeneousPixel,
+    ChannelwiseMath,
     ZeroablePixel,
     LinearPixel,
     WhiteChannel,
@@ -426,6 +432,7 @@ impl LinearPixel<f64> for Mono32 {
     PartialOrd,
     PlainPixel,
     HomogeneousPixel,
+    ChannelwiseMath,
     ZeroablePixel,
     LinearPixel,
     WhiteChannel,
@@ -505,7 +512,15 @@ impl LinearPixel<f64> for Mono64 {
 /// ```
 #[repr(transparent)]
 #[derive(
-    Clone, Copy, Debug, PartialEq, PartialOrd, PlainPixel, HomogeneousPixel, ZeroablePixel,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    PartialOrd,
+    PlainPixel,
+    HomogeneousPixel,
+    ChannelwiseMath,
+    ZeroablePixel,
 )]
 // The inner `f32` is a `PlainChannel` / `LinearChannel` but not a
 // `ZeroablePixel` (that role is pixel-only). Use `Default` for field
@@ -584,7 +599,15 @@ impl Hash for MonoF32 {
 /// ```
 #[repr(transparent)]
 #[derive(
-    Clone, Copy, Debug, PartialEq, PartialOrd, PlainPixel, HomogeneousPixel, ZeroablePixel,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    PartialOrd,
+    PlainPixel,
+    HomogeneousPixel,
+    ChannelwiseMath,
+    ZeroablePixel,
 )]
 // Inner `f64` is a channel, not a pixel.
 pub struct MonoF64(#[zero(default)] pub f64);
@@ -696,6 +719,7 @@ unsafe impl<const BITS: usize> HomogeneousPixel for Mono<BITS> {
     type Channel = Saturating<u16>;
     type Channels = [Saturating<u16>; 1];
 }
+impl<const BITS: usize> ChannelwiseMath for Mono<BITS> {}
 
 // Manual `WhiteChannel` impl for `Mono<BITS>`.
 //

@@ -83,7 +83,8 @@
 //!
 //! let raw = Image::fill(8, 8, BayerRggb12::new(2048));
 //! // ERROR: `BayerRggb12: LinearSpace` is not satisfied.
-//! let _ = resize(&raw, Size::new(4, 4), Bilinear);
+//! let _: Image<BayerRggb12> = resize(&raw, Size::new(4, 4), Bilinear)?;
+//! # Ok::<(), fovea::Error>(())
 //! ```
 //!
 //! Alpha-style blending of two samples:
@@ -147,13 +148,16 @@
 //! assert_eq!(top_left_colour::<BayerBggr12>(), CfaColor::Blue);
 //! ```
 
-use fovea_derive::{HomogeneousPixel, LinearPixel, PlainPixel, WhiteChannel, ZeroablePixel};
+use fovea_derive::{
+    ChannelwiseMath, HomogeneousPixel, LinearPixel, PlainPixel, WhiteChannel, ZeroablePixel,
+};
 
 use std::num::Saturating;
 
 use crate::pixel::{
-    FromLinear, HomogeneousPixel, LinearPixel, Mono, MonoF32, PlainChannel, PlainPixel, Rgb, Rgb8,
-    Rgb16, SingleChannel, WhiteChannel, ZeroablePixel, impl_single_channel, single_channel_sealed,
+    ChannelwiseMath, FromLinear, HomogeneousPixel, LinearPixel, Mono, MonoF32, PlainChannel,
+    PlainPixel, Rgb, Rgb8, Rgb16, SingleChannel, WhiteChannel, ZeroablePixel, impl_single_channel,
+    single_channel_sealed,
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -373,6 +377,7 @@ macro_rules! define_bayer_pattern {
             PartialOrd,
             PlainPixel,
             HomogeneousPixel,
+            ChannelwiseMath,
             ZeroablePixel,
             LinearPixel,
             WhiteChannel,
@@ -449,6 +454,7 @@ macro_rules! define_bayer_pattern {
             PartialOrd,
             PlainPixel,
             HomogeneousPixel,
+            ChannelwiseMath,
             ZeroablePixel,
             LinearPixel,
             WhiteChannel,
@@ -591,6 +597,11 @@ macro_rules! define_bayer_pattern {
             type Channel = Saturating<u16>;
             type Channels = [Saturating<u16>; 1];
         }
+
+        // A raw sample is a quantity; that its neighbours are other colours
+        // is a spatial concern, which `LinearSpace` and
+        // `OriginInvariantPixel` already carry.
+        impl<const BITS: usize> ChannelwiseMath for $Generic<BITS> {}
 
         impl<const BITS: usize> ZeroablePixel for $Generic<BITS> {
             #[inline]

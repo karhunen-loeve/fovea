@@ -17,7 +17,7 @@ fn main() {
     // `fovea::transform`.
     use fovea::image::{Image, ImageView};
     use fovea::pixel::{Mono8, Mono16, Rgb8, RgbF32, Srgb8};
-    use fovea::transform::{ConvertPixel, FullRange, Luminance, SrgbGamma, convert_image};
+    use fovea::transform::{Bt709, ConvertPixel, FullRange, Luminance, SrgbGamma, convert_image};
 
     // =====================================================================
     // 1. FullRange: scale 8-bit grayscale to 16-bit grayscale
@@ -54,11 +54,12 @@ fn main() {
     println!("  Mono8(64)  → Mono16({})", img16.pixel_at(1, 1).value()); // 16448
 
     // =====================================================================
-    // 2. Luminance: RGB to grayscale (BT.601 coefficients)
+    // 2. Luminance: RGB to grayscale (BT.709 weights)
     // =====================================================================
     //
-    // `Luminance` converts colour to grayscale using the ITU-R BT.601
-    // luma formula:  Y = 0.299·R + 0.587·G + 0.114·B
+    // `Luminance` converts colour to grayscale with the weights of a named
+    // standard. For linear light with sRGB or BT.709 primaries that is
+    // `Bt709`:  Y = 0.2126·R + 0.7152·G + 0.0722·B
     //
     // Green contributes most because the human visual system is most
     // sensitive to green light.
@@ -67,20 +68,20 @@ fn main() {
         2,
         1,
         vec![
-            Rgb8::new(255, 0, 0), // pure red   → Y ≈ 76
-            Rgb8::new(0, 255, 0), // pure green → Y ≈ 150
+            Rgb8::new(255, 0, 0), // pure red   → Y ≈ 54
+            Rgb8::new(0, 255, 0), // pure green → Y ≈ 182
         ],
     )
     .expect("pixel count matches 2×1");
 
-    // Luminance implements `ConvertPixel<Rgb8, Mono8>`, so the compiler
-    // knows exactly which conversion is requested.
-    let gray: Image<Mono8> = convert_image(&rgb_img, Luminance);
+    // `Luminance(Bt709)` implements `ConvertPixel<Rgb8, Mono8>`, so the
+    // compiler knows exactly which conversion is requested.
+    let gray: Image<Mono8> = convert_image(&rgb_img, Luminance(Bt709));
 
     println!("\n── Luminance: Rgb8 → Mono8 ──");
     println!("  Red(255,0,0)   → Mono8({})", gray.pixel_at(0, 0).value());
     println!("  Green(0,255,0) → Mono8({})", gray.pixel_at(1, 0).value());
-    println!("  (Green is brighter because of the 0.587 coefficient)");
+    println!("  (Green is brighter because of the 0.7152 coefficient)");
 
     // Sanity-check: green should yield a higher luma than red.
     assert!(
@@ -149,9 +150,9 @@ fn main() {
     );
 
     let red = Rgb8::new(128, 64, 32);
-    let luma: Mono8 = Luminance.convert(&red);
+    let luma: Mono8 = Luminance(Bt709).convert(&red);
     println!(
-        "  Luminance.convert(&Rgb8(128,64,32)) = Mono8({})",
+        "  Luminance(Bt709).convert(&Rgb8(128,64,32)) = Mono8({})",
         luma.value()
     );
 

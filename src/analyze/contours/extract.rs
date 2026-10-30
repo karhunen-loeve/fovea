@@ -1,9 +1,10 @@
 //! Border tracing and hierarchy derivation over the component labeling.
 
 use crate::analyze::components::{Connectivity, Labeling, connected_components};
+use crate::geometry::PixelSpace;
 use crate::image::{Image, ImageView, RasterImage};
 use crate::pixel::LabelPixel;
-use crate::{Coordinate, Error, Offset};
+use crate::{Coordinate, Error, Offset, SignedCoordinate};
 
 use super::hierarchy::{ComponentContour, Contour, ContourHierarchy, ContourKind};
 
@@ -23,54 +24,6 @@ const MOORE_RING: [Offset; 8] = [
 /// The step from a hole's first raster pixel to the foreground pixel above
 /// it, which is the seed the inner border is traced from.
 const NORTH: Offset = Offset::new(0, -1);
-
-/// A position the tracer may visit, including ones off the top or left of
-/// the view.
-///
-/// The trace steps onto positions before it knows whether they carry the
-/// label, and the first backtrack of a component touching the left or top
-/// edge is outside the view entirely, so those two cases cannot be a
-/// [`Coordinate`]. This is where they live, and
-/// [`on_grid`](TracePos::on_grid) is the single place the negative half of
-/// the bounds check happens; the far edge is
-/// [`Image::get`](crate::image::ImageView::get)'s `Option`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct TracePos {
-    x: i64,
-    y: i64,
-}
-
-impl TracePos {
-    /// The position one [`Offset`] away.
-    const fn step(self, offset: Offset) -> Self {
-        Self {
-            x: self.x + offset.dx as i64,
-            y: self.y + offset.dy as i64,
-        }
-    }
-
-    /// The [`Coordinate`] at this position, or `None` if it is off the top
-    /// or left of the view.
-    const fn on_grid(self) -> Option<Coordinate> {
-        if self.x < 0 || self.y < 0 {
-            None
-        } else {
-            Some(Coordinate {
-                x: self.x as usize,
-                y: self.y as usize,
-            })
-        }
-    }
-}
-
-impl From<Coordinate> for TracePos {
-    fn from(value: Coordinate) -> Self {
-        Self {
-            x: value.x as i64,
-            y: value.y as i64,
-        }
-    }
-}
 
 /// Trace every component's borders and derive the outer/hole hierarchy.
 ///
@@ -113,7 +66,7 @@ impl From<Coordinate> for TracePos {
 /// let img: BinaryImage = Image::generate(7, 7, |x, y| {
 ///     (1..6).contains(&x) && (1..6).contains(&y) && !(x == 3 && y == 3)
 /// });
-/// let (labeling, hierarchy) = extract_contours::<Label32, Connectivity8>(&img).unwrap();
+/// let (labeling, hierarchy) = extract_contours::<Label32, Connectivity8, _>(&img).unwrap();
 /// assert_eq!(labeling.label_count, 1);
 ///
 /// let ring = &hierarchy.components()[0];
@@ -122,18 +75,23 @@ impl From<Coordinate> for TracePos {
 /// assert_eq!(ring.outer().kind(), ContourKind::Outer);
 /// assert_eq!(ring.holes()[0].kind(), ContourKind::Hole);
 /// ```
-pub fn extract_contours<L, C>(
-    image: &impl RasterImage<Pixel = bool>,
-) -> Result<(Labeling<L>, ContourHierarchy), Error>
+#[allow(
+    clippy::type_complexity,
+    reason = "the labeling and its contour hierarchy, in the space of the image"
+)]
+pub fn extract_contours<L, C, I>(
+    image: &I,
+) -> Result<(Labeling<L, I::Space>, ContourHierarchy<I::Space>), Error>
 where
     L: LabelPixel,
     C: Connectivity,
+    I: RasterImage<Pixel = bool>,
 {
-    let foreground = connected_components::<L, C>(image)?;
+    let foreground = connected_components::<L, C, I>(image)?;
 
-    let inverted: Image<bool> =
-        Image::generate(image.width(), image.height(), |x, y| !image.pixel_at(x, y));
-    let background = connected_components::<L, C::Dual>(&inverted)?;
+    let inverted: Image<bool, I::Space> =
+        Image::generate_in(image.width(), image.height(), |x, y| !image.pixel_at(x, y));
+    let background = connected_components::<L, C::Dual, _>(&inverted)?;
 
     let fg_first = first_pixels(&foreground);
     let bg_first = first_pixels(&background);
@@ -180,7 +138,7 @@ where
                     &foreground.labels,
                     label,
                     first,
-                    TracePos::from(first).step(Offset::new(-1, 0)),
+                    first.step(Offset::new(-1, 0)),
                 ),
                 ContourKind::Outer,
             );
@@ -193,7 +151,12 @@ where
                         .checked_add(NORTH)
                         .expect("a hole's first pixel has foreground above it");
                     Contour::new(
-                        trace_border(&foreground.labels, label, seed, TracePos::from(hole_first)),
+                        trace_border(
+                            &foreground.labels,
+                            label,
+                            seed,
+                            hole_first.step(Offset::ZERO),
+                        ),
                         ContourKind::Hole,
                     )
                 })
@@ -211,16 +174,16 @@ where
 
 /// Label index at `at`, `0` for background **and** off-view.
 ///
-/// Takes the `Option` [`TracePos::on_grid`] and
+/// Takes the `Option` [`SignedCoordinate::within`] and
 /// [`Coordinate::checked_add`] produce, so an off-view position is one
 /// `None` rather than a sign test repeated at each call site.
-fn label_at<L: LabelPixel>(labels: &Image<L>, at: Option<Coordinate>) -> u32 {
+fn label_at<L: LabelPixel, S: PixelSpace>(labels: &Image<L, S>, at: Option<Coordinate>) -> u32 {
     at.and_then(|c| labels.get(c.x, c.y))
         .map_or(0, LabelPixel::to_label_index)
 }
 
 /// First raster-order pixel of every label, indexed by `label - 1`.
-fn first_pixels<L: LabelPixel>(labeling: &Labeling<L>) -> Vec<Coordinate> {
+fn first_pixels<L: LabelPixel, S: PixelSpace>(labeling: &Labeling<L, S>) -> Vec<Coordinate> {
     let mut first: Vec<Option<Coordinate>> = vec![None; labeling.label_count as usize];
     let mut seen = 0usize;
     'scan: for y in 0..labeling.labels.height() {
@@ -247,7 +210,7 @@ fn first_pixels<L: LabelPixel>(labeling: &Labeling<L>) -> Vec<Coordinate> {
 }
 
 /// Set `out[label - 1]` for every label appearing on the view edge.
-fn mark_frame_labels<L: LabelPixel>(labels: &Image<L>, out: &mut [bool]) {
+fn mark_frame_labels<L: LabelPixel, S: PixelSpace>(labels: &Image<L, S>, out: &mut [bool]) {
     let (w, h) = (labels.width(), labels.height());
     if w == 0 || h == 0 {
         return;
@@ -277,14 +240,18 @@ fn mark_frame_labels<L: LabelPixel>(labels: &Image<L>, out: &mut [bool]) {
 /// the start with the original backtrack" never fires on 1-px-thin
 /// shapes, where the trace re-enters the start from the far side with a
 /// different backtrack.
-fn trace_border<L: LabelPixel>(
-    labels: &Image<L>,
+fn trace_border<L: LabelPixel, S: PixelSpace>(
+    labels: &Image<L, S>,
     label: u32,
     start: Coordinate,
-    backtrack: TracePos,
+    backtrack: SignedCoordinate,
 ) -> Vec<Coordinate> {
-    let matches = |p: TracePos| label_at(labels, p.on_grid()) == label;
-    debug_assert!(matches(TracePos::from(start)) && !matches(backtrack));
+    // The backtrack of a component touching the left or top edge lies off
+    // the view, which is why the trace carries signed positions; `within`
+    // is the one place a position becomes a pixel again.
+    let size = labels.size();
+    let matches = |p: SignedCoordinate| label_at(labels, p.within(size)) == label;
+    debug_assert!(matches(start.step(Offset::ZERO)) && !matches(backtrack));
 
     let mut contour = vec![start];
     let mut current = start;
@@ -295,17 +262,16 @@ fn trace_border<L: LabelPixel>(
     let budget = 4 * labels.width() * labels.height() + 8;
 
     for _ in 0..budget {
-        let here = TracePos::from(current);
         let back_dir = MOORE_RING
             .iter()
-            .position(|&offset| here.step(offset) == back)
+            .position(|&offset| current.step(offset) == back)
             .expect("backtrack is 8-adjacent to the current pixel");
         let mut next = None;
         for k in 1..=8 {
-            let p = here.step(MOORE_RING[(back_dir + k) % 8]);
+            let p = current.step(MOORE_RING[(back_dir + k) % 8]);
             if matches(p) {
                 // `matches` is false off-grid, so a match is on the grid.
-                next = p.on_grid();
+                next = p.within(size);
                 break;
             }
             back = p; // last rejected position becomes the next backtrack
@@ -348,7 +314,7 @@ mod tests {
     }
 
     fn extract(img: &BinaryImage) -> (Labeling<Label32>, ContourHierarchy) {
-        extract_contours::<Label32, Connectivity8>(img).unwrap()
+        extract_contours::<Label32, Connectivity8, _>(img).unwrap()
     }
 
     #[test]
@@ -527,9 +493,9 @@ mod tests {
             "#.
              .#",
         );
-        let (labeling8, _) = extract_contours::<Label32, Connectivity8>(&img).unwrap();
+        let (labeling8, _) = extract_contours::<Label32, Connectivity8, _>(&img).unwrap();
         assert_eq!(labeling8.label_count, 1);
-        let (labeling4, hierarchy4) = extract_contours::<Label32, Connectivity4>(&img).unwrap();
+        let (labeling4, hierarchy4) = extract_contours::<Label32, Connectivity4, _>(&img).unwrap();
         assert_eq!(labeling4.label_count, 2);
         for component in hierarchy4.components() {
             assert_eq!(component.enclosing(), None);

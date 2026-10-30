@@ -1,4 +1,4 @@
-use crate::error::Error;
+use crate::error::{Error, ParameterError, Requirement, Value};
 
 /// The `Size` struct represents the dimensions of an image.
 ///
@@ -101,6 +101,37 @@ impl Coordinate {
         }
     }
 
+    /// The [`SignedCoordinate`] one [`Offset`] away, which may lie outside
+    /// the image.
+    ///
+    /// The total sibling of [`checked_add`](Self::checked_add): where that
+    /// answers "is there a pixel there", this keeps the position so a
+    /// [`BorderPolicy`](crate::border::BorderPolicy) or a tracer can decide
+    /// what an outside position means. A component past `isize::MAX`, which
+    /// no pixel of any image has, saturates rather than wrapping.
+    ///
+    /// # Example
+    /// ```
+    /// # use fovea::{Coordinate, Offset, SignedCoordinate};
+    /// let c = Coordinate::new(0, 4);
+    /// assert_eq!(c.step(Offset::new(-1, 1)), SignedCoordinate::new(-1, 5));
+    /// ```
+    #[inline]
+    #[must_use]
+    pub const fn step(self, by: Offset) -> SignedCoordinate {
+        let x = if self.x > isize::MAX as usize {
+            isize::MAX
+        } else {
+            self.x as isize
+        };
+        let y = if self.y > isize::MAX as usize {
+            isize::MAX
+        } else {
+            self.y as isize
+        };
+        SignedCoordinate::new(x, y).step(by)
+    }
+
     /// The [`Offset`] that carries `self` to `other`.
     ///
     /// The inverse of [`checked_add`](Self::checked_add) for any pair
@@ -139,127 +170,138 @@ impl From<(usize, usize)> for Coordinate {
     }
 }
 
-/// A sub-pixel coordinate in 2D space with `f64` `x` and `y`.
-///
-/// The floating-point companion to [`Coordinate`], for quantities that
-/// fall between pixel centres — a component centroid, a refined feature
-/// location, an interpolated sample point.
-///
-/// # Example
-/// ```
-/// # use fovea::CoordinateF64;
-/// let c = CoordinateF64::new(2.5, 4.0);
-/// assert_eq!(c.x, 2.5);
-/// assert_eq!(c.y, 4.0);
-/// ```
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct CoordinateF64 {
-    /// Horizontal position.
-    pub x: f64,
-    /// Vertical position.
-    pub y: f64,
-}
-impl CoordinateF64 {
-    /// Creates a `CoordinateF64` at the given `(x, y)` position.
-    #[inline]
-    pub fn new(x: f64, y: f64) -> Self {
-        Self { x, y }
-    }
-}
-
-impl From<(f64, f64)> for CoordinateF64 {
-    #[inline]
-    fn from(value: (f64, f64)) -> Self {
-        Self::new(value.0, value.1)
-    }
-}
-
-/// A **signed** pixel position: a point that may legitimately lie outside
-/// the frame on any side.
+/// A **signed** pixel position: a point on the pixel grid that may
+/// legitimately lie outside the frame on any side.
 ///
 /// The third member of the coordinate family. [`Coordinate`] addresses
-/// pixels that exist, so it is unsigned; [`CoordinateF64`] carries
-/// sub-pixel positions; `CoordinateI32` names whole-pixel positions in the
-/// unbounded drawing plane, which is what the [`draw`](crate::draw)
-/// primitives clip against — a marker centred near the frame edge extends
-/// past it as a matter of course.
+/// pixels that can exist, so it is unsigned; [`Point`](crate::Point)
+/// carries sub-pixel positions, in the space of the image they lie in; `SignedCoordinate` names whole-pixel positions
+/// anywhere on the grid. Three places need one: a neighbourhood that
+/// reaches past the image edge (what a
+/// [`BorderPolicy`](crate::border::BorderPolicy) resolves), a shape that
+/// extends past the frame (what the [`draw`](crate::draw) primitives clip
+/// against), and a contour tracer whose backtrack position sits left of
+/// column 0.
 ///
-/// Tuples convert with `.into()`, so call sites stay terse; the typed
+/// The width is `isize` because no image can hold more than `isize::MAX`
+/// bytes, so every pixel of every image has a `SignedCoordinate`, and
+/// [`Coordinate::step`] never fails.
+///
+/// A signed position becomes a pixel again only relative to an image size,
+/// through [`within`](Self::within), which is the whole bounds check in one
+/// place. Tuples convert with `.into()`, so call sites stay terse; the typed
 /// fields are what make a `(y, x)` transposition visible when shapes are
-/// stored or built from data. An in-frame [`Coordinate`] converts with
-/// `try_from` (fallible only past `i32::MAX`).
+/// stored or built from data.
 ///
 /// # Example
 /// ```
-/// # use fovea::{Coordinate, CoordinateI32};
-/// let p = CoordinateI32::new(-3, 7);
-/// assert_eq!(p.x, -3);
+/// # use fovea::{Coordinate, Offset, SignedCoordinate, Size};
+/// let p = Coordinate::new(0, 4).step(Offset::new(-1, 0));
+/// assert_eq!(p, SignedCoordinate::new(-1, 4)); // left of the frame
+/// assert_eq!(p.within(Size::new(8, 8)), None);
 ///
-/// let q: CoordinateI32 = (4, 5).into();
-/// assert_eq!(q, CoordinateI32::new(4, 5));
+/// let q = p.step(Offset::new(2, 0));
+/// assert_eq!(q.within(Size::new(8, 8)), Some(Coordinate::new(1, 4)));
 ///
-/// let r = CoordinateI32::try_from(Coordinate::new(10, 20))?;
-/// assert_eq!(r, CoordinateI32::new(10, 20));
-/// # Ok::<(), fovea::Error>(())
+/// let r: SignedCoordinate = (4, 5).into();
+/// assert_eq!(r, SignedCoordinate::new(4, 5));
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct CoordinateI32 {
+pub struct SignedCoordinate {
     /// Horizontal position; negative is left of the frame.
-    pub x: i32,
+    pub x: isize,
     /// Vertical position; negative is above the frame.
-    pub y: i32,
+    pub y: isize,
 }
 
-impl CoordinateI32 {
-    /// Creates a `CoordinateI32` at the given `(x, y)` position.
+impl SignedCoordinate {
+    /// Creates a `SignedCoordinate` at the given `(x, y)` position.
     #[inline]
     #[must_use]
-    pub const fn new(x: i32, y: i32) -> Self {
+    pub const fn new(x: isize, y: isize) -> Self {
         Self { x, y }
     }
-}
 
-impl From<(i32, i32)> for CoordinateI32 {
+    /// The position one [`Offset`] away.
+    ///
+    /// Saturates at `isize::MIN` and `isize::MAX` instead of wrapping, so a
+    /// position that far out stays on its side of the grid; no image
+    /// reaches either end, so [`within`](Self::within) reports it outside
+    /// either way.
+    ///
+    /// # Example
+    /// ```
+    /// # use fovea::{Offset, SignedCoordinate};
+    /// let p = SignedCoordinate::new(-1, 3).step(Offset::new(2, -4));
+    /// assert_eq!(p, SignedCoordinate::new(1, -1));
+    /// ```
     #[inline]
-    fn from(value: (i32, i32)) -> Self {
-        Self::new(value.0, value.1)
+    #[must_use]
+    pub const fn step(self, by: Offset) -> Self {
+        Self {
+            x: self.x.saturating_add(by.dx as isize),
+            y: self.y.saturating_add(by.dy as isize),
+        }
     }
-}
 
-impl From<&(i32, i32)> for CoordinateI32 {
+    /// The pixel at this position in an image of `size`, or `None` if the
+    /// position lies outside it on any side.
+    ///
+    /// # Example
+    /// ```
+    /// # use fovea::{Coordinate, SignedCoordinate, Size};
+    /// let size = Size::new(4, 3);
+    /// assert_eq!(SignedCoordinate::new(3, 2).within(size), Some(Coordinate::new(3, 2)));
+    /// assert_eq!(SignedCoordinate::new(4, 2).within(size), None); // right of the frame
+    /// assert_eq!(SignedCoordinate::new(0, -1).within(size), None); // above it
+    /// ```
     #[inline]
-    fn from(value: &(i32, i32)) -> Self {
-        Self::new(value.0, value.1)
-    }
-}
-
-impl From<&CoordinateI32> for CoordinateI32 {
-    #[inline]
-    fn from(value: &CoordinateI32) -> Self {
-        *value
-    }
-}
-
-impl TryFrom<Coordinate> for CoordinateI32 {
-    type Error = Error;
-
-    /// Fails only for a position past `i32::MAX` along either axis, which
-    /// no image this crate can hold in memory produces.
-    fn try_from(value: Coordinate) -> Result<Self, Error> {
-        match (i32::try_from(value.x), i32::try_from(value.y)) {
-            (Ok(x), Ok(y)) => Ok(Self { x, y }),
-            _ => Err(Error::InvalidParameter(format!(
-                "coordinate ({}, {}) does not fit a signed 32-bit position",
-                value.x, value.y
-            ))),
+    #[must_use]
+    pub const fn within(self, size: Size) -> Option<Coordinate> {
+        if self.x < 0 || self.y < 0 {
+            return None;
+        }
+        let (x, y) = (self.x as usize, self.y as usize);
+        if x < size.width && y < size.height {
+            Some(Coordinate { x, y })
+        } else {
+            None
         }
     }
 }
 
-impl From<Coordinate> for CoordinateF64 {
+impl From<(isize, isize)> for SignedCoordinate {
     #[inline]
-    fn from(value: Coordinate) -> Self {
-        Self::new(value.x as f64, value.y as f64)
+    fn from(value: (isize, isize)) -> Self {
+        Self::new(value.0, value.1)
+    }
+}
+
+impl From<&(isize, isize)> for SignedCoordinate {
+    #[inline]
+    fn from(value: &(isize, isize)) -> Self {
+        Self::new(value.0, value.1)
+    }
+}
+
+impl From<&SignedCoordinate> for SignedCoordinate {
+    #[inline]
+    fn from(value: &SignedCoordinate) -> Self {
+        *value
+    }
+}
+
+impl TryFrom<Coordinate> for SignedCoordinate {
+    type Error = core::num::TryFromIntError;
+
+    /// Fails only for a position past `isize::MAX` along either axis, which
+    /// no pixel of any image can have. [`Coordinate::step`] is the total
+    /// alternative for positions that come from an image.
+    fn try_from(value: Coordinate) -> Result<Self, Self::Error> {
+        Ok(Self {
+            x: isize::try_from(value.x)?,
+            y: isize::try_from(value.y)?,
+        })
     }
 }
 
@@ -544,9 +586,7 @@ impl Sigma {
         if value.is_finite() && value > 0.0 {
             Ok(Self(value))
         } else {
-            Err(Error::InvalidParameter(format!(
-                "sigma must be finite and strictly positive, got {value}"
-            )))
+            Err(ParameterError::new("sigma", Requirement::FinitePositive, Value::F32(value)).into())
         }
     }
 
@@ -592,13 +632,13 @@ impl Sigma {
 ///
 /// ```compile_fail
 /// use fovea::sigma;
-/// // ERROR: evaluation panicked: sigma must be finite and strictly positive
+/// // ERROR: evaluation panicked: must be finite and strictly positive
 /// let _ = sigma!(0.0);
 /// ```
 #[macro_export]
 macro_rules! sigma {
     ($value:expr) => {
-        const { $crate::Sigma::new($value).expect("sigma must be finite and strictly positive") }
+        const { $crate::Sigma::new($value).expect($crate::error::Requirement::FinitePositive.text()) }
     };
 }
 
@@ -651,9 +691,12 @@ impl PixelDistance {
         if value.is_finite() && value > 0.0 {
             Ok(Self(value))
         } else {
-            Err(Error::InvalidParameter(format!(
-                "pixel distance must be finite and strictly positive, got {value}"
-            )))
+            Err(ParameterError::new(
+                "pixel distance",
+                Requirement::FinitePositive,
+                Value::F64(value),
+            )
+            .into())
         }
     }
 
@@ -686,8 +729,7 @@ impl PixelDistance {
 ///
 /// ```compile_fail
 /// use fovea::pixel_distance;
-/// // ERROR: evaluation panicked: pixel distance must be finite and
-/// // strictly positive
+/// // ERROR: evaluation panicked: must be finite and strictly positive
 /// let _ = pixel_distance!(0.0);
 /// ```
 #[macro_export]
@@ -695,7 +737,7 @@ macro_rules! pixel_distance {
     ($value:expr) => {
         const {
             $crate::PixelDistance::new($value)
-                .expect("pixel distance must be finite and strictly positive")
+                .expect($crate::error::Requirement::FinitePositive.text())
         }
     };
 }
@@ -750,9 +792,12 @@ impl Tolerance {
         if value.is_finite() && value >= 0.0 {
             Ok(Self(value))
         } else {
-            Err(Error::InvalidParameter(format!(
-                "tolerance must be finite and non-negative, got {value}"
-            )))
+            Err(ParameterError::new(
+                "tolerance",
+                Requirement::FiniteNonNegative,
+                Value::F64(value),
+            )
+            .into())
         }
     }
 
@@ -785,13 +830,16 @@ impl Tolerance {
 ///
 /// ```compile_fail
 /// use fovea::tolerance;
-/// // ERROR: evaluation panicked: tolerance must be finite and non-negative
+/// // ERROR: evaluation panicked: must be finite and non-negative
 /// let _ = tolerance!(-0.5);
 /// ```
 #[macro_export]
 macro_rules! tolerance {
     ($value:expr) => {
-        const { $crate::Tolerance::new($value).expect("tolerance must be finite and non-negative") }
+        const {
+            $crate::Tolerance::new($value)
+                .expect($crate::error::Requirement::FiniteNonNegative.text())
+        }
     };
 }
 
@@ -843,7 +891,7 @@ macro_rules! tolerance {
 ///
 /// ```compile_fail
 /// use fovea::window;
-/// // ERROR: evaluation panicked: window side must be odd and non-zero
+/// // ERROR: evaluation panicked: must be odd
 /// let _ = window!(16);
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -875,9 +923,7 @@ impl OddWindowSide {
         if side != 0 && side % 2 == 1 {
             Ok(Self(side))
         } else {
-            Err(Error::InvalidParameter(format!(
-                "window side must be odd and non-zero, got {side}"
-            )))
+            Err(ParameterError::new("window side", Requirement::Odd, Value::Usize(side)).into())
         }
     }
 
@@ -925,13 +971,13 @@ impl OddWindowSide {
 ///
 /// ```compile_fail
 /// use fovea::window;
-/// // ERROR: evaluation panicked: window side must be odd and non-zero
+/// // ERROR: evaluation panicked: must be odd
 /// let _ = window!(16);
 /// ```
 #[macro_export]
 macro_rules! window {
     ($side:expr) => {
-        const { $crate::OddWindowSide::new($side).expect("window side must be odd and non-zero") }
+        const { $crate::OddWindowSide::new($side).expect($crate::error::Requirement::Odd.text()) }
     };
 }
 
@@ -1023,12 +1069,12 @@ pub enum Extremum {
 /// let half = Orientation::from_radians(core::f32::consts::PI)?;
 /// // Compare by difference, not `==`: wrapping rounds, so these agree to
 /// // within an ULP rather than bit-exactly.
-/// assert!(turned.signed_difference(half).abs() < 1e-6);
+/// assert!(turned.signed_difference(half).abs().radians() < 1e-6);
 ///
 /// // The ±π seam is 2 degrees wide, not 358.
 /// let east = Orientation::from_radians(179_f32.to_radians())?;
 /// let west = Orientation::from_radians((-179_f32).to_radians())?;
-/// let apart = east.signed_difference(west).abs().to_degrees();
+/// let apart = east.signed_difference(west).abs().degrees();
 /// assert!((apart - 2.0).abs() < 1e-3, "got {apart}");
 /// # Ok::<(), fovea::Error>(())
 /// ```
@@ -1051,9 +1097,7 @@ impl Orientation {
         if radians.is_finite() {
             Ok(Self(wrap_two_pi(radians)))
         } else {
-            Err(Error::InvalidParameter(format!(
-                "orientation must be a finite angle in radians, got {radians}"
-            )))
+            Err(ParameterError::new("orientation", Requirement::Finite, Value::F32(radians)).into())
         }
     }
 
@@ -1093,10 +1137,30 @@ impl Orientation {
         self.0
     }
 
-    /// Returns the signed angle **from `other` to `self`**, in `(−π, π]`.
+    /// Returns the angle in degrees, in `(−180, 180]`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use fovea::Orientation;
+    ///
+    /// let down = Orientation::from_atan2(1.0, 0.0);
+    /// assert!((down.degrees() - 90.0).abs() < 1e-5);
+    /// ```
+    #[must_use]
+    #[inline]
+    pub fn degrees(self) -> f32 {
+        self.0.to_degrees()
+    }
+
+    /// Returns the signed [`Angle`] **from `other` to `self`**, in
+    /// `(−π, π]`.
     ///
     /// Wraps across the ±π seam, so the result is always the shorter of the
-    /// two ways round and its magnitude never exceeds π.
+    /// two ways round and its magnitude never exceeds π. The difference is
+    /// an amount of turn, so it comes back as an [`Angle`]: the direction
+    /// types wrap and compare on the circle, a difference orders like a
+    /// number.
     ///
     /// # Example
     ///
@@ -1105,13 +1169,15 @@ impl Orientation {
     ///
     /// let a = Orientation::from_radians(0.5)?;
     /// let b = Orientation::from_radians(0.2)?;
-    /// assert!((a.signed_difference(b) - 0.3).abs() < 1e-6);
+    /// assert!((a.signed_difference(b).radians() - 0.3).abs() < 1e-6);
     /// # Ok::<(), fovea::Error>(())
     /// ```
     #[must_use]
     #[inline]
-    pub fn signed_difference(self, other: Self) -> f32 {
-        wrap_two_pi(self.0 - other.0)
+    pub fn signed_difference(self, other: Self) -> Angle {
+        // The wrap runs in f32, where the orientations live; the exact
+        // f32 result is then widened, so no new rounding enters.
+        Angle::from_finite_radians(f64::from(wrap_two_pi(self.0 - other.0)))
     }
 
     /// Discards the sense of direction, yielding the undirected axis this
@@ -1136,7 +1202,7 @@ impl Orientation {
     /// let north = Orientation::from_radians(core::f32::consts::FRAC_PI_2)?;
     /// let south = Orientation::from_radians(-core::f32::consts::FRAC_PI_2)?;
     /// // Opposite directions, one axis.
-    /// assert!(north.to_axial().signed_difference(south.to_axial()).abs() < 1e-6);
+    /// assert!(north.to_axial().signed_difference(south.to_axial()).abs().radians() < 1e-6);
     /// # Ok::<(), fovea::Error>(())
     /// ```
     #[must_use]
@@ -1176,7 +1242,7 @@ impl Orientation {
 /// let a = AxialOrientation::from_radians(80_f64.to_radians())?;
 /// let b = AxialOrientation::from_radians((-100_f64).to_radians())?;
 /// // Same axis, reached from opposite directions.
-/// assert!(a.signed_difference(b).abs() < 1e-12);
+/// assert!(a.signed_difference(b).abs().radians() < 1e-12);
 /// # Ok::<(), fovea::Error>(())
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1197,9 +1263,10 @@ impl AxialOrientation {
         if radians.is_finite() {
             Ok(Self(wrap_pi(radians)))
         } else {
-            Err(Error::InvalidParameter(format!(
-                "axis orientation must be a finite angle in radians, got {radians}"
-            )))
+            Err(
+                ParameterError::new("axis orientation", Requirement::Finite, Value::F64(radians))
+                    .into(),
+            )
         }
     }
 
@@ -1238,6 +1305,23 @@ impl AxialOrientation {
         self.0
     }
 
+    /// Returns the angle in degrees, in `(−90, 90]`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use fovea::AxialOrientation;
+    ///
+    /// let axis = AxialOrientation::from_radians(170_f64.to_radians())?;
+    /// assert!((axis.degrees() + 10.0).abs() < 1e-12);
+    /// # Ok::<(), fovea::Error>(())
+    /// ```
+    #[must_use]
+    #[inline]
+    pub fn degrees(self) -> f64 {
+        self.0.to_degrees()
+    }
+
     /// Returns the signed angle **from `other` to `self`**, in
     /// `(−π/2, π/2]`.
     ///
@@ -1255,20 +1339,150 @@ impl AxialOrientation {
     /// let b = AxialOrientation::from_radians((-80_f64).to_radians())?;
     /// // 20° apart, not 160°. (The sign says which way round: the axis at
     /// // 80° is a fifth of a quarter-turn clockwise of the one at −80°.)
-    /// let apart = a.signed_difference(b).abs().to_degrees();
+    /// let apart = a.signed_difference(b).abs().degrees();
     /// assert!((apart - 20.0).abs() < 1e-9, "got {apart}");
     /// # Ok::<(), fovea::Error>(())
     /// ```
     #[must_use]
     #[inline]
-    pub fn signed_difference(self, other: Self) -> f64 {
-        wrap_pi(self.0 - other.0)
+    pub fn signed_difference(self, other: Self) -> Angle {
+        Angle::from_finite_radians(wrap_pi(self.0 - other.0))
+    }
+}
+
+/// An **amount of turn** in the plane, in `f64` radians and not wrapped.
+///
+/// Use this where an angle says how far something turns rather than which
+/// way it points: the rotation of a calibration, the sweep of an arc, the
+/// angle between two lines. Three quarter turns and minus one quarter turn
+/// are different amounts, so unlike [`Orientation`] and
+/// [`AxialOrientation`] this type keeps the value as given.
+///
+/// Positive turns `+x` towards `+y`, as every angle in the crate, which in
+/// an image with `y` pointing down is clockwise on the screen.
+///
+/// The constructors name the unit, so a call ported from an API that takes
+/// degrees cannot pass them as radians, and an `Angle` cannot be passed
+/// where a scale or a length is expected.
+///
+/// # Example
+///
+/// ```
+/// use fovea::Angle;
+///
+/// let quarter = Angle::from_degrees(90.0)?;
+/// assert!((quarter.radians() - core::f64::consts::FRAC_PI_2).abs() < 1e-15);
+///
+/// // Not wrapped: three quarter turns stay three quarter turns.
+/// let sweep = Angle::from_degrees(270.0)?;
+/// assert!((sweep.degrees() - 270.0).abs() < 1e-12);
+/// # Ok::<(), fovea::Error>(())
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
+#[repr(transparent)]
+pub struct Angle(f64);
+
+impl Angle {
+    /// The angle of `radians`.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::InvalidParameter`] if `radians` is NaN or infinite.
+    pub fn from_radians(radians: f64) -> Result<Self, Error> {
+        if radians.is_finite() {
+            Ok(Self(radians))
+        } else {
+            Err(ParameterError::new("angle", Requirement::Finite, Value::F64(radians)).into())
+        }
+    }
+
+    /// The angle of `degrees`, converted to radians.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::InvalidParameter`] if `degrees` is NaN or infinite.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use fovea::Angle;
+    ///
+    /// assert!(Angle::from_degrees(f64::NAN).is_err());
+    /// assert!((Angle::from_degrees(-180.0)?.radians() + core::f64::consts::PI).abs() < 1e-15);
+    /// # Ok::<(), fovea::Error>(())
+    /// ```
+    pub fn from_degrees(degrees: f64) -> Result<Self, Error> {
+        if degrees.is_finite() {
+            Ok(Self(degrees.to_radians()))
+        } else {
+            Err(ParameterError::new("angle", Requirement::Finite, Value::F64(degrees)).into())
+        }
+    }
+
+    /// Wraps a value the crate computed and knows to be finite.
+    #[inline]
+    pub(crate) fn from_finite_radians(radians: f64) -> Self {
+        debug_assert!(radians.is_finite());
+        Self(radians)
+    }
+
+    /// Returns the angle in radians.
+    #[must_use]
+    #[inline]
+    pub const fn radians(self) -> f64 {
+        self.0
+    }
+
+    /// Returns the angle in degrees.
+    #[must_use]
+    #[inline]
+    pub fn degrees(self) -> f64 {
+        self.0.to_degrees()
+    }
+
+    /// The angle's magnitude: the same amount of turn, without its sense.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use fovea::Angle;
+    ///
+    /// let back = Angle::from_degrees(-90.0)?;
+    /// assert_eq!(back.abs(), Angle::from_degrees(90.0)?);
+    /// # Ok::<(), fovea::Error>(())
+    /// ```
+    #[must_use]
+    #[inline]
+    pub fn abs(self) -> Self {
+        Self(self.0.abs())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn angle_keeps_the_value_unwrapped() {
+        let a = Angle::from_radians(5.0).unwrap();
+        assert_eq!(a.radians(), 5.0);
+        assert_eq!(Angle::from_radians(-5.0).unwrap().radians(), -5.0);
+        let d = Angle::from_degrees(270.0).unwrap();
+        assert_eq!(d.radians(), 270_f64.to_radians());
+        assert!((d.degrees() - 270.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn angle_rejects_non_finite_values() {
+        for v in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for e in [Angle::from_radians(v), Angle::from_degrees(v)] {
+                let Err(Error::InvalidParameter(p)) = e else {
+                    panic!("accepted {v}")
+                };
+                assert_eq!(p.requirement(), Requirement::Finite);
+            }
+        }
+    }
 
     #[test]
     fn sigma_valid_values_round_trip() {
@@ -1284,14 +1498,11 @@ mod tests {
         // Zero, negative, NaN, infinite: each can flow out of a
         // computation over data, so each is an error value.
         for value in [0.0, -1.0, f32::NAN, f32::INFINITY] {
-            let err = Sigma::try_new(value).unwrap_err();
-            match err {
-                Error::InvalidParameter(reason) => assert!(
-                    reason.contains("sigma"),
-                    "reason {reason:?} does not mention sigma"
-                ),
-                other => panic!("expected InvalidParameter, got {other:?}"),
-            }
+            let Err(Error::InvalidParameter(e)) = Sigma::try_new(value) else {
+                panic!("sigma {value} must be rejected as a parameter");
+            };
+            assert_eq!(e.requirement(), Requirement::FinitePositive);
+            assert_eq!(e.value(), Value::F32(value));
         }
     }
 
@@ -1317,14 +1528,11 @@ mod tests {
     #[test]
     fn pixel_distance_try_new_rejects_invalid_values() {
         for value in [0.0, -2.0, f64::NAN, f64::INFINITY] {
-            let err = PixelDistance::try_new(value).unwrap_err();
-            match err {
-                Error::InvalidParameter(reason) => assert!(
-                    reason.contains("pixel distance"),
-                    "reason {reason:?} does not mention pixel distance"
-                ),
-                other => panic!("expected InvalidParameter, got {other:?}"),
-            }
+            let Err(Error::InvalidParameter(e)) = PixelDistance::try_new(value) else {
+                panic!("pixel distance {value} must be rejected as a parameter");
+            };
+            assert_eq!(e.requirement(), Requirement::FinitePositive);
+            assert_eq!(e.value(), Value::F64(value));
         }
     }
 
@@ -1352,14 +1560,11 @@ mod tests {
         // pixel pitch, say) and land on an even number or zero, so each is
         // an error value rather than a crash.
         for side in [0, 2, 4, 100] {
-            let err = OddWindowSide::try_new(side).unwrap_err();
-            match err {
-                Error::InvalidParameter(reason) => assert!(
-                    reason.contains("odd and non-zero"),
-                    "reason {reason:?} does not name the invariant"
-                ),
-                other => panic!("expected InvalidParameter, got {other:?}"),
-            }
+            let Err(Error::InvalidParameter(e)) = OddWindowSide::try_new(side) else {
+                panic!("window side {side} must be rejected as a parameter");
+            };
+            assert_eq!(e.requirement(), Requirement::Odd);
+            assert_eq!(e.value(), Value::Usize(side));
         }
     }
 
@@ -1417,20 +1622,17 @@ mod tests {
         // rounds, which is why the documented comparison is by difference.
         let three_halves = Orientation::from_radians(3.0 * PI32).unwrap();
         let half = Orientation::from_radians(PI32).unwrap();
-        assert!(three_halves.signed_difference(half).abs() < 1e-6);
+        assert!(three_halves.signed_difference(half).abs().radians() < 1e-6);
     }
 
     #[test]
     fn orientation_from_radians_rejects_non_finite() {
         for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
-            let err = Orientation::from_radians(value).unwrap_err();
-            match err {
-                Error::InvalidParameter(reason) => assert!(
-                    reason.contains("orientation"),
-                    "reason {reason:?} does not mention orientation"
-                ),
-                other => panic!("expected InvalidParameter, got {other:?}"),
-            }
+            let Err(Error::InvalidParameter(e)) = Orientation::from_radians(value) else {
+                panic!("orientation {value} must be rejected as a parameter");
+            };
+            assert_eq!(e.requirement(), Requirement::Finite);
+            assert_eq!(e.value(), Value::F32(value));
         }
     }
 
@@ -1453,7 +1655,7 @@ mod tests {
         // The bug this type exists to prevent: 2° apart, not 358°.
         let east = Orientation::from_radians(179_f32.to_radians()).unwrap();
         let west = Orientation::from_radians((-179_f32).to_radians()).unwrap();
-        let delta = east.signed_difference(west).to_degrees();
+        let delta = east.signed_difference(west).degrees();
         assert!((delta.abs() - 2.0).abs() < 1e-3, "got {delta}");
     }
 
@@ -1461,9 +1663,9 @@ mod tests {
     fn orientation_signed_difference_is_signed_and_directed() {
         let a = Orientation::from_radians(0.5).unwrap();
         let b = Orientation::from_radians(0.2).unwrap();
-        assert!((a.signed_difference(b) - 0.3).abs() < 1e-6);
-        assert!((b.signed_difference(a) + 0.3).abs() < 1e-6);
-        assert_eq!(a.signed_difference(a), 0.0);
+        assert!((a.signed_difference(b).radians() - 0.3).abs() < 1e-6);
+        assert!((b.signed_difference(a).radians() + 0.3).abs() < 1e-6);
+        assert_eq!(a.signed_difference(a).radians(), 0.0);
     }
 
     #[test]
@@ -1472,9 +1674,9 @@ mod tests {
             let a = Orientation::from_radians(degrees.to_radians()).unwrap();
             let b = Orientation::from_radians(0.0).unwrap();
             assert!(
-                a.signed_difference(b).abs() <= PI32 + 1e-6,
+                a.signed_difference(b).abs().radians() <= f64::from(PI32) + 1e-6,
                 "{degrees}° → {}",
-                a.signed_difference(b)
+                a.signed_difference(b).radians()
             );
         }
     }
@@ -1487,14 +1689,31 @@ mod tests {
         // axis, which is precisely what `signed_difference` sees.
         let north = Orientation::from_radians(PI32 / 2.0).unwrap();
         let south = Orientation::from_radians(-PI32 / 2.0).unwrap();
-        assert!(north.to_axial().signed_difference(south.to_axial()).abs() < 1e-6);
+        assert!(
+            north
+                .to_axial()
+                .signed_difference(south.to_axial())
+                .abs()
+                .radians()
+                < 1e-6
+        );
 
         let east = Orientation::from_radians(0.0).unwrap();
         let west = Orientation::from_radians(PI32).unwrap();
-        assert!(east.to_axial().signed_difference(west.to_axial()).abs() < 1e-6);
+        assert!(
+            east.to_axial()
+                .signed_difference(west.to_axial())
+                .abs()
+                .radians()
+                < 1e-6
+        );
 
         // ...and the two axes are a quarter turn apart, not the same.
-        let apart = north.to_axial().signed_difference(east.to_axial()).abs();
+        let apart = north
+            .to_axial()
+            .signed_difference(east.to_axial())
+            .abs()
+            .radians();
         assert!((apart - PI64 / 2.0).abs() < 1e-6, "got {apart}");
     }
 
@@ -1534,25 +1753,22 @@ mod tests {
         // An axis has no head or tail: θ and θ + π are equal.
         let a = AxialOrientation::from_radians(0.4).unwrap();
         let b = AxialOrientation::from_radians(0.4 + PI64).unwrap();
-        assert!(a.signed_difference(b).abs() < 1e-12);
+        assert!(a.signed_difference(b).abs().radians() < 1e-12);
 
         // 80° and −100° are the same axis, reached the other way round.
         let c = AxialOrientation::from_radians(80_f64.to_radians()).unwrap();
         let d = AxialOrientation::from_radians((-100_f64).to_radians()).unwrap();
-        assert!(c.signed_difference(d).abs() < 1e-12);
+        assert!(c.signed_difference(d).abs().radians() < 1e-12);
     }
 
     #[test]
     fn axial_orientation_from_radians_rejects_non_finite() {
         for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-            let err = AxialOrientation::from_radians(value).unwrap_err();
-            match err {
-                Error::InvalidParameter(reason) => assert!(
-                    reason.contains("axis orientation"),
-                    "reason {reason:?} does not mention axis orientation"
-                ),
-                other => panic!("expected InvalidParameter, got {other:?}"),
-            }
+            let Err(Error::InvalidParameter(e)) = AxialOrientation::from_radians(value) else {
+                panic!("axis orientation {value} must be rejected as a parameter");
+            };
+            assert_eq!(e.requirement(), Requirement::Finite);
+            assert_eq!(e.value(), Value::F64(value));
         }
     }
 
@@ -1581,16 +1797,16 @@ mod tests {
         let b = AxialOrientation::from_radians((-80_f64).to_radians()).unwrap();
         // 20° apart, not 160°. The sign is negative: the axis at 80° is
         // reached from the one at −80° (≡ 100°) by turning back 20°.
-        let delta = a.signed_difference(b).to_degrees();
+        let delta = a.signed_difference(b).degrees();
         assert!((delta.abs() - 20.0).abs() < 1e-9, "got {delta}");
 
         for degrees in [0.0_f64, 10.0, 89.0, 91.0, 170.0, 269.0] {
             let x = AxialOrientation::from_radians(degrees.to_radians()).unwrap();
             let y = AxialOrientation::from_radians(0.0).unwrap();
             assert!(
-                x.signed_difference(y).abs() <= PI64 / 2.0 + 1e-12,
+                x.signed_difference(y).abs().radians() <= PI64 / 2.0 + 1e-12,
                 "{degrees}° → {}",
-                x.signed_difference(y)
+                x.signed_difference(y).radians()
             );
         }
     }
@@ -1902,5 +2118,68 @@ mod tests {
         // distinguishable values, where a positional pair would have made
         // the swap invisible.
         assert_ne!(Offset::new(1, -1), Offset::new(-1, 1));
+    }
+
+    #[test]
+    fn step_and_within_agree_with_checked_add() {
+        // `checked_add` answers the lower half of the bounds check and
+        // `within` both halves; wherever the step lands inside the image
+        // the two must name the same pixel, and `within` must refuse
+        // exactly the positions past either edge.
+        let size = Size::new(5, 4);
+        for x in 0..size.width {
+            for y in 0..size.height {
+                let c = Coordinate::new(x, y);
+                for dx in -6..=6 {
+                    for dy in -6..=6 {
+                        let off = Offset::new(dx, dy);
+                        let signed = c.step(off);
+                        assert_eq!(
+                            signed,
+                            SignedCoordinate::new(
+                                x as isize + dx as isize,
+                                y as isize + dy as isize
+                            )
+                        );
+                        let expected = c
+                            .checked_add(off)
+                            .filter(|p| p.x < size.width && p.y < size.height);
+                        assert_eq!(signed.within(size), expected, "{c:?} + {off:?}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn signed_steps_saturate_rather_than_wrapping() {
+        // No image reaches either end of isize, so a saturated position is
+        // still correctly "outside"; a wrapping add would flip it to the
+        // opposite side of the grid.
+        let right = SignedCoordinate::new(isize::MAX, 0).step(Offset::new(1, 0));
+        assert_eq!(right, SignedCoordinate::new(isize::MAX, 0));
+        let up = SignedCoordinate::new(0, isize::MIN).step(Offset::new(0, -1));
+        assert_eq!(up, SignedCoordinate::new(0, isize::MIN));
+        // A Coordinate past isize::MAX, which no pixel has, saturates too.
+        let far = Coordinate::new(usize::MAX, 0).step(Offset::ZERO);
+        assert_eq!(far, SignedCoordinate::new(isize::MAX, 0));
+        assert!(SignedCoordinate::try_from(Coordinate::new(usize::MAX, 0)).is_err());
+        assert_eq!(
+            SignedCoordinate::try_from(Coordinate::new(3, 7)).ok(),
+            Some(SignedCoordinate::new(3, 7))
+        );
+    }
+
+    #[test]
+    fn within_rejects_every_outside_side_and_an_empty_size() {
+        let size = Size::new(3, 2);
+        for p in [(-1, 0), (0, -1), (3, 0), (0, 2), (isize::MIN, isize::MAX)] {
+            assert_eq!(SignedCoordinate::from(p).within(size), None, "{p:?}");
+        }
+        assert_eq!(SignedCoordinate::new(0, 0).within(Size::new(0, 5)), None);
+        assert_eq!(
+            SignedCoordinate::new(2, 1).within(size),
+            Some(Coordinate::new(2, 1))
+        );
     }
 }

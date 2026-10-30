@@ -1,6 +1,7 @@
 use crate::border::{BorderPolicy, compute_interior_region};
 use crate::image::{Image, ImageView, RasterImage, RasterImageMut};
 use crate::pixel::ZeroablePixel;
+use crate::{Coordinate, Offset};
 // `MonoF32` appears in doctests and the `#[cfg(test)]`
 // module as the pixel-role float output type. Scoping the import to
 // `cfg(test)` keeps the non-test build free of the unused-import
@@ -216,7 +217,8 @@ pub struct FoldItem<P, W> {
 ///
 /// For every pixel in `border.output_region(…)`:
 ///
-/// 1. Iterate the kernel positions `(dx, dy, weight)` relative to the anchor.
+/// 1. Iterate the kernel positions (an [`Offset`] and a weight) relative to
+///    the anchor.
 /// 2. Fetch the corresponding source pixel — directly for interior
 ///    positions (hot path), via `border.pixel_at()` for boundary positions
 ///    (cold path).
@@ -287,7 +289,7 @@ pub struct FoldItem<P, W> {
 pub fn fold_neighborhood_into<I, WI, B, O, F, P, W, Out>(
     image: &I,
     weights: &WI,
-    anchor: (usize, usize),
+    anchor: Coordinate,
     border: &B,
     output: &mut O,
     f: F,
@@ -297,7 +299,7 @@ pub fn fold_neighborhood_into<I, WI, B, O, F, P, W, Out>(
     WI: ImageView<Pixel = W>,
     W: Copy,
     B: BorderPolicy<I>,
-    O: RasterImageMut<Pixel = Out>,
+    O: RasterImageMut<Pixel = Out, Space = I::Space>,
     F: FoldOp<P, W, Output = Out>,
 {
     // Owns the working buffers for the duration of the call and delegates
@@ -323,8 +325,13 @@ pub fn fold_neighborhood_into<I, WI, B, O, F, P, W, Out>(
 pub(crate) struct FoldScratch<A, W> {
     /// One accumulator per interior column of the row being folded.
     acc_row: Vec<A>,
-    /// `(dx, dy, weight)` per kernel tap, relative to the anchor.
-    positions: Vec<(isize, isize, W)>,
+    /// Per kernel tap, relative to the anchor: the displacement as the
+    /// `isize` pair the interior hot loops index with, the same
+    /// displacement as an [`Offset`] for the boundary path, and the weight.
+    /// The hot loops keep the bare pair so that the vocabulary type does
+    /// not reach them; changing their representation is a measured
+    /// performance question, not a cleanup.
+    positions: Vec<(isize, isize, Offset, W)>,
 }
 
 impl<A, W> FoldScratch<A, W> {
@@ -352,7 +359,7 @@ impl<A, W> FoldScratch<A, W> {
 pub(crate) fn fold_neighborhood_into_with_scratch<I, WI, B, O, F, P, W, Out>(
     image: &I,
     weights: &WI,
-    anchor: (usize, usize),
+    anchor: Coordinate,
     border: &B,
     output: &mut O,
     mut f: F,
@@ -363,7 +370,7 @@ pub(crate) fn fold_neighborhood_into_with_scratch<I, WI, B, O, F, P, W, Out>(
     WI: ImageView<Pixel = W>,
     W: Copy,
     B: BorderPolicy<I>,
-    O: RasterImageMut<Pixel = Out>,
+    O: RasterImageMut<Pixel = Out, Space = I::Space>,
     F: FoldOp<P, W, Output = Out>,
 {
     let FoldScratch { acc_row, positions } = scratch;
@@ -381,20 +388,19 @@ pub(crate) fn fold_neighborhood_into_with_scratch<I, WI, B, O, F, P, W, Out>(
         output_region.size.height,
     );
 
-    // Pre-collect kernel positions (dx, dy, weight) so we don't recompute
-    // them for every pixel.  For typical kernel sizes (3×3 .. 7×7) this is
-    // a tiny buffer that stays in L1.
+    // Pre-collect kernel positions so we don't recompute them for every
+    // pixel.  For typical kernel sizes (3×3 .. 7×7) this is a tiny buffer
+    // that stays in L1.
     positions.clear();
     positions.reserve(kernel_size.width * kernel_size.height);
     for ky in 0..kernel_size.height {
         for kx in 0..kernel_size.width {
-            let dx = kx as isize - anchor.0 as isize;
-            let dy = ky as isize - anchor.1 as isize;
+            let offset = anchor.offset_to(Coordinate::new(kx, ky));
             let w = weights.pixel_at(kx, ky);
-            positions.push((dx, dy, w));
+            positions.push((offset.dx as isize, offset.dy as isize, offset, w));
         }
     }
-    let kernel_positions: &[(isize, isize, W)] = positions;
+    let kernel_positions: &[(isize, isize, Offset, W)] = positions;
 
     // Offset from the output region origin to the image coordinate system.
     let ox = output_region.left();
@@ -427,7 +433,7 @@ pub(crate) fn fold_neighborhood_into_with_scratch<I, WI, B, O, F, P, W, Out>(
 
                 for cy in int_top..int_bottom {
                     // Kernel-outer sweep
-                    for &(dx, dy, w) in kernel_positions {
+                    for &(dx, dy, _, w) in kernel_positions {
                         let src_row = image.row((cy as isize + dy) as usize);
                         let start = (int_left as isize + dx) as usize;
                         let src_slice = &src_row[start..start + int_width];
@@ -455,7 +461,7 @@ pub(crate) fn fold_neighborhood_into_with_scratch<I, WI, B, O, F, P, W, Out>(
                 // ── Per-pixel fallback (non-invertible ops) ──────────
                 for cy in int_top..int_bottom {
                     for cx in int_left..int_right {
-                        let iter = kernel_positions.iter().map(|&(dx, dy, w)| {
+                        let iter = kernel_positions.iter().map(|&(dx, dy, _, w)| {
                             let sx = (cx as isize + dx) as usize;
                             let sy = (cy as isize + dy) as usize;
                             FoldItem {
@@ -486,8 +492,9 @@ pub(crate) fn fold_neighborhood_into_with_scratch<I, WI, B, O, F, P, W, Out>(
                 }
             }
 
-            let iter = kernel_positions.iter().map(|&(dx, dy, w)| {
-                let pixel = border.pixel_at(image, cx as isize + dx, cy as isize + dy);
+            let at = Coordinate::new(cx, cy);
+            let iter = kernel_positions.iter().map(|&(_, _, offset, w)| {
+                let pixel = border.pixel_at(image, at.step(offset));
                 FoldItem { pixel, weight: w }
             });
 
@@ -553,10 +560,10 @@ pub(crate) fn fold_neighborhood_into_with_scratch<I, WI, B, O, F, P, W, Out>(
 pub fn fold_neighborhood<I, WI, B, F, P, W, Out>(
     image: &I,
     weights: &WI,
-    anchor: (usize, usize),
+    anchor: Coordinate,
     border: &B,
     f: F,
-) -> Image<Out>
+) -> Image<Out, I::Space>
 where
     I: RasterImage<Pixel = P>,
     P: Copy,
@@ -567,7 +574,7 @@ where
     F: FoldOp<P, W, Output = Out>,
 {
     let output_region = border.output_region(image.size(), weights.size(), anchor);
-    let mut out = Image::<Out>::zero(output_region.size.width, output_region.size.height);
+    let mut out = Image::<Out, _>::zero_in(output_region.size.width, output_region.size.height);
     fold_neighborhood_into(image, weights, anchor, border, &mut out, f);
     out
 }
@@ -614,7 +621,7 @@ where
 pub fn fold_neighborhood_fn_into<I, WI, B, O, F, P, W, Out>(
     image: &I,
     weights: &WI,
-    anchor: (usize, usize),
+    anchor: Coordinate,
     border: &B,
     output: &mut O,
     f: F,
@@ -624,7 +631,7 @@ pub fn fold_neighborhood_fn_into<I, WI, B, O, F, P, W, Out>(
     WI: ImageView<Pixel = W>,
     W: Copy,
     B: BorderPolicy<I>,
-    O: RasterImageMut<Pixel = Out>,
+    O: RasterImageMut<Pixel = Out, Space = I::Space>,
     F: FnMut(&mut dyn Iterator<Item = FoldItem<P, W>>) -> Out,
 {
     fold_neighborhood_into(image, weights, anchor, border, output, ClosureFold(f));
@@ -672,10 +679,10 @@ pub fn fold_neighborhood_fn_into<I, WI, B, O, F, P, W, Out>(
 pub fn fold_neighborhood_fn<I, WI, B, F, P, W, Out>(
     image: &I,
     weights: &WI,
-    anchor: (usize, usize),
+    anchor: Coordinate,
     border: &B,
     f: F,
-) -> Image<Out>
+) -> Image<Out, I::Space>
 where
     I: RasterImage<Pixel = P>,
     P: Copy,
@@ -1236,10 +1243,9 @@ mod tests {
         let src = make_5x5();
         // Weight 1.0 at array position [0][0] = anchor (0,0), all others 0.0.
         // sum_fold will return pixel_at(anchor) * 1.0 = the source pixel.
-        let kernel = Neighborhood::<f32, 3, 3>::with_anchor(
-            [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-            (0, 0),
-        );
+        let kernel = Neighborhood::<f32, 3, 3>::with_anchor::<0, 0>([
+            1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        ]);
 
         // With anchor at (0,0): left margin = 0, top margin = 0,
         // right margin = 2, bottom margin = 2.
@@ -1879,10 +1885,9 @@ mod tests {
         // Asymmetric weights with an off-centre anchor: the interior
         // rectangle is not symmetric, so an `acc_row` sized or offset
         // wrongly would show up here.
-        let kernel = Neighborhood::<f32, 3, 3>::with_anchor(
-            [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
-            (0, 2),
-        );
+        let kernel = Neighborhood::<f32, 3, 3>::with_anchor::<0, 2>([
+            0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0,
+        ]);
 
         let mut scratch = FoldScratch::new();
 

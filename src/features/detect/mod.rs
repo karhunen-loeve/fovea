@@ -207,7 +207,7 @@
 //! in the base-image frame so they are directly comparable:
 //!
 //! ```
-//! use fovea::CoordinateF64;
+//! use fovea::{Pixels, Point};
 //! use fovea::features::HasPosition;
 //! use fovea::features::detect::{detect_corners_in_level, CornerParams, NmsRadius, ShiTomasi};
 //! use fovea::image::{Image, PlacedPyramid, Pyramid};

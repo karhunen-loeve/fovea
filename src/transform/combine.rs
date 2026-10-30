@@ -21,7 +21,10 @@ use std::ops::Sub as StdSub;
 
 use crate::error::Error;
 use crate::image::{Image, RasterImage, RasterImageMut};
-use crate::pixel::{HomogeneousPixel, LinearPixel, LinearSpace, ZeroablePixel};
+use crate::pixel::{
+    ChannelwiseMath, ComplexF32, ComplexF64, HomogeneousPixel, LinearPixel, LinearSpace, MonoF32,
+    MonoF64, ZeroablePixel,
+};
 
 // ─── CombinePixels trait ─────────────────────────────────────────────────────
 
@@ -133,8 +136,8 @@ pub fn combine_images_into<IA, IB, O, M>(
 ) -> Result<(), Error>
 where
     IA: RasterImage,
-    IB: RasterImage,
-    O: RasterImageMut<Pixel = M::Output>,
+    IB: RasterImage<Space = IA::Space>,
+    O: RasterImageMut<Pixel = M::Output, Space = IA::Space>,
     M: CombinePixels<IA::Pixel, IB::Pixel>,
 {
     if a.size() != b.size() {
@@ -191,10 +194,14 @@ where
 /// let out = result.unwrap();
 /// assert_eq!(out.pixel_at(0, 0), Mono8::new(255)); // saturated
 /// ```
-pub fn combine_images<IA, IB, M>(a: &IA, b: &IB, method: M) -> Result<Image<M::Output>, Error>
+pub fn combine_images<IA, IB, M>(
+    a: &IA,
+    b: &IB,
+    method: M,
+) -> Result<Image<M::Output, IA::Space>, Error>
 where
     IA: RasterImage,
-    IB: RasterImage,
+    IB: RasterImage<Space = IA::Space>,
     M: CombinePixels<IA::Pixel, IB::Pixel>,
     M::Output: ZeroablePixel,
 {
@@ -205,7 +212,7 @@ where
         });
     }
 
-    let mut out = Image::<M::Output>::zero(a.width(), a.height());
+    let mut out = Image::<M::Output, _>::zero_in(a.width(), a.height());
     // unwrap is safe: we just checked a.size() == b.size() above
     combine_images_into(a, b, &mut out, method).unwrap();
     Ok(out)
@@ -244,8 +251,8 @@ pub fn combine_images_fn_into<IA, IB, O, Out, F>(
 ) -> Result<(), Error>
 where
     IA: RasterImage,
-    IB: RasterImage,
-    O: RasterImageMut<Pixel = Out>,
+    IB: RasterImage<Space = IA::Space>,
+    O: RasterImageMut<Pixel = Out, Space = IA::Space>,
     F: Fn(&IA::Pixel, &IB::Pixel) -> Out,
 {
     combine_images_into(a, b, out, ClosureCombine(f))
@@ -274,10 +281,14 @@ where
 /// let out = result.unwrap();
 /// assert_eq!(out.pixel_at(0, 0), Mono32::new(200));
 /// ```
-pub fn combine_images_fn<IA, IB, Out, F>(a: &IA, b: &IB, f: F) -> Result<Image<Out>, Error>
+pub fn combine_images_fn<IA, IB, Out, F>(
+    a: &IA,
+    b: &IB,
+    f: F,
+) -> Result<Image<Out, IA::Space>, Error>
 where
     IA: RasterImage,
-    IB: RasterImage,
+    IB: RasterImage<Space = IA::Space>,
     Out: ZeroablePixel,
     F: Fn(&IA::Pixel, &IB::Pixel) -> Out,
 {
@@ -395,12 +406,25 @@ impl<P: Copy + StdMul<Output = P>> CombinePixels<P, P> for PixelMultiply {
 /// // Result is the same regardless of operand order
 /// assert_eq!(AbsDiff.combine(&Mono8::new(150), &Mono8::new(100)), Mono8::new(50));
 /// ```
+///
+/// The difference of two palette indices says nothing about the colours they
+/// point to, so an indexed image is rejected at compile time:
+///
+/// ```compile_fail
+/// use fovea::image::Image;
+/// use fovea::pixel::Indexed8;
+/// use fovea::transform::{AbsDiff, combine_images};
+///
+/// let indexed = Image::fill(4, 4, Indexed8(3));
+/// // ERROR: `Indexed8: ChannelwiseMath` is not satisfied.
+/// let _ = combine_images(&indexed, &indexed, AbsDiff);
+/// ```
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct AbsDiff;
 
 impl<P> CombinePixels<P, P> for AbsDiff
 where
-    P: HomogeneousPixel,
+    P: ChannelwiseMath,
     P::Channel: PartialOrd + StdSub<Output = P::Channel>,
 {
     type Output = P;
@@ -441,12 +465,25 @@ where
 /// assert_eq!(Max.combine(&Mono8::new(100), &Mono8::new(200)), Mono8::new(200));
 /// assert_eq!(Max.combine(&Mono8::new(200), &Mono8::new(100)), Mono8::new(200));
 /// ```
+///
+/// A component label is ordered as a number but is not a quantity, so the
+/// maximum of two label images is rejected at compile time:
+///
+/// ```compile_fail
+/// use fovea::image::Image;
+/// use fovea::pixel::Label32;
+/// use fovea::transform::{Max, combine_images};
+///
+/// let labels = Image::fill(4, 4, Label32::new(7));
+/// // ERROR: `Label32: ChannelwiseMath` is not satisfied.
+/// let _ = combine_images(&labels, &labels, Max);
+/// ```
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Max;
 
 impl<P> CombinePixels<P, P> for Max
 where
-    P: HomogeneousPixel,
+    P: ChannelwiseMath,
     P::Channel: Ord,
 {
     type Output = P;
@@ -481,7 +518,7 @@ pub struct Min;
 
 impl<P> CombinePixels<P, P> for Min
 where
-    P: HomogeneousPixel,
+    P: ChannelwiseMath,
     P::Channel: Ord,
 {
     type Output = P;
@@ -666,7 +703,7 @@ pub struct Magnitude;
 
 impl<P> CombinePixels<P, P> for Magnitude
 where
-    P: HomogeneousPixel,
+    P: ChannelwiseMath,
     P::Channel: MagnitudeChannel,
 {
     type Output = P;
@@ -711,7 +748,7 @@ pub struct MagnitudeHypot;
 
 impl<P> CombinePixels<P, P> for MagnitudeHypot
 where
-    P: HomogeneousPixel,
+    P: ChannelwiseMath,
     P::Channel: MagnitudeChannel,
 {
     type Output = P;
@@ -791,7 +828,7 @@ pub struct Direction;
 
 impl<P> CombinePixels<P, P> for Direction
 where
-    P: HomogeneousPixel,
+    P: ChannelwiseMath,
     P::Channel: DirectionChannel,
 {
     type Output = P;
@@ -802,6 +839,91 @@ where
             result.set_channel(i, DirectionChannel::direction(a.channel(i), b.channel(i)));
         }
         result
+    }
+}
+
+// ─── Complex ─────────────────────────────────────────────────────────────────
+
+/// A complex image from a real and an imaginary one.
+///
+/// The way back from [`RealPart`](crate::transform::RealPart) and
+/// [`ImaginaryPart`](crate::transform::ImaginaryPart): the first image gives
+/// `re`, the second `im`. Through [`combine_images`] the two must have the
+/// same size, which is checked there. `MonoF32` pairs give `ComplexF32`,
+/// `MonoF64` pairs give `ComplexF64`.
+///
+/// # Example
+///
+/// ```
+/// use fovea::image::{Image, ImageView};
+/// use fovea::pixel::{ComplexF32, MonoF32};
+/// use fovea::transform::{FromParts, combine_images};
+///
+/// let re = Image::fill(2, 2, MonoF32::new(3.0));
+/// let im = Image::fill(2, 2, MonoF32::new(4.0));
+/// let z = combine_images(&re, &im, FromParts)?;
+/// assert_eq!(z.pixel_at(1, 1), ComplexF32::new(3.0, 4.0));
+/// # Ok::<(), fovea::Error>(())
+/// ```
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct FromParts;
+
+impl CombinePixels<MonoF32, MonoF32> for FromParts {
+    type Output = ComplexF32;
+
+    #[inline(always)]
+    fn combine(&self, re: &MonoF32, im: &MonoF32) -> ComplexF32 {
+        ComplexF32::new(re.0, im.0)
+    }
+}
+
+impl CombinePixels<MonoF64, MonoF64> for FromParts {
+    type Output = ComplexF64;
+
+    #[inline(always)]
+    fn combine(&self, re: &MonoF64, im: &MonoF64) -> ComplexF64 {
+        ComplexF64::new(re.0, im.0)
+    }
+}
+
+/// The complex product of two complex images, pixel by pixel.
+///
+/// `(a + bi)(c + di) = (ac − bd) + (ad + bc)i` at every pixel. The same
+/// result as [`PixelMultiply`], which uses the pixel's `*`, and on a
+/// complex pixel `*` is the complex product; this name says so at the call
+/// site.
+///
+/// # Example
+///
+/// ```
+/// use fovea::image::{Image, ImageView};
+/// use fovea::pixel::ComplexF32;
+/// use fovea::transform::{ComplexMultiply, combine_images};
+///
+/// let a = Image::fill(2, 2, ComplexF32::new(1.0, 2.0));
+/// let b = Image::fill(2, 2, ComplexF32::new(3.0, -1.0));
+/// let product = combine_images(&a, &b, ComplexMultiply)?;
+/// assert_eq!(product.pixel_at(0, 0), ComplexF32::new(5.0, 5.0));
+/// # Ok::<(), fovea::Error>(())
+/// ```
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ComplexMultiply;
+
+impl CombinePixels<ComplexF32, ComplexF32> for ComplexMultiply {
+    type Output = ComplexF32;
+
+    #[inline(always)]
+    fn combine(&self, a: &ComplexF32, b: &ComplexF32) -> ComplexF32 {
+        *a * *b
+    }
+}
+
+impl CombinePixels<ComplexF64, ComplexF64> for ComplexMultiply {
+    type Output = ComplexF64;
+
+    #[inline(always)]
+    fn combine(&self, a: &ComplexF64, b: &ComplexF64) -> ComplexF64 {
+        *a * *b
     }
 }
 
@@ -829,10 +951,10 @@ where
 /// let c = Image::fill(4, 4, Mono8::new(0));
 /// assert!(add(&a, &c).is_err());
 /// ```
-pub fn add<IA, IB>(a: &IA, b: &IB) -> Result<Image<IA::Pixel>, Error>
+pub fn add<IA, IB>(a: &IA, b: &IB) -> Result<Image<IA::Pixel, IA::Space>, Error>
 where
     IA: RasterImage,
-    IB: RasterImage<Pixel = IA::Pixel>,
+    IB: RasterImage<Pixel = IA::Pixel, Space = IA::Space>,
     IA::Pixel: Copy + StdAdd<Output = IA::Pixel> + ZeroablePixel,
 {
     combine_images(a, b, PixelAdd)
@@ -861,10 +983,10 @@ where
 /// let saturated = subtract(&b, &c).unwrap();
 /// assert_eq!(saturated.pixel_at(0, 0), Mono8::new(0));
 /// ```
-pub fn subtract<IA, IB>(a: &IA, b: &IB) -> Result<Image<IA::Pixel>, Error>
+pub fn subtract<IA, IB>(a: &IA, b: &IB) -> Result<Image<IA::Pixel, IA::Space>, Error>
 where
     IA: RasterImage,
-    IB: RasterImage<Pixel = IA::Pixel>,
+    IB: RasterImage<Pixel = IA::Pixel, Space = IA::Space>,
     IA::Pixel: Copy + StdSub<Output = IA::Pixel> + ZeroablePixel,
 {
     combine_images(a, b, PixelSubtract)
@@ -893,11 +1015,11 @@ where
 /// let swapped = abs_diff(&b, &a).unwrap();
 /// assert_eq!(result.pixel_at(0, 0), swapped.pixel_at(0, 0));
 /// ```
-pub fn abs_diff<IA, IB>(a: &IA, b: &IB) -> Result<Image<IA::Pixel>, Error>
+pub fn abs_diff<IA, IB>(a: &IA, b: &IB) -> Result<Image<IA::Pixel, IA::Space>, Error>
 where
     IA: RasterImage,
-    IB: RasterImage<Pixel = IA::Pixel>,
-    IA::Pixel: HomogeneousPixel + ZeroablePixel,
+    IB: RasterImage<Pixel = IA::Pixel, Space = IA::Space>,
+    IA::Pixel: ChannelwiseMath + ZeroablePixel,
     <IA::Pixel as HomogeneousPixel>::Channel:
         PartialOrd + StdSub<Output = <IA::Pixel as HomogeneousPixel>::Channel>,
 {
@@ -922,11 +1044,11 @@ where
 /// let result = image_min(&a, &b).unwrap();
 /// assert_eq!(result.pixel_at(0, 0), Mono8::new(100));
 /// ```
-pub fn image_min<IA, IB>(a: &IA, b: &IB) -> Result<Image<IA::Pixel>, Error>
+pub fn image_min<IA, IB>(a: &IA, b: &IB) -> Result<Image<IA::Pixel, IA::Space>, Error>
 where
     IA: RasterImage,
-    IB: RasterImage<Pixel = IA::Pixel>,
-    IA::Pixel: HomogeneousPixel + ZeroablePixel,
+    IB: RasterImage<Pixel = IA::Pixel, Space = IA::Space>,
+    IA::Pixel: ChannelwiseMath + ZeroablePixel,
     <IA::Pixel as HomogeneousPixel>::Channel: Ord,
 {
     combine_images(a, b, Min)
@@ -950,11 +1072,11 @@ where
 /// let result = image_max(&a, &b).unwrap();
 /// assert_eq!(result.pixel_at(0, 0), Mono8::new(200));
 /// ```
-pub fn image_max<IA, IB>(a: &IA, b: &IB) -> Result<Image<IA::Pixel>, Error>
+pub fn image_max<IA, IB>(a: &IA, b: &IB) -> Result<Image<IA::Pixel, IA::Space>, Error>
 where
     IA: RasterImage,
-    IB: RasterImage<Pixel = IA::Pixel>,
-    IA::Pixel: HomogeneousPixel + ZeroablePixel,
+    IB: RasterImage<Pixel = IA::Pixel, Space = IA::Space>,
+    IA::Pixel: ChannelwiseMath + ZeroablePixel,
     <IA::Pixel as HomogeneousPixel>::Channel: Ord,
 {
     combine_images(a, b, Max)

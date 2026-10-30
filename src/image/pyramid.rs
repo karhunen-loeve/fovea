@@ -22,9 +22,10 @@
 //! that and its absolute σ. The two aliases [`PlacedPyramid<P>`] and
 //! [`ScaledPyramid<P>`] name the chains the two Gaussian builders return.
 
-use crate::error::Error;
+use crate::error::{Error, ParameterError, Requirement, Value};
+use crate::geometry::{PixelSpace, Pixels, Point};
 use crate::image::{Image, ImageView, RasterImage};
-use crate::{CoordinateF64, PixelDistance, Sigma, Size};
+use crate::{PixelDistance, Sigma, Size};
 
 // ─── PyramidLevel ────────────────────────────────────────────────────────────
 
@@ -69,12 +70,12 @@ pub trait PyramidLevel: RasterImage {
     /// Use this where the owned `Image<P>` itself is needed. For the
     /// level's size and pixels, the [`ImageView`] methods inherited through
     /// [`RasterImage`] answer directly.
-    fn as_image(&self) -> &Image<Self::Pixel>;
+    fn as_image(&self) -> &Image<Self::Pixel, Self::Space>;
 }
 
-impl<P: Copy> PyramidLevel for Image<P> {
+impl<P: Copy, S: PixelSpace> PyramidLevel for Image<P, S> {
     #[inline]
-    fn as_image(&self) -> &Image<P> {
+    fn as_image(&self) -> &Image<P, S> {
         self
     }
 }
@@ -494,7 +495,7 @@ fn halved(dim: usize) -> usize {
 /// capability rather than a construction method, which is why it is also
 /// the right name for an imported GPU mipmap: both know where their samples
 /// sit, and neither claims a blur.
-pub type PlacedPyramid<P> = Dyadic<LevelChain<PlacedImage<P>>>;
+pub type PlacedPyramid<P, S = Pixels> = Dyadic<LevelChain<PlacedImage<P, S>>>;
 
 /// A dyadic pyramid of levels that know their sampling grid **and** their
 /// absolute σ.
@@ -504,7 +505,7 @@ pub type PlacedPyramid<P> = Dyadic<LevelChain<PlacedImage<P>>>;
 /// [`Gaussian::assuming_input_sigma`](crate::transform::Gaussian::assuming_input_sigma).
 /// The extra capability is [`ScaleLevel`], so a function that binds it
 /// accepts this and not [`PlacedPyramid`].
-pub type ScaledPyramid<P> = Dyadic<LevelChain<ScaledImage<P>>>;
+pub type ScaledPyramid<P, S = Pixels> = Dyadic<LevelChain<ScaledImage<P, S>>>;
 
 // ─── Scale capability traits ────────────────────────────────────────────────
 
@@ -531,7 +532,7 @@ pub type ScaledPyramid<P> = Dyadic<LevelChain<ScaledImage<P>>>;
 /// # Example
 ///
 /// ```
-/// use fovea::CoordinateF64;
+/// use fovea::{Pixels, Point};
 /// use fovea::image::{Decimated, Image, OriginOffset, PlacedImage};
 /// use fovea::pixel::MonoF32;
 /// use fovea::pixel_distance;
@@ -545,8 +546,8 @@ pub type ScaledPyramid<P> = Dyadic<LevelChain<ScaledImage<P>>>;
 ///     OriginOffset::ZERO,
 /// );
 ///
-/// let base = level.to_base(CoordinateF64::new(1.5, 3.0));
-/// assert_eq!(base, CoordinateF64::new(3.0, 6.0));
+/// let base = level.to_base(Point::new(1.5, 3.0));
+/// assert_eq!(base, Point::new(3.0, 6.0));
 /// ```
 pub trait Decimated: PyramidLevel {
     /// Distance between two adjacent samples of this level, measured in
@@ -563,17 +564,19 @@ pub trait Decimated: PyramidLevel {
     /// [`pyr_down`](crate::transform::pyr_down) convention: coarse pixel
     /// `k` samples fine pixel `2k`); `(0.5, 0.5)` for an area-averaging 2×
     /// reduction, whose coarse pixel centers sit between fine ones.
-    fn origin_offset(&self) -> CoordinateF64;
+    fn origin_offset(&self) -> Point<Self::Space>;
 
     /// Lifts a level-local sub-pixel point into the base-image frame:
     /// `base = origin_offset + pixel_distance · local`.
     ///
     /// This is the mapping a detector uses to report keypoints found on
-    /// this level in base-image coordinates.
-    fn to_base(&self, local: CoordinateF64) -> CoordinateF64 {
+    /// this level in base-image coordinates. Both points are in the level's
+    /// space: a level and its base lie in one space, and telling a level's
+    /// positions from the base's is this mapping's job, not a type's.
+    fn to_base(&self, local: Point<Self::Space>) -> Point<Self::Space> {
         let d = self.pixel_distance().get();
         let o = self.origin_offset();
-        CoordinateF64::new(o.x + d * local.x, o.y + d * local.y)
+        Point::new(o.x + d * local.x, o.y + d * local.y)
     }
 
     /// Projects a base-image point back into this level's local
@@ -590,7 +593,7 @@ pub trait Decimated: PyramidLevel {
     /// # Example
     ///
     /// ```
-    /// use fovea::CoordinateF64;
+    /// use fovea::{Pixels, Point};
     /// use fovea::image::{Decimated, Image, OriginOffset, PlacedImage};
     /// use fovea::pixel::MonoF32;
     /// use fovea::pixel_distance;
@@ -602,13 +605,13 @@ pub trait Decimated: PyramidLevel {
     ///     OriginOffset::new(0.5, 0.5).unwrap(),
     /// );
     ///
-    /// let local = CoordinateF64::new(1.5, 3.0);
+    /// let local = Point::new(1.5, 3.0);
     /// assert_eq!(level.to_local(level.to_base(local)), local);
     /// ```
-    fn to_local(&self, base: CoordinateF64) -> CoordinateF64 {
+    fn to_local(&self, base: Point<Self::Space>) -> Point<Self::Space> {
         let d = self.pixel_distance().get();
         let o = self.origin_offset();
-        CoordinateF64::new((base.x - o.x) / d, (base.y - o.y) / d)
+        Point::new((base.x - o.x) / d, (base.y - o.y) / d)
     }
 }
 
@@ -623,7 +626,7 @@ pub trait Decimated: PyramidLevel {
 /// # Example
 ///
 /// ```
-/// use fovea::CoordinateF64;
+/// use fovea::{Pixels, Point};
 /// use fovea::image::{Image, OriginOffset, ScaleLevel, ScaledImage};
 /// use fovea::pixel::MonoF32;
 /// use fovea::{pixel_distance, sigma};
@@ -670,7 +673,7 @@ pub trait ScaleLevel: PyramidLevel {
 /// # Example
 ///
 /// ```
-/// use fovea::CoordinateF64;
+/// use fovea::{Pixels, Point};
 /// use fovea::image::{Decimated, Image, ImageView, OriginOffset, ScaleLevel, ScaledImage};
 /// use fovea::pixel::MonoF32;
 /// use fovea::{pixel_distance, sigma};
@@ -696,16 +699,39 @@ pub trait ScaleLevel: PyramidLevel {
 /// assert_eq!(level.pixel_distance().get(), 2.0);
 /// assert_eq!(level.sigma().get(), 1.0);
 /// assert_eq!(
-///     level.to_base(CoordinateF64::new(3.0, 4.0)),
-///     CoordinateF64::new(6.0, 8.0),
+///     level.to_base(Point::new(3.0, 4.0)),
+///     Point::new(6.0, 8.0),
 /// );
 /// ```
-#[derive(Clone, Debug)]
-pub struct ScaledImage<P: Copy> {
-    image: Image<P>,
+pub struct ScaledImage<P: Copy, S = Pixels> {
+    image: Image<P, S>,
     pixel_distance: PixelDistance,
-    origin_offset: OriginOffset,
+    origin_offset: OriginOffset<S>,
     sigma: Sigma,
+}
+
+// Written by hand rather than derived: a derive would require `S: Clone`
+// and `S: Debug` of a marker that is never instantiated.
+impl<P: Copy, S> Clone for ScaledImage<P, S> {
+    fn clone(&self) -> Self {
+        Self {
+            image: self.image.clone(),
+            pixel_distance: self.pixel_distance,
+            origin_offset: self.origin_offset,
+            sigma: self.sigma,
+        }
+    }
+}
+
+impl<P: Copy, S> core::fmt::Debug for ScaledImage<P, S> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ScaledImage")
+            .field("image", &self.image)
+            .field("pixel_distance", &self.pixel_distance)
+            .field("origin_offset", &self.origin_offset)
+            .field("sigma", &self.sigma)
+            .finish()
+    }
 }
 
 /// A level's pixel-(0,0) center in base-image coordinates: **finite** along
@@ -725,6 +751,7 @@ pub struct ScaledImage<P: Copy> {
 /// # Example
 ///
 /// ```
+/// use fovea::Pixels;
 /// use fovea::image::OriginOffset;
 ///
 /// const UNSHIFTED: OriginOffset = OriginOffset::ZERO;
@@ -734,16 +761,37 @@ pub struct ScaledImage<P: Copy> {
 /// const HALF: OriginOffset = OriginOffset::new(0.5, 0.5).unwrap();
 /// assert_eq!(HALF.get().y, 0.5);
 ///
-/// assert!(OriginOffset::new(f64::NAN, 0.0).is_none());
-/// assert!(OriginOffset::try_new(f64::INFINITY, 0.0).is_err());
+/// assert!(OriginOffset::<Pixels>::new(f64::NAN, 0.0).is_none());
+/// assert!(OriginOffset::<Pixels>::try_new(f64::INFINITY, 0.0).is_err());
 /// ```
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct OriginOffset(CoordinateF64);
+pub struct OriginOffset<S = Pixels>(Point<S>);
 
-impl OriginOffset {
+// Written by hand rather than derived: a derive would require `S: Clone`,
+// `S: Debug` and `S: PartialEq` of a marker that is never instantiated.
+impl<S> Clone for OriginOffset<S> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<S> Copy for OriginOffset<S> {}
+
+impl<S> PartialEq for OriginOffset<S> {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
+
+impl<S> core::fmt::Debug for OriginOffset<S> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_tuple("OriginOffset").field(&self.0).finish()
+    }
+}
+
+impl<S: PixelSpace> OriginOffset<S> {
     /// The unshifted origin: this level's pixel (0, 0) sits exactly on the
     /// base image's.
-    pub const ZERO: Self = Self(CoordinateF64 { x: 0.0, y: 0.0 });
+    pub const ZERO: Self = Self(Point::new(0.0, 0.0));
 
     /// Creates an origin offset, returning `None` if either component is
     /// NaN or infinite.
@@ -753,7 +801,7 @@ impl OriginOffset {
     #[must_use]
     pub const fn new(x: f64, y: f64) -> Option<Self> {
         if x.is_finite() && y.is_finite() {
-            Some(Self(CoordinateF64 { x, y }))
+            Some(Self(Point::new(x, y)))
         } else {
             None
         }
@@ -767,21 +815,19 @@ impl OriginOffset {
     /// infinite.
     pub fn try_new(x: f64, y: f64) -> Result<Self, Error> {
         Self::new(x, y).ok_or_else(|| {
-            Error::InvalidParameter(format!(
-                "origin offset must be finite along both axes, got ({x}, {y})"
-            ))
+            ParameterError::new("origin offset", Requirement::Finite, Value::F64Pair(x, y)).into()
         })
     }
 
     /// Returns the offset as a coordinate in base-image units.
     #[inline]
     #[must_use]
-    pub const fn get(self) -> CoordinateF64 {
+    pub const fn get(self) -> Point<S> {
         self.0
     }
 }
 
-impl<P: Copy> ScaledImage<P> {
+impl<P: Copy, S: PixelSpace> ScaledImage<P, S> {
     /// Wraps an image with its scale metadata.
     ///
     /// - `pixel_distance` — distance between adjacent samples of this
@@ -797,9 +843,9 @@ impl<P: Copy> ScaledImage<P> {
     /// const `new`, computed values via their `try_new`. Nothing can fail
     /// here.
     pub fn new(
-        image: Image<P>,
+        image: Image<P, S>,
         pixel_distance: PixelDistance,
-        origin_offset: OriginOffset,
+        origin_offset: OriginOffset<S>,
         sigma: Sigma,
     ) -> Self {
         Self {
@@ -810,18 +856,19 @@ impl<P: Copy> ScaledImage<P> {
         }
     }
     /// Returns the wrapped image.
-    pub fn image(&self) -> &Image<P> {
+    pub fn image(&self) -> &Image<P, S> {
         &self.image
     }
 
     /// Unwraps the level, discarding the scale metadata.
-    pub fn into_image(self) -> Image<P> {
+    pub fn into_image(self) -> Image<P, S> {
         self.image
     }
 }
 
-impl<P: Copy> ImageView for ScaledImage<P> {
+impl<P: Copy, S: PixelSpace> ImageView for ScaledImage<P, S> {
     type Pixel = P;
+    type Space = S;
 
     #[inline]
     fn size(&self) -> Size {
@@ -834,33 +881,33 @@ impl<P: Copy> ImageView for ScaledImage<P> {
     }
 }
 
-impl<P: Copy> RasterImage for ScaledImage<P> {
+impl<P: Copy, S: PixelSpace> RasterImage for ScaledImage<P, S> {
     #[inline]
     fn row(&self, y: usize) -> &[P] {
         self.image.row(y)
     }
 }
 
-impl<P: Copy> PyramidLevel for ScaledImage<P> {
+impl<P: Copy, S: PixelSpace> PyramidLevel for ScaledImage<P, S> {
     #[inline]
-    fn as_image(&self) -> &Image<P> {
+    fn as_image(&self) -> &Image<P, S> {
         &self.image
     }
 }
 
-impl<P: Copy> Decimated for ScaledImage<P> {
+impl<P: Copy, S: PixelSpace> Decimated for ScaledImage<P, S> {
     #[inline]
     fn pixel_distance(&self) -> PixelDistance {
         self.pixel_distance
     }
 
     #[inline]
-    fn origin_offset(&self) -> CoordinateF64 {
+    fn origin_offset(&self) -> Point<S> {
         self.origin_offset.get()
     }
 }
 
-impl<P: Copy> ScaleLevel for ScaledImage<P> {
+impl<P: Copy, S: PixelSpace> ScaleLevel for ScaledImage<P, S> {
     #[inline]
     fn sigma(&self) -> Sigma {
         self.sigma
@@ -898,7 +945,7 @@ impl<P: Copy> ScaleLevel for ScaledImage<P> {
 /// # Example
 ///
 /// ```
-/// use fovea::CoordinateF64;
+/// use fovea::{Pixels, Point};
 /// use fovea::image::{Decimated, Image, ImageView, OriginOffset, PlacedImage};
 /// use fovea::pixel::MonoF32;
 /// use fovea::pixel_distance;
@@ -913,18 +960,39 @@ impl<P: Copy> ScaleLevel for ScaledImage<P> {
 /// assert_eq!(level.size().width, 8);
 /// assert_eq!(level.pixel_distance().get(), 2.0);
 /// assert_eq!(
-///     level.to_base(CoordinateF64::new(3.0, 4.0)),
-///     CoordinateF64::new(6.0, 8.0),
+///     level.to_base(Point::new(3.0, 4.0)),
+///     Point::new(6.0, 8.0),
 /// );
 /// ```
-#[derive(Clone, Debug)]
-pub struct PlacedImage<P: Copy> {
-    image: Image<P>,
+pub struct PlacedImage<P: Copy, S = Pixels> {
+    image: Image<P, S>,
     pixel_distance: PixelDistance,
-    origin_offset: OriginOffset,
+    origin_offset: OriginOffset<S>,
 }
 
-impl<P: Copy> PlacedImage<P> {
+// Written by hand rather than derived: a derive would require `S: Clone`
+// and `S: Debug` of a marker that is never instantiated.
+impl<P: Copy, S> Clone for PlacedImage<P, S> {
+    fn clone(&self) -> Self {
+        Self {
+            image: self.image.clone(),
+            pixel_distance: self.pixel_distance,
+            origin_offset: self.origin_offset,
+        }
+    }
+}
+
+impl<P: Copy, S> core::fmt::Debug for PlacedImage<P, S> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("PlacedImage")
+            .field("image", &self.image)
+            .field("pixel_distance", &self.pixel_distance)
+            .field("origin_offset", &self.origin_offset)
+            .finish()
+    }
+}
+
+impl<P: Copy, S: PixelSpace> PlacedImage<P, S> {
     /// Wraps an image with its sampling geometry.
     ///
     /// - `pixel_distance`: distance between adjacent samples of this level,
@@ -937,9 +1005,9 @@ impl<P: Copy> PlacedImage<P> {
     /// and was checked when that value was constructed. Nothing can fail
     /// here.
     pub fn new(
-        image: Image<P>,
+        image: Image<P, S>,
         pixel_distance: PixelDistance,
-        origin_offset: OriginOffset,
+        origin_offset: OriginOffset<S>,
     ) -> Self {
         Self {
             image,
@@ -949,12 +1017,12 @@ impl<P: Copy> PlacedImage<P> {
     }
 
     /// Returns the wrapped image.
-    pub fn image(&self) -> &Image<P> {
+    pub fn image(&self) -> &Image<P, S> {
         &self.image
     }
 
     /// Unwraps the level, discarding the sampling geometry.
-    pub fn into_image(self) -> Image<P> {
+    pub fn into_image(self) -> Image<P, S> {
         self.image
     }
 
@@ -962,13 +1030,14 @@ impl<P: Copy> PlacedImage<P> {
     ///
     /// The geometry carries over unchanged; only the claim about blur is
     /// new, which is why it has to be supplied here rather than derived.
-    pub fn with_sigma(self, sigma: Sigma) -> ScaledImage<P> {
+    pub fn with_sigma(self, sigma: Sigma) -> ScaledImage<P, S> {
         ScaledImage::new(self.image, self.pixel_distance, self.origin_offset, sigma)
     }
 }
 
-impl<P: Copy> ImageView for PlacedImage<P> {
+impl<P: Copy, S: PixelSpace> ImageView for PlacedImage<P, S> {
     type Pixel = P;
+    type Space = S;
 
     #[inline]
     fn size(&self) -> Size {
@@ -981,28 +1050,28 @@ impl<P: Copy> ImageView for PlacedImage<P> {
     }
 }
 
-impl<P: Copy> RasterImage for PlacedImage<P> {
+impl<P: Copy, S: PixelSpace> RasterImage for PlacedImage<P, S> {
     #[inline]
     fn row(&self, y: usize) -> &[P] {
         self.image.row(y)
     }
 }
 
-impl<P: Copy> PyramidLevel for PlacedImage<P> {
+impl<P: Copy, S: PixelSpace> PyramidLevel for PlacedImage<P, S> {
     #[inline]
-    fn as_image(&self) -> &Image<P> {
+    fn as_image(&self) -> &Image<P, S> {
         &self.image
     }
 }
 
-impl<P: Copy> Decimated for PlacedImage<P> {
+impl<P: Copy, S: PixelSpace> Decimated for PlacedImage<P, S> {
     #[inline]
     fn pixel_distance(&self) -> PixelDistance {
         self.pixel_distance
     }
 
     #[inline]
-    fn origin_offset(&self) -> CoordinateF64 {
+    fn origin_offset(&self) -> Point<S> {
         self.origin_offset.get()
     }
 }
@@ -1380,7 +1449,7 @@ mod tests {
         assert_eq!(level.size(), Size::new(4, 4));
         assert_eq!(level.image().pixel_at(1, 1), MonoF32::new(0.5));
         assert_eq!(level.pixel_distance(), pixel_distance!(2.0));
-        assert_eq!(level.origin_offset(), CoordinateF64::new(0.0, 0.0));
+        assert_eq!(level.origin_offset(), Point::new(0.0, 0.0));
         assert_eq!(level.sigma(), sigma!(1.0));
         let img = level.into_image();
         assert_eq!(img.size(), Size::new(4, 4));
@@ -1395,14 +1464,8 @@ mod tests {
             OriginOffset::ZERO,
             sigma!(1.0),
         );
-        assert_eq!(
-            level.to_base(CoordinateF64::new(0.0, 0.0)),
-            CoordinateF64::new(0.0, 0.0)
-        );
-        assert_eq!(
-            level.to_base(CoordinateF64::new(1.5, 3.0)),
-            CoordinateF64::new(3.0, 6.0)
-        );
+        assert_eq!(level.to_base(Point::new(0.0, 0.0)), Point::new(0.0, 0.0));
+        assert_eq!(level.to_base(Point::new(1.5, 3.0)), Point::new(3.0, 6.0));
     }
 
     #[test]
@@ -1415,14 +1478,8 @@ mod tests {
             OriginOffset::new(0.5, 0.5).unwrap(),
             sigma!(1.0),
         );
-        assert_eq!(
-            level.to_base(CoordinateF64::new(0.0, 0.0)),
-            CoordinateF64::new(0.5, 0.5)
-        );
-        assert_eq!(
-            level.to_base(CoordinateF64::new(2.0, 1.0)),
-            CoordinateF64::new(4.5, 2.5)
-        );
+        assert_eq!(level.to_base(Point::new(0.0, 0.0)), Point::new(0.5, 0.5));
+        assert_eq!(level.to_base(Point::new(2.0, 1.0)), Point::new(4.5, 2.5));
     }
 
     #[test]
@@ -1434,10 +1491,7 @@ mod tests {
             OriginOffset::ZERO,
             sigma!(0.8),
         );
-        assert_eq!(
-            level.to_base(CoordinateF64::new(6.0, 10.0)),
-            CoordinateF64::new(3.0, 5.0)
-        );
+        assert_eq!(level.to_base(Point::new(6.0, 10.0)), Point::new(3.0, 5.0));
     }
 
     #[test]
@@ -1451,9 +1505,9 @@ mod tests {
             sigma!(1.0),
         );
         for local in [
-            CoordinateF64::new(0.0, 0.0),
-            CoordinateF64::new(1.5, 3.0),
-            CoordinateF64::new(3.25, 0.75),
+            Point::new(0.0, 0.0),
+            Point::new(1.5, 3.0),
+            Point::new(3.25, 0.75),
         ] {
             assert_eq!(level.to_local(level.to_base(local)), local);
         }
@@ -1467,15 +1521,9 @@ mod tests {
             OriginOffset::ZERO,
             sigma!(1.0),
         );
-        assert_eq!(
-            level.to_local(CoordinateF64::new(6.0, 8.0)),
-            CoordinateF64::new(3.0, 4.0)
-        );
+        assert_eq!(level.to_local(Point::new(6.0, 8.0)), Point::new(3.0, 4.0));
         // Base points between this level's samples land on fractions.
-        assert_eq!(
-            level.to_local(CoordinateF64::new(3.0, 1.0)),
-            CoordinateF64::new(1.5, 0.5)
-        );
+        assert_eq!(level.to_local(Point::new(3.0, 1.0)), Point::new(1.5, 0.5));
     }
 
     #[test]
@@ -1486,10 +1534,7 @@ mod tests {
             OriginOffset::ZERO,
             sigma!(0.8),
         );
-        assert_eq!(
-            level.to_local(CoordinateF64::new(3.0, 5.0)),
-            CoordinateF64::new(6.0, 10.0)
-        );
+        assert_eq!(level.to_local(Point::new(3.0, 5.0)), Point::new(6.0, 10.0));
     }
 
     #[test]
@@ -1529,15 +1574,9 @@ mod tests {
     fn placed_image_carries_its_grid_and_no_sigma() {
         let level = placed_level();
         assert_eq!(level.pixel_distance(), pixel_distance!(2.0));
-        assert_eq!(level.origin_offset(), CoordinateF64::new(0.0, 0.0));
-        assert_eq!(
-            level.to_base(CoordinateF64::new(3.0, 4.0)),
-            CoordinateF64::new(6.0, 8.0)
-        );
-        assert_eq!(
-            level.to_local(CoordinateF64::new(6.0, 8.0)),
-            CoordinateF64::new(3.0, 4.0)
-        );
+        assert_eq!(level.origin_offset(), Point::new(0.0, 0.0));
+        assert_eq!(level.to_base(Point::new(3.0, 4.0)), Point::new(6.0, 8.0));
+        assert_eq!(level.to_local(Point::new(6.0, 8.0)), Point::new(3.0, 4.0));
     }
 
     #[test]
@@ -1569,7 +1608,7 @@ mod tests {
     fn with_sigma_carries_the_geometry_over() {
         let scaled = placed_level().with_sigma(sigma!(1.5));
         assert_eq!(scaled.pixel_distance(), pixel_distance!(2.0));
-        assert_eq!(scaled.origin_offset(), CoordinateF64::new(0.0, 0.0));
+        assert_eq!(scaled.origin_offset(), Point::new(0.0, 0.0));
         assert_eq!(scaled.sigma(), sigma!(1.5));
         assert_eq!(scaled.size(), Size::new(4, 3));
     }
@@ -1578,5 +1617,30 @@ mod tests {
     fn into_image_drops_the_geometry() {
         let image = placed_level().into_image();
         assert_eq!(image.size(), Size::new(4, 3));
+    }
+
+    #[test]
+    fn the_level_traits_ask_nothing_of_the_space() {
+        use crate::Pixels;
+        use crate::pixel::MonoF32;
+        use crate::{pixel_distance, sigma};
+        let half: OriginOffset = OriginOffset::new(0.5, 0.5).unwrap();
+        assert_eq!(Clone::clone(&half), half);
+        assert_ne!(half, OriginOffset::ZERO);
+        assert!(format!("{half:?}").starts_with("OriginOffset(Point"));
+        assert!(OriginOffset::<Pixels>::new(f64::NAN, 0.0).is_none());
+        assert!(OriginOffset::<Pixels>::try_new(0.0, f64::INFINITY).is_err());
+
+        let placed = PlacedImage::new(
+            Image::fill(2, 2, MonoF32::new(1.0)),
+            pixel_distance!(2.0),
+            half,
+        );
+        let copy = placed.clone();
+        assert_eq!(copy.image(), placed.image());
+        assert!(format!("{placed:?}").starts_with("PlacedImage { image:"));
+        let scaled = placed.with_sigma(sigma!(1.0));
+        assert_eq!(scaled.clone().image(), scaled.image());
+        assert!(format!("{scaled:?}").starts_with("ScaledImage { image:"));
     }
 }

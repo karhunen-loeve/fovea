@@ -13,7 +13,10 @@
 //! separate contour extraction.
 
 use crate::analyze::statistics::moments::{axis_eccentricity, axis_orientation};
-use crate::{AxialOrientation, Coordinate, CoordinateF64, Rectangle, Size};
+use core::marker::PhantomData;
+
+use crate::geometry::{PixelSpace, Pixels, Point};
+use crate::{AxialOrientation, Coordinate, Rectangle, Size};
 
 /// Shape descriptors for one connected component.
 ///
@@ -68,8 +71,10 @@ use crate::{AxialOrientation, Coordinate, CoordinateF64, Rectangle, Size};
 /// rasterised disc lands *above* 1 (converging to ≈1.25), while an
 /// axis-aligned square lands at ≈π/4. Compare against tolerance bands,
 /// not exact 1.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct BlobMeasurements {
+///
+/// `S` is the space of the labeled image, which the
+/// [`centroid`](BlobMeasurements::centroid) is reported in.
+pub struct BlobMeasurements<S = Pixels> {
     /// Number of pixels in the component.
     pub area: u64,
     /// Inclusive top-left corner of the bounding box.
@@ -94,9 +99,52 @@ pub struct BlobMeasurements {
     /// [`extract_contours`](crate::analyze::contours::extract_contours)
     /// and use [`Contour::perimeter`](crate::analyze::contours::Contour::perimeter).
     pub boundary_pixels: u64,
+    space: PhantomData<fn() -> S>,
 }
 
-impl BlobMeasurements {
+// Written by hand rather than derived: a derive would require `S: Clone`,
+// `S: Debug` and `S: PartialEq` of a marker that is never instantiated.
+impl<S> Clone for BlobMeasurements<S> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<S> Copy for BlobMeasurements<S> {}
+
+impl<S> PartialEq for BlobMeasurements<S> {
+    fn eq(&self, other: &Self) -> bool {
+        self.area == other.area
+            && self.bbox_min == other.bbox_min
+            && self.bbox_max_inclusive == other.bbox_max_inclusive
+            && self.sum_x == other.sum_x
+            && self.sum_y == other.sum_y
+            && self.sum_x2 == other.sum_x2
+            && self.sum_y2 == other.sum_y2
+            && self.sum_xy == other.sum_xy
+            && self.boundary_pixels == other.boundary_pixels
+    }
+}
+
+impl<S> Eq for BlobMeasurements<S> {}
+
+impl<S> core::fmt::Debug for BlobMeasurements<S> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("BlobMeasurements")
+            .field("area", &self.area)
+            .field("bbox_min", &self.bbox_min)
+            .field("bbox_max_inclusive", &self.bbox_max_inclusive)
+            .field("sum_x", &self.sum_x)
+            .field("sum_y", &self.sum_y)
+            .field("sum_x2", &self.sum_x2)
+            .field("sum_y2", &self.sum_y2)
+            .field("sum_xy", &self.sum_xy)
+            .field("boundary_pixels", &self.boundary_pixels)
+            .finish()
+    }
+}
+
+impl<S: PixelSpace> BlobMeasurements<S> {
     /// Seed a new record from the first pixel of a component.
     ///
     /// `is_boundary` is the pixel's 4-connected boundary flag as computed
@@ -114,6 +162,7 @@ impl BlobMeasurements {
             sum_y2: yu * yu,
             sum_xy: xu * yu,
             boundary_pixels: is_boundary as u64,
+            space: PhantomData,
         }
     }
 
@@ -152,13 +201,14 @@ impl BlobMeasurements {
         self.boundary_pixels += is_boundary as u64;
     }
 
-    /// Centroid (centre of mass) as a sub-pixel [`CoordinateF64`].
+    /// Centroid (centre of mass) as a sub-pixel position in the space of
+    /// the labeled image.
     ///
     /// Returns `(sum_x / area, sum_y / area)`. `area` is always `>= 1`
     /// for records produced by the engine, so the division is safe.
-    pub fn centroid(&self) -> CoordinateF64 {
+    pub fn centroid(&self) -> Point<S> {
         let inv = 1.0 / self.area as f64;
-        CoordinateF64::new(self.sum_x as f64 * inv, self.sum_y as f64 * inv)
+        Point::new(self.sum_x as f64 * inv, self.sum_y as f64 * inv)
     }
 
     /// Axis-aligned bounding box as a half-open [`Rectangle`].
@@ -281,7 +331,8 @@ mod tests {
         };
         let mut it = pixels.iter();
         let &(x0, y0) = it.next().expect("at least one pixel");
-        let mut m = BlobMeasurements::from_seed(Coordinate::new(x0, y0), is_boundary(x0, y0));
+        let mut m =
+            BlobMeasurements::<Pixels>::from_seed(Coordinate::new(x0, y0), is_boundary(x0, y0));
         for &(x, y) in it {
             m.extend(Coordinate::new(x, y), is_boundary(x, y));
         }
@@ -301,13 +352,13 @@ mod tests {
 
     #[test]
     fn from_seed_single_pixel_is_finite() {
-        let m = BlobMeasurements::from_seed(Coordinate::new(3, 5), true);
+        let m = BlobMeasurements::<Pixels>::from_seed(Coordinate::new(3, 5), true);
         assert_eq!(m.area, 1);
         assert_eq!(m.boundary_pixels, 1);
         assert_eq!(m.sum_x2, 9);
         assert_eq!(m.sum_y2, 25);
         assert_eq!(m.sum_xy, 15);
-        assert_eq!(m.centroid(), CoordinateF64::new(3.0, 5.0));
+        assert_eq!(m.centroid(), Point::new(3.0, 5.0));
         // No NaN / div-by-zero for a degenerate blob.
         assert_eq!(m.eccentricity(), 0.0);
         assert_eq!(m.orientation().radians(), 0.0);
@@ -375,7 +426,7 @@ mod tests {
         let m = from_pixels(&pixels);
         let expected = AxialOrientation::from_radians(PI / 4.0).unwrap();
         assert!(
-            m.orientation().signed_difference(expected).abs() < 1e-9,
+            m.orientation().signed_difference(expected).abs().radians() < 1e-9,
             "got {:?}",
             m.orientation()
         );
@@ -385,7 +436,7 @@ mod tests {
         let m = from_pixels(&pixels);
         let expected = AxialOrientation::from_radians(-PI / 4.0).unwrap();
         assert!(
-            m.orientation().signed_difference(expected).abs() < 1e-9,
+            m.orientation().signed_difference(expected).abs().radians() < 1e-9,
             "got {:?}",
             m.orientation()
         );
@@ -459,5 +510,16 @@ mod tests {
         assert_eq!(m.area, pixels.len() as u64);
         assert_eq!((m.sum_x, m.sum_y), (sx, sy));
         assert_eq!((m.sum_x2, m.sum_y2, m.sum_xy), (sx2, sy2, sxy));
+    }
+
+    #[test]
+    fn the_record_traits_ask_nothing_of_the_space() {
+        let m = BlobMeasurements::<crate::Pixels>::from_seed(Coordinate::new(1, 2), true);
+        assert_eq!(Clone::clone(&m), m);
+        assert_ne!(
+            BlobMeasurements::<crate::Pixels>::from_seed(Coordinate::new(1, 3), true),
+            m
+        );
+        assert!(format!("{m:?}").starts_with("BlobMeasurements { area: 1,"));
     }
 }

@@ -14,7 +14,7 @@ use crate::Error;
 use crate::analyze::histogram::strategy::BinningStrategy;
 use crate::analyze::histogram::{Histogram, NaturalBins, histogram};
 use crate::image::{BinaryImage, RasterImage};
-use crate::pixel::SingleChannel;
+use crate::pixel::{ChannelwiseMath, SingleChannel};
 use crate::transform::{BinaryMask, convert_image};
 
 /// Compute Otsu's optimal threshold from a 256-bin histogram.
@@ -46,6 +46,11 @@ use crate::transform::{BinaryMask, convert_image};
 /// `w0 * w1 * (mu0 - mu1)^2`. Return the `t` that maximises this
 /// quantity.
 ///
+/// If several thresholds reach the same maximum, the lowest of them is
+/// returned. Between two modes with empty bins in between, every `t` in the
+/// gap separates the classes equally well, so the result is the last
+/// occupied bin of the darker mode.
+///
 /// # Examples
 ///
 /// ```
@@ -63,7 +68,8 @@ use crate::transform::{BinaryMask, convert_image};
 /// ).unwrap();
 /// let h: Histogram<NaturalBins, _> = histogram(&img, &NaturalBins).unwrap();
 /// let t = otsu_threshold(&h).unwrap();
-/// assert!((20..220).contains(&(t as u32)));
+/// // Every t from 20 to 219 splits the two groups; the lowest wins.
+/// assert_eq!(t, 20);
 /// ```
 pub fn otsu_threshold<V: Copy>(hist: &Histogram<NaturalBins, V>) -> Option<u8>
 where
@@ -124,7 +130,7 @@ where
 ///
 /// # Errors
 ///
-/// Returns [`Error::InvalidBinningStrategy`] (Tier 2) only if the
+/// Returns [`Error::InvalidParameter`] (Tier 2) only if the
 /// internal histogram engine ever does. [`NaturalBins`] has no
 /// configuration to validate, but the `Result` return shape leaves
 /// room for 16-bit overloads that take a caller-supplied
@@ -151,17 +157,17 @@ where
 /// assert!(!mask.pixel_at(0, 0));
 /// assert!(mask.pixel_at(0, 1));
 /// ```
-pub fn otsu_binary_mask<I, P>(image: &I) -> Result<(u8, BinaryImage), Error>
+pub fn otsu_binary_mask<I, P>(image: &I) -> Result<(u8, BinaryImage<I::Space>), Error>
 where
     I: RasterImage<Pixel = P>,
-    P: SingleChannel + From<u8>,
+    P: SingleChannel + ChannelwiseMath + From<u8>,
     P::Channel: Ord,
     NaturalBins: BinningStrategy<P::Channel>,
 {
     let h: Histogram<NaturalBins, P::Channel> = histogram(image, &NaturalBins)?;
     let t = otsu_threshold(&h).unwrap_or(0);
     let thresh = P::from(t);
-    let mask: BinaryImage = convert_image(image, BinaryMask { thresh });
+    let mask: BinaryImage<I::Space> = convert_image(image, BinaryMask { thresh });
     Ok((t, mask))
 }
 
@@ -169,7 +175,7 @@ where
 mod tests {
     use super::*;
     use crate::image::{Image, ImageView};
-    use crate::pixel::{Indexed8, Mono8};
+    use crate::pixel::Mono8;
     use std::num::Saturating;
 
     fn hist_from_bins_u8(bins: Vec<u64>) -> Histogram<NaturalBins, u8> {
@@ -221,6 +227,17 @@ mod tests {
             (64..192).contains(&(t as u32)),
             "expected t strictly between the two modes; got {t}",
         );
+    }
+
+    #[test]
+    fn otsu_threshold_returns_the_lowest_of_tied_thresholds() {
+        // Two occupied bins, 50 and 180: every t in 50..180 gives the same
+        // between-class variance, and the scan keeps the first.
+        let mut bins = vec![0u64; 256];
+        bins[50] = 7;
+        bins[180] = 3;
+        let h = hist_from_bins_u8(bins);
+        assert_eq!(otsu_threshold(&h), Some(50));
     }
 
     #[test]
@@ -356,16 +373,11 @@ mod tests {
     }
 
     #[test]
-    fn otsu_binary_mask_indexed8_runs_on_u8_channel() {
-        // Indexed8 channel type is bare u8; covers the second
-        // NaturalBins impl. Indexed8 implements From<u8> as of this
-        // crate's `pixel::indexed` module.
-        let img = Image::from_vec(
-            2,
-            2,
-            vec![Indexed8(10), Indexed8(10), Indexed8(200), Indexed8(200)],
-        )
-        .unwrap();
+    fn otsu_binary_mask_runs_on_a_bare_u8_channel() {
+        // The primitive `u8` pixel has the bare `u8` channel, which covers
+        // the second NaturalBins impl. `Indexed8` has the same channel type
+        // but is not `ChannelwiseMath`: a palette index is not a quantity.
+        let img = Image::from_vec(2, 2, vec![10u8, 10, 200, 200]).unwrap();
         let (t, mask) = otsu_binary_mask(&img).unwrap();
         assert!((10..200).contains(&(t as u32)));
         assert!(!mask.pixel_at(0, 0));

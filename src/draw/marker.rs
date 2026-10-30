@@ -1,7 +1,7 @@
 //! Point markers — the crosshair.
 
 use super::{Drawable, hspan, vspan};
-use crate::CoordinateI32;
+use crate::SignedCoordinate;
 use crate::image::ImageViewMut;
 
 /// A `+`-shaped marker centred on a point.
@@ -34,7 +34,7 @@ use crate::image::ImageViewMut;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Crosshair<P> {
     /// Center of the marker, drawn.
-    pub center: CoordinateI32,
+    pub center: SignedCoordinate,
     /// Pixels each arm extends from the center, in all four directions.
     pub arm_length: u32,
     /// Pixel value written along both strokes.
@@ -43,8 +43,8 @@ pub struct Crosshair<P> {
 
 impl<P: Copy> Drawable<P> for Crosshair<P> {
     fn draw_into(&self, image: &mut impl ImageViewMut<Pixel = P>) {
-        let (cx, cy) = (i64::from(self.center.x), i64::from(self.center.y));
-        let arm = i64::from(self.arm_length);
+        let (cx, cy) = (self.center.x as i128, self.center.y as i128);
+        let arm = i128::from(self.arm_length);
         hspan(image, cx - arm, cx + arm, cy, self.color);
         vspan(image, cx, cy - arm, cy + arm, self.color);
     }
@@ -68,7 +68,7 @@ impl<P: Copy> Drawable<P> for Crosshair<P> {
 /// ```
 pub fn draw_crosshair<P: Copy>(
     image: &mut impl ImageViewMut<Pixel = P>,
-    center: impl Into<CoordinateI32>,
+    center: impl Into<SignedCoordinate>,
     arm_length: u32,
     color: P,
 ) {

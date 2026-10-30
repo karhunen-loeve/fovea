@@ -15,12 +15,22 @@
 //! - [`guide::pixel_conversions`] — conversion strategies, common paths, and `.then()` combinator
 //! - [`guide::camera_buffers`] — raw bytes, camera SDK buffers, and byte layout
 //! - [`guide::large_images`] — slices, rows, tiles, sliding windows, and parallel runtimes
+//! - [`guide::numerics`]: which bits are stable, how accuracy is documented, and tie rules
+//! - [`guide::scales_of_measurement`]: which pixel values may be averaged, ordered or only compared
 
 extern crate self as fovea;
 
 mod common;
-mod error;
 mod internal;
+
+/// The crate's error type and the payload of its parameter errors.
+///
+/// [`Error`] is also re-exported at the crate root, where most code names
+/// it. This module holds what [`Error::InvalidParameter`] carries: a
+/// [`ParameterError`](error::ParameterError) with the rejected parameter's
+/// name, the [`Requirement`](error::Requirement) it broke and the
+/// [`Value`](error::Value) it received.
+pub mod error;
 
 /// Image types, views, and containers.
 ///
@@ -50,6 +60,7 @@ pub mod border {
     };
 }
 
+pub use fovea_derive::ChannelwiseMath;
 pub use fovea_derive::HomogeneousPixel;
 pub use fovea_derive::LinearPixel;
 pub use fovea_derive::PlainPixel;
@@ -102,14 +113,57 @@ pub mod features;
 /// [`draw::Circle`], [`draw::Polyline`], [`draw::Crosshair`]) and the
 /// [`draw::Drawable`] trait carry the same operations as storable values,
 /// and `Drawable` is the extension point for custom markers.
+/// [`draw::draw_text`] labels them in a [`draw::BitmapFont`], measured
+/// beforehand with [`draw::BitmapFont::text_size`].
 pub mod draw;
+
+/// Units, positions and mappings of the plane: pixels to millimetres.
+///
+/// Start with [`Point`](geometry::Point) and a unit such as
+/// [`Millimeter`](geometry::Millimeter), and with a calibration such as
+/// [`UniformScale`](geometry::UniformScale) or
+/// [`AxisScale`](geometry::AxisScale). The class of a mapping decides which
+/// objects it converts: points under every mapping, vectors under the
+/// [`AffineMap`](geometry::AffineMap)s, lengths only under the
+/// [`ConformalMap`](geometry::ConformalMap)s. The elements a fit returns,
+/// [`Line`](geometry::Line), [`Segment`](geometry::Segment),
+/// [`Circle`](geometry::Circle) and [`Ellipse`](geometry::Ellipse), live
+/// here with their relations: distances, nearest points, the angle between
+/// two lines and where they meet.
+pub mod geometry;
+
+/// Measurement tools: the caliper, which finds edges and edge pairs along a
+/// path to a fraction of a pixel, and the fits of lines, circles and
+/// ellipses with their residuals.
+///
+/// Start with [`Caliper`](measure::Caliper) and
+/// [`profile`](measure::profile), then
+/// [`Profile::edges`](measure::Profile::edges) and
+/// [`Edges::pairs`](measure::Edges::pairs); fit the points with
+/// [`fit`](measure::fit). Results are positions and lengths in
+/// pixels, which a calibration from [`geometry`] converts.
+pub mod measure;
+
+/// The frequency domain: the discrete Fourier transform of an image and
+/// its spectrum.
+///
+/// Start with [`dft`](frequency::dft) and a method such as
+/// [`Radix2`](frequency::Radix2) or [`Auto`](frequency::Auto); the
+/// [`Spectrum`](frequency::Spectrum) it returns goes back to an image
+/// with [`Spectrum::inverse`](frequency::Spectrum::inverse). A spectrum
+/// is not an image, so image operations do not apply to it.
+pub mod frequency;
 
 #[cfg(doc)]
 pub mod guide;
 
 // ── Core vocabulary types (module-agnostic, kept at root) ────────────────────
 pub use common::{
-    AxialOrientation, Coordinate, CoordinateF64, CoordinateI32, Extremum, OddWindowSide, Offset,
-    Orientation, PixelDistance, Rectangle, Sigma, Size, Stride, Tolerance,
+    Angle, AxialOrientation, Coordinate, Extremum, OddWindowSide, Offset, Orientation,
+    PixelDistance, Rectangle, Sigma, SignedCoordinate, Size, Stride, Tolerance,
 };
 pub use error::Error;
+pub use geometry::{
+    Circle, Ellipse, IdealPixels, Length, Line, Meter, Micrometer, Millimeter, Pixels, Point,
+    Segment, SpectrumPixels,
+};

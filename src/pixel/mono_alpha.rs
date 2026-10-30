@@ -2,7 +2,9 @@
 //!
 //! Two-channel pixels: value (v) + alpha (a).
 
-use fovea_derive::{HomogeneousPixel, LinearPixel, PlainPixel, WhiteChannel, ZeroablePixel};
+use fovea_derive::{
+    ChannelwiseMath, HomogeneousPixel, LinearPixel, PlainPixel, WhiteChannel, ZeroablePixel,
+};
 
 use std::{
     hash::{Hash, Hasher},
@@ -29,6 +31,7 @@ use crate::pixel::impl_origin_invariant_pixel;
     Hash,
     PlainPixel,
     HomogeneousPixel,
+    ChannelwiseMath,
     ZeroablePixel,
     LinearPixel,
     WhiteChannel,
@@ -61,6 +64,7 @@ impl MonoA8 {
     Hash,
     PlainPixel,
     HomogeneousPixel,
+    ChannelwiseMath,
     ZeroablePixel,
     LinearPixel,
     WhiteChannel,
@@ -93,6 +97,7 @@ impl MonoA16 {
     Hash,
     PlainPixel,
     HomogeneousPixel,
+    ChannelwiseMath,
     ZeroablePixel,
     LinearPixel,
     WhiteChannel,
@@ -125,6 +130,7 @@ impl MonoA32 {
     Hash,
     PlainPixel,
     HomogeneousPixel,
+    ChannelwiseMath,
     ZeroablePixel,
     LinearPixel,
     WhiteChannel,
@@ -149,7 +155,15 @@ impl MonoA64 {
 /// Grayscale-with-alpha pixel, 32-bit floating point depth per channel.
 #[repr(C)]
 #[derive(
-    Clone, Copy, Debug, PartialEq, PlainPixel, HomogeneousPixel, ZeroablePixel, LinearPixel,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    PlainPixel,
+    HomogeneousPixel,
+    ChannelwiseMath,
+    ZeroablePixel,
+    LinearPixel,
 )]
 #[linear(accumulator = Self)]
 pub struct MonoAF32 {
@@ -178,7 +192,15 @@ impl Hash for MonoAF32 {
 /// Grayscale-with-alpha pixel, 64-bit floating point depth per channel.
 #[repr(C)]
 #[derive(
-    Clone, Copy, Debug, PartialEq, PlainPixel, HomogeneousPixel, ZeroablePixel, LinearPixel,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    PlainPixel,
+    HomogeneousPixel,
+    ChannelwiseMath,
+    ZeroablePixel,
+    LinearPixel,
 )]
 #[linear(accumulator = Self)]
 pub struct MonoAF64 {

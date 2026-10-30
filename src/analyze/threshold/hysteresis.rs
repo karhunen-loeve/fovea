@@ -7,8 +7,9 @@
 
 use crate::Error;
 use crate::analyze::components::{Connectivity8, connected_components};
-use crate::image::{BinaryImage, ImageView, RasterImage, RasterImageMut};
-use crate::pixel::{Label32, LabelPixel, SingleChannel};
+use crate::error::{ParameterError, Requirement, Value};
+use crate::image::{BinaryImage, Image, ImageView, RasterImage, RasterImageMut};
+use crate::pixel::{ChannelwiseMath, Label32, LabelPixel, SingleChannel};
 
 /// A validated pair of hysteresis thresholds: `low <= high`.
 ///
@@ -66,7 +67,7 @@ pub struct HysteresisThresholds<C> {
 
 impl<C> HysteresisThresholds<C>
 where
-    C: PartialOrd + Copy + core::fmt::Debug,
+    C: PartialOrd + Copy,
 {
     /// Creates a threshold pair, validating the `low <= high` relation.
     ///
@@ -75,15 +76,20 @@ where
     ///
     /// # Errors
     ///
-    /// Returns [`Error::InvalidParameter`] if `!(low <= high)`, which
-    /// includes either value being NaN.
+    /// Returns [`Error::InvalidParameter`] with
+    /// [`Requirement::Ordered`] if `!(low <= high)`, which includes either
+    /// value being NaN. The error does not hold the two values, since `C`
+    /// is generic; the caller passed them and still has them.
     pub fn try_new(low: C, high: C) -> Result<Self, Error> {
         if low <= high {
             Ok(Self { low, high })
         } else {
-            Err(Error::InvalidParameter(format!(
-                "hysteresis thresholds must satisfy low <= high, got low {low:?} and high {high:?}"
-            )))
+            Err(ParameterError::new(
+                "hysteresis thresholds",
+                Requirement::Ordered,
+                Value::NotRecorded,
+            )
+            .into())
         }
     }
 }
@@ -182,18 +188,33 @@ impl<C: Copy> HysteresisThresholds<C> {
 /// assert!(!mask.pixel_at(2, 0)); // non-edge
 /// assert!(!mask.pixel_at(3, 0)); // weak but isolated → dropped
 /// ```
+///
+/// A threshold on palette indices or component labels has no meaning, so
+/// it does not compile; the pixel must be
+/// [`ChannelwiseMath`](crate::pixel::ChannelwiseMath):
+///
+/// ```compile_fail
+/// use fovea::analyze::threshold::{HysteresisThresholds, hysteresis_threshold};
+/// use fovea::image::Image;
+/// use fovea::pixel::Indexed8;
+///
+/// let palette = Image::fill(4, 4, Indexed8(3));
+/// let thresholds = HysteresisThresholds::try_new(1u8, 2u8).unwrap();
+/// // ERROR: `Indexed8: ChannelwiseMath` is not satisfied.
+/// let _ = hysteresis_threshold(&palette, thresholds);
+/// ```
 pub fn hysteresis_threshold<I, P>(
     image: &I,
     thresholds: HysteresisThresholds<P::Channel>,
-) -> BinaryImage
+) -> BinaryImage<I::Space>
 where
     I: RasterImage<Pixel = P>,
-    P: SingleChannel,
+    P: SingleChannel + ChannelwiseMath,
     P::Channel: PartialOrd + Copy + core::fmt::Debug,
 {
     // Owned variant allocates the output and delegates, matching the
     // `connected_components` / `connected_components_into` convention.
-    let mut out = BinaryImage::fill(image.width(), image.height(), false);
+    let mut out = Image::fill_in(image.width(), image.height(), false);
     hysteresis_threshold_into(image, thresholds, &mut out);
     out
 }
@@ -211,10 +232,10 @@ where
 pub fn hysteresis_threshold_into<I, P>(
     image: &I,
     thresholds: HysteresisThresholds<P::Channel>,
-    out: &mut BinaryImage,
+    out: &mut BinaryImage<I::Space>,
 ) where
     I: RasterImage<Pixel = P>,
-    P: SingleChannel,
+    P: SingleChannel + ChannelwiseMath,
     P::Channel: PartialOrd + Copy + core::fmt::Debug,
 {
     assert_eq!(
@@ -246,7 +267,7 @@ pub fn hysteresis_threshold_into<I, P>(
 
     // 2. Label the weak mask with 8-connectivity. The strong mask is
     //    never materialised — `>= high` is tested inline in step 3.
-    let labeling = connected_components::<Label32, Connectivity8>(&weak).expect(
+    let labeling = connected_components::<Label32, Connectivity8, _>(&weak).expect(
         "hysteresis_threshold: weak-component count exceeds Label32 capacity (u32::MAX); \
          an image with that many components is not representable",
     );
@@ -494,11 +515,11 @@ mod tests {
     fn computed_pair_reports_misordering_as_a_value() {
         // The `try_new` half: thresholds picked from a magnitude histogram
         // can come out inverted, which is a value the caller handles.
-        let err = HysteresisThresholds::try_new(0.5_f32, 0.2).unwrap_err();
-        assert!(
-            matches!(err, Error::InvalidParameter(ref m) if m.contains("low <= high")),
-            "unexpected error: {err:?}"
-        );
+        let Err(Error::InvalidParameter(e)) = HysteresisThresholds::try_new(0.5_f32, 0.2) else {
+            panic!("a misordered pair must be rejected as a parameter");
+        };
+        assert_eq!(e.requirement(), Requirement::Ordered);
+        assert_eq!(e.value(), Value::NotRecorded);
     }
 
     #[test]

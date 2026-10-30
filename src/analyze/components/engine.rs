@@ -19,7 +19,7 @@ use super::union_find::UnionFind;
 ///
 /// The label pixel type `L` and connectivity strategy `C` are named
 /// explicitly by the caller (turbofish), e.g.
-/// `connected_components::<Label32, Connectivity8>(&binary)`.
+/// `connected_components::<Label32, Connectivity8, _>(&binary)`.
 ///
 /// # Errors — Tier 2
 ///
@@ -40,18 +40,17 @@ use super::union_find::UnionFind;
 /// use fovea::pixel::Label32;
 ///
 /// let img = BinaryImage::fill(8, 8, true);
-/// let r = connected_components::<Label32, Connectivity4>(&img).unwrap();
+/// let r = connected_components::<Label32, Connectivity4, _>(&img).unwrap();
 /// assert_eq!(r.label_count, 1);
 /// ```
-pub fn connected_components<L, C>(
-    image: &impl RasterImage<Pixel = bool>,
-) -> Result<Labeling<L>, Error>
+pub fn connected_components<L, C, I>(image: &I) -> Result<Labeling<L, I::Space>, Error>
 where
     L: LabelPixel,
     C: Connectivity,
+    I: RasterImage<Pixel = bool>,
 {
-    let mut labels = Image::<L>::zero(image.width(), image.height());
-    let label_count = connected_components_into::<L, C>(image, &mut labels)?;
+    let mut labels = Image::<L, _>::zero_in(image.width(), image.height());
+    let label_count = connected_components_into::<L, C, I>(image, &mut labels)?;
     Ok(Labeling {
         labels,
         label_count,
@@ -79,13 +78,14 @@ where
 /// provisional-label space is exhausted, which takes more than
 /// `u32::MAX` disconnected foreground sites and is out of practical
 /// reach.
-pub fn connected_components_into<L, C>(
-    image: &impl RasterImage<Pixel = bool>,
-    out: &mut Image<L>,
+pub fn connected_components_into<L, C, I>(
+    image: &I,
+    out: &mut Image<L, I::Space>,
 ) -> Result<u32, Error>
 where
     L: LabelPixel,
     C: Connectivity,
+    I: RasterImage<Pixel = bool>,
 {
     assert_eq!(
         out.size(),
@@ -128,23 +128,28 @@ where
 /// // A 2x2 square.
 /// let img = BinaryImage::fill(2, 2, true);
 /// let (lab, stats) =
-///     connected_components_with_stats::<Label32, Connectivity4>(&img).unwrap();
+///     connected_components_with_stats::<Label32, Connectivity4, _>(&img).unwrap();
 /// assert_eq!(lab.label_count, 1);
 /// assert_eq!(stats[0].area, 4);
-/// assert_eq!(stats[0].centroid(), fovea::CoordinateF64::new(0.5, 0.5));
+/// assert_eq!(stats[0].centroid(), fovea::Point::new(0.5, 0.5));
 /// ```
-pub fn connected_components_with_stats<L, C>(
-    image: &impl RasterImage<Pixel = bool>,
-) -> Result<(Labeling<L>, Vec<ComponentStats>), Error>
+#[allow(
+    clippy::type_complexity,
+    reason = "the labeling and one record per component, in the space of the image"
+)]
+pub fn connected_components_with_stats<L, C, I>(
+    image: &I,
+) -> Result<(Labeling<L, I::Space>, Vec<ComponentStats<I::Space>>), Error>
 where
     L: LabelPixel,
     C: Connectivity,
+    I: RasterImage<Pixel = bool>,
 {
-    let mut labels = Image::<L>::zero(image.width(), image.height());
-    let mut stats: Vec<ComponentStats> = Vec::new();
+    let mut labels = Image::<L, _>::zero_in(image.width(), image.height());
+    let mut stats: Vec<ComponentStats<I::Space>> = Vec::new();
     let label_count = {
         let mut sink = WithStats { out: &mut stats };
-        run::<L, C, _, WithStats<'_>>(image, &mut labels, &mut sink)?
+        run::<L, C, _, WithStats<'_, I::Space>>(image, &mut labels, &mut sink)?
     };
     debug_assert_eq!(stats.len(), label_count as usize);
     Ok((
@@ -207,25 +212,30 @@ where
 /// // A solid 3x3 square: area 9, boundary pixels 8 (4·3 − 4).
 /// let img = BinaryImage::fill(3, 3, true);
 /// let (lab, m) =
-///     connected_components_with_measurements::<Label32, Connectivity4>(&img).unwrap();
+///     connected_components_with_measurements::<Label32, Connectivity4, _>(&img).unwrap();
 /// assert_eq!(lab.label_count, 1);
 /// assert_eq!(m[0].area, 9);
 /// assert_eq!(m[0].boundary_pixels, 8);
 /// ```
-pub fn connected_components_with_measurements<L, C>(
-    image: &impl RasterImage<Pixel = bool>,
-) -> Result<(Labeling<L>, Vec<BlobMeasurements>), Error>
+#[allow(
+    clippy::type_complexity,
+    reason = "the labeling and one record per component, in the space of the image"
+)]
+pub fn connected_components_with_measurements<L, C, I>(
+    image: &I,
+) -> Result<(Labeling<L, I::Space>, Vec<BlobMeasurements<I::Space>>), Error>
 where
     L: LabelPixel,
     C: Connectivity,
+    I: RasterImage<Pixel = bool>,
 {
-    let mut labels = Image::<L>::zero(image.width(), image.height());
-    let mut measurements: Vec<BlobMeasurements> = Vec::new();
+    let mut labels = Image::<L, _>::zero_in(image.width(), image.height());
+    let mut measurements: Vec<BlobMeasurements<I::Space>> = Vec::new();
     let label_count = {
         let mut sink = WithMeasurements {
             out: &mut measurements,
         };
-        run::<L, C, _, WithMeasurements<'_>>(image, &mut labels, &mut sink)?
+        run::<L, C, _, WithMeasurements<'_, I::Space>>(image, &mut labels, &mut sink)?
     };
     debug_assert_eq!(measurements.len(), label_count as usize);
     Ok((
@@ -249,7 +259,7 @@ where
 /// flagged for follow-up design.
 const MAX_NEIGHBOURS: usize = 4;
 
-fn run<L, C, I, S>(image: &I, out: &mut Image<L>, sink: &mut S) -> Result<u32, Error>
+fn run<L, C, I, S>(image: &I, out: &mut Image<L, I::Space>, sink: &mut S) -> Result<u32, Error>
 where
     L: LabelPixel,
     C: Connectivity,
@@ -506,15 +516,38 @@ mod tests {
     #[test]
     fn empty_image_returns_zero_labels() {
         let img = BinaryImage::from_vec(0, 0, Vec::new()).unwrap();
-        let r = connected_components::<Label32, Connectivity4>(&img).unwrap();
+        let r = connected_components::<Label32, Connectivity4, _>(&img).unwrap();
         assert_eq!(r.label_count, 0);
         assert_eq!(r.labels.size(), Size::new(0, 0));
     }
 
     #[test]
+    fn labels_follow_the_raster_order_of_first_pixels() {
+        // The U's right arm starts after the dot between the arms and joins
+        // the left arm only on the third row. The labels still follow each
+        // component's first pixel in raster order: the U at (0, 0) is 1, the
+        // dot at (2, 0) is 2, the bar at (0, 4) is 3.
+        let img = img_from_str(
+            "
+            #.#.#
+            #...#
+            #####
+            .....
+            ##...
+            ",
+        );
+        let r = connected_components::<Label32, Connectivity4, _>(&img).unwrap();
+        assert_eq!(r.label_count, 3);
+        assert_eq!(r.labels.pixel_at(0, 0), Label32::new(1));
+        assert_eq!(r.labels.pixel_at(4, 0), Label32::new(1));
+        assert_eq!(r.labels.pixel_at(2, 0), Label32::new(2));
+        assert_eq!(r.labels.pixel_at(0, 4), Label32::new(3));
+    }
+
+    #[test]
     fn all_background() {
         let img = BinaryImage::fill(8, 8, false);
-        let r = connected_components::<Label32, Connectivity4>(&img).unwrap();
+        let r = connected_components::<Label32, Connectivity4, _>(&img).unwrap();
         assert_eq!(r.label_count, 0);
         for y in 0..8 {
             for x in 0..8 {
@@ -526,7 +559,7 @@ mod tests {
     #[test]
     fn all_foreground_4connected() {
         let img = BinaryImage::fill(5, 4, true);
-        let r = connected_components::<Label32, Connectivity4>(&img).unwrap();
+        let r = connected_components::<Label32, Connectivity4, _>(&img).unwrap();
         assert_eq!(r.label_count, 1);
         for y in 0..4 {
             for x in 0..5 {
@@ -538,7 +571,7 @@ mod tests {
     #[test]
     fn all_foreground_8connected() {
         let img = BinaryImage::fill(5, 4, true);
-        let r = connected_components::<Label32, Connectivity8>(&img).unwrap();
+        let r = connected_components::<Label32, Connectivity8, _>(&img).unwrap();
         assert_eq!(r.label_count, 1);
     }
 
@@ -552,7 +585,7 @@ mod tests {
             ..#.
         "#,
         );
-        let r = connected_components::<Label32, Connectivity4>(&img).unwrap();
+        let r = connected_components::<Label32, Connectivity4, _>(&img).unwrap();
         assert_eq!(r.label_count, 2);
         // The partition: 4-pixel top L and 3-pixel bottom L.
         let groups = partition_by_label(&r);
@@ -575,7 +608,7 @@ mod tests {
             ..#.
         "#,
         );
-        let r = connected_components::<Label32, Connectivity8>(&img).unwrap();
+        let r = connected_components::<Label32, Connectivity8, _>(&img).unwrap();
         // The diagonal at (2,2) touches (1,1) so all 8 foreground pixels collapse.
         assert_eq!(r.label_count, 1);
     }
@@ -589,7 +622,7 @@ mod tests {
             ###
         "#,
         );
-        let r = connected_components::<Label32, Connectivity4>(&img).unwrap();
+        let r = connected_components::<Label32, Connectivity4, _>(&img).unwrap();
         assert_eq!(r.label_count, 1);
     }
 
@@ -598,7 +631,7 @@ mod tests {
         let mut data = vec![false; 4 * 4];
         data[0] = true;
         let img = BinaryImage::from_vec(4, 4, data).unwrap();
-        let r = connected_components::<Label32, Connectivity4>(&img).unwrap();
+        let r = connected_components::<Label32, Connectivity4, _>(&img).unwrap();
         assert_eq!(r.label_count, 1);
         assert_eq!(r.labels.pixel_at(0, 0), Label32::new(1));
     }
@@ -606,14 +639,14 @@ mod tests {
     #[test]
     fn single_row() {
         let img = BinaryImage::from_vec(5, 1, vec![true, false, true, true, false]).unwrap();
-        let r = connected_components::<Label32, Connectivity4>(&img).unwrap();
+        let r = connected_components::<Label32, Connectivity4, _>(&img).unwrap();
         assert_eq!(r.label_count, 2);
     }
 
     #[test]
     fn single_column() {
         let img = BinaryImage::from_vec(1, 5, vec![true, false, true, true, false]).unwrap();
-        let r = connected_components::<Label32, Connectivity4>(&img).unwrap();
+        let r = connected_components::<Label32, Connectivity4, _>(&img).unwrap();
         assert_eq!(r.label_count, 2);
     }
 
@@ -627,7 +660,7 @@ mod tests {
             }
         }
         let img = BinaryImage::from_vec(8, 8, data).unwrap();
-        let r = connected_components::<Label32, Connectivity4>(&img).unwrap();
+        let r = connected_components::<Label32, Connectivity4, _>(&img).unwrap();
         assert_eq!(r.label_count, 32);
     }
 
@@ -640,7 +673,7 @@ mod tests {
             }
         }
         let img = BinaryImage::from_vec(8, 8, data).unwrap();
-        let r = connected_components::<Label32, Connectivity8>(&img).unwrap();
+        let r = connected_components::<Label32, Connectivity8, _>(&img).unwrap();
         assert_eq!(r.label_count, 1);
     }
 
@@ -660,7 +693,7 @@ mod tests {
         let roi = img
             .roi(Rectangle::new(Coordinate::new(1, 1), Size::new(4, 4)))
             .unwrap();
-        let r = connected_components::<Label32, Connectivity4>(&roi).unwrap();
+        let r = connected_components::<Label32, Connectivity4, _>(&roi).unwrap();
         // The ring around the 4x4 ROI is a single component (12 pixels).
         assert_eq!(r.label_count, 1);
         let groups = partition_by_label(&r);
@@ -672,7 +705,7 @@ mod tests {
     fn into_size_mismatch_panics() {
         let img = BinaryImage::fill(4, 4, false);
         let mut out: Image<Label32> = Image::zero(8, 8);
-        let _ = connected_components_into::<Label32, Connectivity4>(&img, &mut out);
+        let _ = connected_components_into::<Label32, Connectivity4, _>(&img, &mut out);
     }
 
     #[test]
@@ -686,9 +719,9 @@ mod tests {
             #.#.#
         "#,
         );
-        let r = connected_components::<Label32, Connectivity4>(&img).unwrap();
+        let r = connected_components::<Label32, Connectivity4, _>(&img).unwrap();
         let mut out: Image<Label32> = Image::zero(5, 5);
-        let count = connected_components_into::<Label32, Connectivity4>(&img, &mut out).unwrap();
+        let count = connected_components_into::<Label32, Connectivity4, _>(&img, &mut out).unwrap();
         assert_eq!(count, r.label_count);
         // And the label images agree pixel-for-pixel.
         for y in 0..5 {
@@ -709,7 +742,7 @@ mod tests {
             ##..##
         "#,
         );
-        let r = connected_components::<Label32, Connectivity4>(&img).unwrap();
+        let r = connected_components::<Label32, Connectivity4, _>(&img).unwrap();
         // Count input foreground pixels.
         let mut fg = 0usize;
         for y in 0..img.height() {
@@ -720,7 +753,8 @@ mod tests {
             }
         }
         // Sum component areas from stats.
-        let (_, stats) = connected_components_with_stats::<Label32, Connectivity4>(&img).unwrap();
+        let (_, stats) =
+            connected_components_with_stats::<Label32, Connectivity4, _>(&img).unwrap();
         let total_area: u64 = stats.iter().map(|s| s.area).sum();
         assert_eq!(total_area as usize, fg);
         assert_eq!(stats.len(), r.label_count as usize);
@@ -739,7 +773,8 @@ mod tests {
             .......
         "#,
         );
-        let (_, stats) = connected_components_with_stats::<Label32, Connectivity4>(&img).unwrap();
+        let (_, stats) =
+            connected_components_with_stats::<Label32, Connectivity4, _>(&img).unwrap();
         assert_eq!(stats.len(), 1);
         assert_eq!(stats[0].area, 6);
         assert_eq!(stats[0].bbox_min, Coordinate::new(2, 1));
@@ -760,7 +795,8 @@ mod tests {
             .....
         "#,
         );
-        let (_, stats) = connected_components_with_stats::<Label32, Connectivity4>(&img).unwrap();
+        let (_, stats) =
+            connected_components_with_stats::<Label32, Connectivity4, _>(&img).unwrap();
         assert_eq!(stats.len(), 1);
         let c = stats[0].centroid();
         assert!((c.x - 2.0).abs() < 1e-9);
@@ -781,7 +817,8 @@ mod tests {
             #.....
         "#,
         );
-        let (lab, stats) = connected_components_with_stats::<Label32, Connectivity4>(&img).unwrap();
+        let (lab, stats) =
+            connected_components_with_stats::<Label32, Connectivity4, _>(&img).unwrap();
         assert_eq!(lab.label_count, 3);
         assert_eq!(stats.len(), 3);
         // Find each component by area.
@@ -840,10 +877,10 @@ mod tests {
         )
         .unwrap();
         // First sanity-check with Label32 that there really are 5 components.
-        let r = connected_components::<Label32, Connectivity4>(&img).unwrap();
+        let r = connected_components::<Label32, Connectivity4, _>(&img).unwrap();
         assert_eq!(r.label_count, 5);
 
-        let err = connected_components::<TinyLabel, Connectivity4>(&img).unwrap_err();
+        let err = connected_components::<TinyLabel, Connectivity4, _>(&img).unwrap_err();
         match err {
             Error::LabelOverflow { label_capacity } => assert_eq!(label_capacity, 3),
             other => panic!("expected LabelOverflow, got {:?}", other),
@@ -855,7 +892,7 @@ mod tests {
         // Exactly 3 components \u2014 should fit TinyLabel.
         let img = BinaryImage::from_vec(5, 1, vec![true, false, true, false, true]).unwrap();
         let mut out: Image<TinyLabel> = Image::zero(5, 1);
-        let n = connected_components_into::<TinyLabel, Connectivity4>(&img, &mut out).unwrap();
+        let n = connected_components_into::<TinyLabel, Connectivity4, _>(&img, &mut out).unwrap();
         assert_eq!(n, 3);
         assert_eq!(out.pixel_at(0, 0), TinyLabel(1));
         assert_eq!(out.pixel_at(2, 0), TinyLabel(2));
@@ -874,11 +911,11 @@ mod tests {
             #######
         "#,
         );
-        let r = connected_components::<Label32, Connectivity4>(&img).unwrap();
+        let r = connected_components::<Label32, Connectivity4, _>(&img).unwrap();
         assert_eq!(r.label_count, 1);
 
         let mut out: Image<TinyLabel> = Image::zero(7, 2);
-        let n = connected_components_into::<TinyLabel, Connectivity4>(&img, &mut out).unwrap();
+        let n = connected_components_into::<TinyLabel, Connectivity4, _>(&img, &mut out).unwrap();
         assert_eq!(n, 1);
     }
 
@@ -893,10 +930,10 @@ mod tests {
             ###.###.###.###
         "#,
         );
-        let r = connected_components::<Label32, Connectivity4>(&img).unwrap();
+        let r = connected_components::<Label32, Connectivity4, _>(&img).unwrap();
         assert_eq!(r.label_count, 4);
 
-        let err = connected_components::<TinyLabel, Connectivity4>(&img).unwrap_err();
+        let err = connected_components::<TinyLabel, Connectivity4, _>(&img).unwrap_err();
         match err {
             Error::LabelOverflow { label_capacity } => assert_eq!(label_capacity, 3),
             other => panic!("expected LabelOverflow, got {:?}", other),
@@ -908,7 +945,7 @@ mod tests {
     #[test]
     fn labeling_is_clone_and_debug() {
         let img = BinaryImage::fill(2, 2, true);
-        let r = connected_components::<Label32, Connectivity4>(&img).unwrap();
+        let r = connected_components::<Label32, Connectivity4, _>(&img).unwrap();
         let cloned: Labeling<Label32> = r.clone();
         assert_eq!(cloned.label_count, 1);
         let s = format!("{:?}", cloned);
@@ -922,13 +959,13 @@ mod tests {
         // Solid 5x5 square → boundary-pixel count = 4·5 − 4 = 16.
         let img = BinaryImage::fill(5, 5, true);
         let (lab, m) =
-            connected_components_with_measurements::<Label32, Connectivity4>(&img).unwrap();
+            connected_components_with_measurements::<Label32, Connectivity4, _>(&img).unwrap();
         assert_eq!(lab.label_count, 1);
         assert_eq!(m.len(), 1);
         assert_eq!(m[0].area, 25);
         assert_eq!(m[0].boundary_pixels, 16);
         // Moments match the cheap path for the shared fields.
-        assert_eq!(m[0].centroid(), crate::CoordinateF64::new(2.0, 2.0));
+        assert_eq!(m[0].centroid(), crate::Point::new(2.0, 2.0));
     }
 
     #[test]
@@ -937,7 +974,7 @@ mod tests {
         data[4] = true; // centre pixel
         let img = BinaryImage::from_vec(3, 3, data).unwrap();
         let (_, m) =
-            connected_components_with_measurements::<Label32, Connectivity4>(&img).unwrap();
+            connected_components_with_measurements::<Label32, Connectivity4, _>(&img).unwrap();
         assert_eq!(m.len(), 1);
         assert_eq!(m[0].area, 1);
         assert_eq!(m[0].boundary_pixels, 1);
@@ -961,9 +998,10 @@ mod tests {
             #.....
         "#,
         );
-        let (_, stats) = connected_components_with_stats::<Label32, Connectivity4>(&img).unwrap();
+        let (_, stats) =
+            connected_components_with_stats::<Label32, Connectivity4, _>(&img).unwrap();
         let (_, meas) =
-            connected_components_with_measurements::<Label32, Connectivity4>(&img).unwrap();
+            connected_components_with_measurements::<Label32, Connectivity4, _>(&img).unwrap();
         assert_eq!(stats.len(), meas.len());
         for (s, m) in stats.iter().zip(meas.iter()) {
             assert_eq!(s.area, m.area);
@@ -990,7 +1028,7 @@ mod tests {
         "#,
         );
         let (lab4, m4) =
-            connected_components_with_measurements::<Label32, Connectivity4>(&img).unwrap();
+            connected_components_with_measurements::<Label32, Connectivity4, _>(&img).unwrap();
         assert_eq!(lab4.label_count, 2);
         assert_eq!(m4.len(), 2);
         for m in &m4 {
@@ -999,7 +1037,7 @@ mod tests {
         }
 
         let (lab8, m8) =
-            connected_components_with_measurements::<Label32, Connectivity8>(&img).unwrap();
+            connected_components_with_measurements::<Label32, Connectivity8, _>(&img).unwrap();
         assert_eq!(lab8.label_count, 1);
         assert_eq!(m8.len(), 1);
         assert_eq!(m8[0].area, 2);
@@ -1027,7 +1065,7 @@ mod tests {
             .roi(Rectangle::new(Coordinate::new(0, 0), Size::new(3, 3)))
             .unwrap();
         let (lab, m) =
-            connected_components_with_measurements::<Label32, Connectivity4>(&roi).unwrap();
+            connected_components_with_measurements::<Label32, Connectivity4, _>(&roi).unwrap();
         assert_eq!(lab.label_count, 1);
         assert_eq!(m[0].area, 9);
         // 3x3 block with all four view edges cutting it → every pixel is a

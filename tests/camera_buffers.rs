@@ -10,11 +10,11 @@
 //! constructor refuses such a buffer outright, and there is a zero-copy route
 //! that takes it correctly.
 
+use fovea::Size;
 use fovea::border::Clamp;
-use fovea::image::{Image, ImageRef, ImageView, SubView};
+use fovea::image::{Image, ImageRef, ImageView, RowStride};
 use fovea::pixel::{Mono8, PlainPixel};
 use fovea::transform::gaussian_blur_3x3;
-use fovea::{Rectangle, Size};
 
 /// Image 6 px wide over a buffer with a row pitch of 8.
 const WIDTH: usize = 6;
@@ -57,20 +57,16 @@ fn from_raw_bytes_rejects_a_padded_plane() {
 // ─── Test 2: the same buffer, taken zero-copy ──────────────────────────────
 
 #[test]
-fn padded_plane_survives_as_a_strided_roi() {
+fn padded_plane_survives_as_a_strided_view() {
     let bytes = padded_plane();
 
     // 1. Reinterpret the bytes as pixels. Borrowed, nothing is copied.
     let pixels: &[Mono8] = Mono8::cast_slice(&bytes).expect("byte-aligned pixel type");
 
-    // 2. View the buffer at the width it actually has, padding included.
-    let padded = ImageRef::new(ROW_STRIDE, HEIGHT, pixels).expect("buffer is ROW_STRIDE*HEIGHT");
-
-    // 3. Crop the padding away. The sub-view keeps the row pitch of its
-    //    parent, which is exactly what a strided plane needs.
-    let frame = padded
-        .roi(Rectangle::new((0, 0), Size::new(WIDTH, HEIGHT)))
-        .expect("the image fits inside its own buffer");
+    // 2. Name the stride, in bytes as the SDK reports it. The view keeps it.
+    let stride = RowStride::bytes(ROW_STRIDE).expect("a stride of whole pixels");
+    let frame =
+        ImageRef::from_strided(WIDTH, HEIGHT, stride, pixels).expect("buffer reaches the last row");
 
     assert_eq!(frame.size(), Size::new(WIDTH, HEIGHT));
 
@@ -92,11 +88,9 @@ fn padded_plane_survives_as_a_strided_roi() {
 fn an_operation_on_the_strided_view_matches_the_packed_one() {
     let bytes = padded_plane();
     let pixels: &[Mono8] = Mono8::cast_slice(&bytes).unwrap();
-    // The sub-view borrows its parent, so the padded view has to stay bound.
-    let padded = ImageRef::new(ROW_STRIDE, HEIGHT, pixels).unwrap();
-    let strided = padded
-        .roi(Rectangle::new((0, 0), Size::new(WIDTH, HEIGHT)))
-        .unwrap();
+    let strided =
+        ImageRef::from_strided(WIDTH, HEIGHT, RowStride::bytes(ROW_STRIDE).unwrap(), pixels)
+            .unwrap();
 
     // The same image with the padding removed up front.
     let packed = Image::<Mono8>::generate(WIDTH, HEIGHT, |x, y| Mono8::new(sample(x, y)));

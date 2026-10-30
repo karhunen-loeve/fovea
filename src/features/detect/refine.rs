@@ -4,11 +4,12 @@
 //! The user-facing overview of the two-step localization story (interpolate
 //! for precision, refine for accuracy) lives on the parent module.
 
+use crate::Coordinate;
 use crate::error::Error;
 use crate::features::Corner;
+use crate::geometry::Point;
 use crate::image::RasterImage;
-use crate::pixel::SingleChannel;
-use crate::{Coordinate, CoordinateF64};
+use crate::pixel::{ChannelwiseMath, SingleChannel};
 
 use super::peaks::{NmsRadius, pixel_site};
 
@@ -184,15 +185,15 @@ const RANK_EPSILON: f64 = 1e-12;
 /// # Ok::<(), fovea::Error>(())
 /// ```
 pub fn refine_corners<IX, IY, P>(
-    corners: &mut [Corner],
+    corners: &mut [Corner<IX::Space>],
     gx: &IX,
     gy: &IY,
     radius: NmsRadius,
 ) -> Result<usize, Error>
 where
     IX: RasterImage<Pixel = P>,
-    IY: RasterImage<Pixel = P>,
-    P: SingleChannel,
+    IY: RasterImage<Pixel = P, Space = IX::Space>,
+    P: SingleChannel + ChannelwiseMath,
     f64: From<P::Channel>,
 {
     if gx.size() != gy.size() {
@@ -217,12 +218,12 @@ where
 fn refine_one<IX, IY, P>(
     gx: &IX,
     gy: &IY,
-    at: CoordinateF64,
+    at: Point<IX::Space>,
     radius: usize,
-) -> Option<CoordinateF64>
+) -> Option<Point<IX::Space>>
 where
     IX: RasterImage<Pixel = P>,
-    IY: RasterImage<Pixel = P>,
+    IY: RasterImage<Pixel = P, Space = IX::Space>,
     P: SingleChannel,
     f64: From<P::Channel>,
 {
@@ -247,10 +248,10 @@ fn solve_window<IX, IY, P>(
     gy: &IY,
     centre: Coordinate,
     radius: usize,
-) -> Option<CoordinateF64>
+) -> Option<Point<IX::Space>>
 where
     IX: RasterImage<Pixel = P>,
-    IY: RasterImage<Pixel = P>,
+    IY: RasterImage<Pixel = P, Space = IX::Space>,
     P: SingleChannel,
     f64: From<P::Channel>,
 {
@@ -305,10 +306,7 @@ where
     if !inside_the_window {
         return None;
     }
-    Some(CoordinateF64::new(
-        centre.x as f64 + dx,
-        centre.y as f64 + dy,
-    ))
+    Some(Point::new(centre.x as f64 + dx, centre.y as f64 + dy))
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
@@ -316,6 +314,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Pixels;
     use crate::Sigma;
     use crate::border::{Clamp, Skip};
     use crate::features::detect::{
@@ -346,7 +345,7 @@ mod tests {
         [(a, a), (b, a), (a, b), (b, b)]
     }
 
-    fn nearest_truth(truth: &[(f64, f64); 4], p: CoordinateF64) -> (f64, f64) {
+    fn nearest_truth(truth: &[(f64, f64); 4], p: Point<Pixels>) -> (f64, f64) {
         *truth
             .iter()
             .min_by(|a, b| {
@@ -460,9 +459,9 @@ mod tests {
             CornerParams::try_new(window, 0.3 * max_response(&map), NmsRadius::new(3).unwrap())
                 .unwrap();
         let corners = detect_corners(&image, ShiTomasi, params);
-        assert_eq!(corners[0].position(), CoordinateF64::new(9.0, 9.0));
+        assert_eq!(corners[0].position(), Point::new(9.0, 9.0));
 
-        let distance = |p: CoordinateF64| ((p.x - 7.5).powi(2) + (p.y - 7.5).powi(2)).sqrt();
+        let distance = |p: Point<Pixels>| ((p.x - 7.5).powi(2) + (p.y - 7.5).powi(2)).sqrt();
 
         let mut interpolated = corners.clone();
         assert!(interpolate_corners(&mut interpolated, &map) >= 1);
@@ -540,7 +539,7 @@ mod tests {
         // Two clean edge lines crossing at (3.5, 5.2), no mixed pixels: the
         // least squares has a consistent solution and must hit it exactly.
         let (gx, gy) = crossing_gradients();
-        let mut corners = vec![Corner::new(CoordinateF64::new(4.0, 5.0), 1.0)];
+        let mut corners = vec![Corner::new(Point::new(4.0, 5.0), 1.0)];
         assert_eq!(
             refine_corners(&mut corners, &gx, &gy, NmsRadius::new(2).unwrap()).unwrap(),
             1
@@ -557,7 +556,7 @@ mod tests {
         // window sees all of it, and the result is the same exact point a
         // well-placed start finds.
         let (gx, gy) = crossing_gradients();
-        let mut corners = vec![Corner::new(CoordinateF64::new(6.0, 6.0), 1.0)];
+        let mut corners = vec![Corner::new(Point::new(6.0, 6.0), 1.0)];
         assert_eq!(
             refine_corners(&mut corners, &gx, &gy, NmsRadius::new(2).unwrap()).unwrap(),
             1
@@ -573,12 +572,12 @@ mod tests {
     fn a_window_leaving_the_frame_is_refused() {
         let (gx, gy) = crossing_gradients();
         // Radius 5 around (4, 5) runs off every side of the 9x9 frame.
-        let mut corners = vec![Corner::new(CoordinateF64::new(4.0, 5.0), 1.0)];
+        let mut corners = vec![Corner::new(Point::new(4.0, 5.0), 1.0)];
         assert_eq!(
             refine_corners(&mut corners, &gx, &gy, NmsRadius::new(5).unwrap()).unwrap(),
             0
         );
-        assert_eq!(corners[0].position(), CoordinateF64::new(4.0, 5.0));
+        assert_eq!(corners[0].position(), Point::new(4.0, 5.0));
     }
 
     #[test]
@@ -589,36 +588,36 @@ mod tests {
         let image = square(24, 8, 16);
         let gx = sobel_x(&image, &Clamp);
         let gy = sobel_y(&image, &Clamp);
-        let mut corners = vec![Corner::new(CoordinateF64::new(8.0, 12.0), 1.0)];
+        let mut corners = vec![Corner::new(Point::new(8.0, 12.0), 1.0)];
         assert_eq!(
             refine_corners(&mut corners, &gx, &gy, NmsRadius::new(2).unwrap()).unwrap(),
             0
         );
-        assert_eq!(corners[0].position(), CoordinateF64::new(8.0, 12.0));
+        assert_eq!(corners[0].position(), Point::new(8.0, 12.0));
     }
 
     #[test]
     fn a_flat_window_is_refused() {
         let gx: Image<MonoF32> = Image::zero(9, 9);
         let gy: Image<MonoF32> = Image::zero(9, 9);
-        let mut corners = vec![Corner::new(CoordinateF64::new(4.0, 4.0), 1.0)];
+        let mut corners = vec![Corner::new(Point::new(4.0, 4.0), 1.0)];
         assert_eq!(
             refine_corners(&mut corners, &gx, &gy, NmsRadius::new(2).unwrap()).unwrap(),
             0
         );
-        assert_eq!(corners[0].position(), CoordinateF64::new(4.0, 4.0));
+        assert_eq!(corners[0].position(), Point::new(4.0, 4.0));
     }
 
     #[test]
     fn a_nan_gradient_refuses_the_fit() {
         let (gx, mut gy) = crossing_gradients();
         *gy.pixel_at_mut(4, 5) = MonoF32::new(f32::NAN);
-        let mut corners = vec![Corner::new(CoordinateF64::new(4.0, 5.0), 1.0)];
+        let mut corners = vec![Corner::new(Point::new(4.0, 5.0), 1.0)];
         assert_eq!(
             refine_corners(&mut corners, &gx, &gy, NmsRadius::new(2).unwrap()).unwrap(),
             0
         );
-        assert_eq!(corners[0].position(), CoordinateF64::new(4.0, 5.0));
+        assert_eq!(corners[0].position(), Point::new(4.0, 5.0));
     }
 
     #[test]
@@ -628,16 +627,16 @@ mod tests {
         // gradients cannot be refined against them.
         let (gx, gy) = crossing_gradients();
         let mut corners = vec![
-            Corner::new(CoordinateF64::new(40.0, 40.0), 0.9),
-            Corner::new(CoordinateF64::new(-3.0, 2.0), 0.9),
-            Corner::new(CoordinateF64::new(f64::NAN, 2.0), 0.9),
+            Corner::new(Point::new(40.0, 40.0), 0.9),
+            Corner::new(Point::new(-3.0, 2.0), 0.9),
+            Corner::new(Point::new(f64::NAN, 2.0), 0.9),
         ];
         assert_eq!(
             refine_corners(&mut corners, &gx, &gy, NmsRadius::new(2).unwrap()).unwrap(),
             0
         );
-        assert_eq!(corners[0].position(), CoordinateF64::new(40.0, 40.0));
-        assert_eq!(corners[1].position(), CoordinateF64::new(-3.0, 2.0));
+        assert_eq!(corners[0].position(), Point::new(40.0, 40.0));
+        assert_eq!(corners[1].position(), Point::new(-3.0, 2.0));
     }
 
     // ── Contract ────────────────────────────────────────────────────────
@@ -660,21 +659,21 @@ mod tests {
     fn the_count_reports_only_the_fits_that_succeeded() {
         let (gx, gy) = crossing_gradients();
         let mut corners = vec![
-            Corner::new(CoordinateF64::new(0.0, 0.0), 0.5), // window off the frame
-            Corner::new(CoordinateF64::new(4.0, 5.0), 0.5), // refines
+            Corner::new(Point::new(0.0, 0.0), 0.5), // window off the frame
+            Corner::new(Point::new(4.0, 5.0), 0.5), // refines
         ];
         assert_eq!(
             refine_corners(&mut corners, &gx, &gy, NmsRadius::new(2).unwrap()).unwrap(),
             1
         );
-        assert_eq!(corners[0].position(), CoordinateF64::new(0.0, 0.0));
+        assert_eq!(corners[0].position(), Point::new(0.0, 0.0));
         assert!((corners[1].position().x - 3.5).abs() < 1e-9);
     }
 
     #[test]
     fn the_response_is_left_alone() {
         let (gx, gy) = crossing_gradients();
-        let mut corners = vec![Corner::new(CoordinateF64::new(4.0, 5.0), 0.75)];
+        let mut corners = vec![Corner::new(Point::new(4.0, 5.0), 0.75)];
         assert_eq!(
             refine_corners(&mut corners, &gx, &gy, NmsRadius::new(2).unwrap()).unwrap(),
             1
@@ -709,7 +708,7 @@ mod tests {
                 _ => 0.0,
             })
         });
-        let mut corners = vec![Corner::new(CoordinateF64::new(4.0, 5.0), 1.0)];
+        let mut corners = vec![Corner::new(Point::new(4.0, 5.0), 1.0)];
         assert_eq!(
             refine_corners(&mut corners, &gx, &gy, NmsRadius::new(2).unwrap()).unwrap(),
             1

@@ -7,7 +7,7 @@ use fovea::border::Clamp;
 use fovea::image::{Image, ImageView, SubView};
 use fovea::pixel::{Mono8, Mono16, MonoF32, Rgb8};
 use fovea::transform::{
-    AbsDiff, Broadcast, FullRange, Luminance, PixelAdd, combine_images, convert_image,
+    AbsDiff, Broadcast, Bt601, FullRange, Luminance, PixelAdd, combine_images, convert_image,
     gaussian_blur_3x3, sobel_x,
 };
 use fovea::{Rectangle, Size};
@@ -145,7 +145,7 @@ fn pipeline_convert_mono8_to_mono16_fullrange() {
 fn pipeline_convert_rgb8_to_mono8_luminance() {
     // Pure red → luminance ≈ 0.299 * 255 ≈ 76
     let red = Image::<Rgb8>::fill(3, 3, Rgb8::new(255, 0, 0));
-    let gray: Image<Mono8> = convert_image(&red, Luminance);
+    let gray: Image<Mono8> = convert_image(&red, Luminance(Bt601));
     assert_eq!(gray.size(), red.size());
 
     let v = gray.pixel_at(0, 0).value();
@@ -157,7 +157,7 @@ fn pipeline_convert_rgb8_to_mono8_luminance() {
 
     // Pure green → luminance ≈ 0.587 * 255 ≈ 150
     let green = Image::<Rgb8>::fill(3, 3, Rgb8::new(0, 255, 0));
-    let gray_g: Image<Mono8> = convert_image(&green, Luminance);
+    let gray_g: Image<Mono8> = convert_image(&green, Luminance(Bt601));
     let vg = gray_g.pixel_at(0, 0).value();
     assert!(
         (vg as i32 - 150).unsigned_abs() <= 2,
@@ -199,7 +199,7 @@ fn pipeline_create_convert_blur_roi() {
     assert_eq!(rgb.size(), Size::new(10, 10));
 
     // Step 2: Convert to grayscale via Luminance
-    let gray: Image<Mono8> = convert_image(&rgb, Luminance);
+    let gray: Image<Mono8> = convert_image(&rgb, Luminance(Bt601));
     assert_eq!(gray.size(), rgb.size());
     // For gray input (r==g==b) Luminance should preserve the value exactly
     // (or within ±1 due to integer rounding)
@@ -304,7 +304,7 @@ fn pipeline_broadcast_blur_convert_back() {
     assert_eq!(blurred_rgb.size(), rgb.size());
 
     // Step 3: Convert back to Mono8 via Luminance
-    let result: Image<Mono8> = convert_image(&blurred_rgb, Luminance);
+    let result: Image<Mono8> = convert_image(&blurred_rgb, Luminance(Bt601));
     assert_eq!(result.size(), mono.size());
 
     // Step 4: Also blur the mono image directly for comparison

@@ -1,7 +1,10 @@
 //! The contour data model: [`Contour`], [`ComponentContour`],
 //! [`ContourHierarchy`].
 
-use crate::{Coordinate, CoordinateF64};
+use core::marker::PhantomData;
+
+use crate::Coordinate;
+use crate::geometry::{PixelSpace, Pixels, Point};
 
 use super::chain::ChainCode;
 use super::polygon::{convex_hull, polygon_area, polygon_centroid, polygon_perimeter};
@@ -42,20 +45,53 @@ pub enum ContourKind {
 /// Thin structures trace **out and back**: a 3-px horizontal line yields
 /// 4 points (3 out, 1 back), encloses no area, and has a perimeter — the
 /// length of the out-and-back path — of 4.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Contour {
+pub struct Contour<S = Pixels> {
     points: Vec<Coordinate>,
     kind: ContourKind,
+    space: PhantomData<fn() -> S>,
 }
 
-impl Contour {
+// Written by hand rather than derived: a derive would require `S: Clone`,
+// `S: Debug` and `S: PartialEq` of a marker that is never instantiated.
+impl<S> Clone for Contour<S> {
+    fn clone(&self) -> Self {
+        Self {
+            points: self.points.clone(),
+            kind: self.kind,
+            space: PhantomData,
+        }
+    }
+}
+
+impl<S> PartialEq for Contour<S> {
+    fn eq(&self, other: &Self) -> bool {
+        self.points == other.points && self.kind == other.kind
+    }
+}
+
+impl<S> Eq for Contour<S> {}
+
+impl<S> core::fmt::Debug for Contour<S> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Contour")
+            .field("points", &self.points)
+            .field("kind", &self.kind)
+            .finish()
+    }
+}
+
+impl<S: PixelSpace> Contour<S> {
     /// Certify a traced point chain. Tracer-internal.
     pub(super) fn new(points: Vec<Coordinate>, kind: ContourKind) -> Self {
         debug_assert!(
             !points.is_empty(),
             "a traced contour has at least one point"
         );
-        Self { points, kind }
+        Self {
+            points,
+            kind,
+            space: PhantomData,
+        }
     }
 
     /// The border pixels in trace order. Never empty.
@@ -95,7 +131,7 @@ impl Contour {
     /// Centroid of the enclosed region, or `None` when the chain
     /// encloses no area.
     #[must_use]
-    pub fn centroid(&self) -> Option<CoordinateF64> {
+    pub fn centroid(&self) -> Option<Point<S>> {
         polygon_centroid(&self.points)
     }
 
@@ -163,24 +199,51 @@ impl Contour {
 
 /// All contours of one connected component: its outer border, the
 /// borders of its holes, and its place in the nesting hierarchy.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ComponentContour {
-    pub(super) outer: Contour,
-    pub(super) holes: Vec<Contour>,
+pub struct ComponentContour<S = Pixels> {
+    pub(super) outer: Contour<S>,
+    pub(super) holes: Vec<Contour<S>>,
     pub(super) enclosing: Option<usize>,
 }
 
-impl ComponentContour {
+impl<S> Clone for ComponentContour<S> {
+    fn clone(&self) -> Self {
+        Self {
+            outer: self.outer.clone(),
+            holes: self.holes.clone(),
+            enclosing: self.enclosing,
+        }
+    }
+}
+
+impl<S> PartialEq for ComponentContour<S> {
+    fn eq(&self, other: &Self) -> bool {
+        self.outer == other.outer && self.holes == other.holes && self.enclosing == other.enclosing
+    }
+}
+
+impl<S> Eq for ComponentContour<S> {}
+
+impl<S> core::fmt::Debug for ComponentContour<S> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ComponentContour")
+            .field("outer", &self.outer)
+            .field("holes", &self.holes)
+            .field("enclosing", &self.enclosing)
+            .finish()
+    }
+}
+
+impl<S> ComponentContour<S> {
     /// The component's outer border.
     #[must_use]
-    pub fn outer(&self) -> &Contour {
+    pub fn outer(&self) -> &Contour<S> {
         &self.outer
     }
 
     /// One border per hole, in raster order of the holes' first pixels.
     /// Empty for a component without holes.
     #[must_use]
-    pub fn holes(&self) -> &[Contour] {
+    pub fn holes(&self) -> &[Contour<S>] {
         &self.holes
     }
 
@@ -211,15 +274,38 @@ impl ComponentContour {
 /// [`Labeling`](crate::analyze::components::Labeling) returned alongside —
 /// the same convention as the stats and measurements vectors, so contours
 /// join those tables with no translation.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ContourHierarchy {
-    pub(super) components: Vec<ComponentContour>,
+pub struct ContourHierarchy<S = Pixels> {
+    pub(super) components: Vec<ComponentContour<S>>,
 }
 
-impl ContourHierarchy {
+impl<S> Clone for ContourHierarchy<S> {
+    fn clone(&self) -> Self {
+        Self {
+            components: self.components.clone(),
+        }
+    }
+}
+
+impl<S> PartialEq for ContourHierarchy<S> {
+    fn eq(&self, other: &Self) -> bool {
+        self.components == other.components
+    }
+}
+
+impl<S> Eq for ContourHierarchy<S> {}
+
+impl<S> core::fmt::Debug for ContourHierarchy<S> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ContourHierarchy")
+            .field("components", &self.components)
+            .finish()
+    }
+}
+
+impl<S> ContourHierarchy<S> {
     /// All components, in label order (component `i` ↔ label `i + 1`).
     #[must_use]
-    pub fn components(&self) -> &[ComponentContour] {
+    pub fn components(&self) -> &[ComponentContour<S>] {
         &self.components
     }
 
@@ -227,7 +313,7 @@ impl ContourHierarchy {
     /// label image), or `None` if the label is `0` (background) or out of
     /// range.
     #[must_use]
-    pub fn component_for_label(&self, label: u32) -> Option<&ComponentContour> {
+    pub fn component_for_label(&self, label: u32) -> Option<&ComponentContour<S>> {
         let index = usize::try_from(label.checked_sub(1)?).ok()?;
         self.components.get(index)
     }
@@ -259,7 +345,7 @@ mod tests {
         ]
         .map(Coordinate::from)
         .to_vec();
-        Contour::new(points, ContourKind::Outer)
+        Contour::<Pixels>::new(points, ContourKind::Outer)
     }
 
     #[test]
@@ -279,7 +365,7 @@ mod tests {
 
     #[test]
     fn degenerate_contour_descriptors_are_absent_not_nan() {
-        let dot = Contour::new(vec![c(5, 5)], ContourKind::Outer);
+        let dot = Contour::<Pixels>::new(vec![c(5, 5)], ContourKind::Outer);
         assert_eq!(dot.area(), 0.0);
         assert_eq!(dot.perimeter(), 0.0);
         assert_eq!(dot.centroid(), None);
@@ -287,7 +373,8 @@ mod tests {
         assert_eq!(dot.solidity(), None);
 
         // Out-and-back line: perimeter exists, area does not.
-        let line = Contour::new(vec![c(1, 2), c(2, 2), c(3, 2), c(2, 2)], ContourKind::Outer);
+        let line =
+            Contour::<Pixels>::new(vec![c(1, 2), c(2, 2), c(3, 2), c(2, 2)], ContourKind::Outer);
         assert_eq!(line.area(), 0.0);
         assert_eq!(line.perimeter(), 4.0);
         assert_eq!(line.centroid(), None);
@@ -299,7 +386,8 @@ mod tests {
         // still zero enclosed area, but its point set's hull is a real
         // triangle, so the hull-side guard alone used to let this reach
         // the quotient and report the misuse-inviting Some(0.0).
-        let bent = Contour::new(vec![c(1, 1), c(2, 1), c(2, 2), c(2, 1)], ContourKind::Outer);
+        let bent =
+            Contour::<Pixels>::new(vec![c(1, 1), c(2, 1), c(2, 2), c(2, 1)], ContourKind::Outer);
         assert_eq!(bent.area(), 0.0);
         assert_eq!(bent.perimeter(), 4.0);
         assert!(polygon_area(&bent.convex_hull()) > 0.0);
@@ -326,7 +414,7 @@ mod tests {
         ]
         .map(Coordinate::from)
         .to_vec();
-        let l = Contour::new(points, ContourKind::Outer);
+        let l = Contour::<Pixels>::new(points, ContourKind::Outer);
         let s = l.solidity().unwrap();
         assert!(s < 1.0, "solidity {s} of a concave shape must be < 1");
         assert!(s > 0.0);
@@ -344,8 +432,8 @@ mod tests {
         let two_holes = ComponentContour {
             outer: outer.clone(),
             holes: vec![
-                Contour::new(vec![c(1, 1)], ContourKind::Hole),
-                Contour::new(vec![c(2, 2)], ContourKind::Hole),
+                Contour::<Pixels>::new(vec![c(1, 1)], ContourKind::Hole),
+                Contour::<Pixels>::new(vec![c(2, 2)], ContourKind::Hole),
             ],
             enclosing: None,
         };
@@ -364,5 +452,29 @@ mod tests {
         assert!(hierarchy.component_for_label(0).is_none());
         assert!(hierarchy.component_for_label(1).is_some());
         assert!(hierarchy.component_for_label(2).is_none());
+    }
+
+    #[test]
+    fn the_contour_traits_ask_nothing_of_the_space() {
+        let outer = Contour::<Pixels>::new(
+            vec![Coordinate::new(0, 0), Coordinate::new(1, 0)],
+            ContourKind::Outer,
+        );
+        let hole = Contour::<Pixels>::new(vec![Coordinate::new(5, 5)], ContourKind::Hole);
+        assert_eq!(outer.clone(), outer);
+        assert_ne!(outer, hole);
+        assert!(format!("{outer:?}").starts_with("Contour { points:"));
+        let component = ComponentContour {
+            outer: outer.clone(),
+            holes: vec![hole],
+            enclosing: Some(0),
+        };
+        assert_eq!(component.clone(), component);
+        assert!(format!("{component:?}").starts_with("ComponentContour { outer:"));
+        let hierarchy = ContourHierarchy {
+            components: vec![component],
+        };
+        assert_eq!(hierarchy.clone(), hierarchy);
+        assert!(format!("{hierarchy:?}").starts_with("ContourHierarchy { components:"));
     }
 }

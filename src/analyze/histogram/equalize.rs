@@ -15,7 +15,7 @@ use crate::Error;
 use crate::analyze::histogram::strategy::BinningStrategy;
 use crate::analyze::histogram::{Histogram, NaturalBins, histogram};
 use crate::image::{Image, RasterImage, RasterImageMut};
-use crate::pixel::{Array, HomogeneousPixel, ZeroablePixel};
+use crate::pixel::{Array, ChannelwiseMath, ZeroablePixel};
 use crate::transform::ChannelLut;
 
 /// Build a 256-entry per-channel equalization LUT from a single-channel
@@ -98,7 +98,7 @@ where
 ///
 /// # Errors
 ///
-/// Returns [`Error::InvalidBinningStrategy`] (Tier 2) only if the
+/// Returns [`Error::InvalidParameter`] (Tier 2) only if the
 /// internal histogram engine ever does. [`NaturalBins`] has no
 /// configuration to validate, but the `Result` return shape is kept
 /// for future strategy overloads.
@@ -116,13 +116,13 @@ where
 /// assert_eq!(u8::from(out.pixel_at(0, 0)), 0);
 /// assert_eq!(u8::from(out.pixel_at(10, 0)), 255);
 /// ```
-pub fn equalize_image<I, P>(image: &I) -> Result<Image<P>, Error>
+pub fn equalize_image<I, P>(image: &I) -> Result<Image<P, I::Space>, Error>
 where
     I: RasterImage<Pixel = P>,
-    P: HomogeneousPixel<Channel = Saturating<u8>> + ZeroablePixel,
+    P: ChannelwiseMath<Channel = Saturating<u8>> + ZeroablePixel,
     NaturalBins: BinningStrategy<P::Channel>,
 {
-    let mut out = Image::<P>::zero(image.width(), image.height());
+    let mut out = Image::<P, _>::zero_in(image.width(), image.height());
     equalize_image_into(image, &mut out)?;
     Ok(out)
 }
@@ -135,8 +135,8 @@ where
 pub fn equalize_image_into<I, O, P>(image: &I, out: &mut O) -> Result<(), Error>
 where
     I: RasterImage<Pixel = P>,
-    O: RasterImageMut<Pixel = P>,
-    P: HomogeneousPixel<Channel = Saturating<u8>>,
+    O: RasterImageMut<Pixel = P, Space = I::Space>,
+    P: ChannelwiseMath<Channel = Saturating<u8>>,
     NaturalBins: BinningStrategy<P::Channel>,
 {
     assert_eq!(

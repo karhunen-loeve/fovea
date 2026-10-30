@@ -86,7 +86,7 @@
 //! strongest:
 //!
 //! ```
-//! use fovea::CoordinateF64;
+//! use fovea::{Pixels, Point};
 //! use fovea::features::{retain_top_n, Corner, HasPosition};
 //! use fovea::image::{Image, ImageView, PlacedPyramid, Pyramid};
 //! use fovea::pixel::MonoF32;
@@ -102,12 +102,12 @@
 //!
 //! // Two detections in the level's own coordinates.
 //! let mut corners = vec![
-//!     Corner::from_level(level, CoordinateF64::new(1.0, 1.0), 0.3),
-//!     Corner::from_level(level, CoordinateF64::new(3.5, 2.0), 0.9),
+//!     Corner::from_level(level, Point::new(1.0, 1.0), 0.3),
+//!     Corner::from_level(level, Point::new(3.5, 2.0), 0.9),
 //! ];
 //!
 //! retain_top_n(&mut corners, 1);
-//! assert_eq!(corners[0].position(), CoordinateF64::new(7.0, 4.0));
+//! assert_eq!(corners[0].position(), Point::new(7.0, 4.0));
 //! ```
 
 pub mod detect;

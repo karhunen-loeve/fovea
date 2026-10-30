@@ -13,6 +13,7 @@
 //! | Resize by copying samples | [`resize`](crate::transform::resize) + [`NearestNeighbor`](crate::transform::NearestNeighbor) | Works for gamma-encoded pixels because no blending occurs. |
 //! | Resize smoothly | [`resize`](crate::transform::resize) + [`Bilinear`](crate::transform::Bilinear) | Requires [`crate::pixel::LinearSpace`]. Linearize sRGB first. |
 //! | Combine two images pixel-wise | [`combine_images`](crate::transform::combine_images) | Inputs must have the same size. |
+//! | Rectify or undistort | [`remap`](crate::transform::remap), [`DestToSourceTable`](crate::transform::DestToSourceTable) | The direction is in the type; the border policy must give every pixel a value. |
 //! | Apply a convolution/filter | [`convolve`](crate::transform::convolve) or named filters | Choose an explicit border policy. |
 //! | Erode/dilate/median | [`map_neighborhood`](crate::transform::map_neighborhood) or morphology helpers | Use masks for active neighborhood positions. |
 //!
@@ -125,24 +126,28 @@ mod demosaic;
 mod filters;
 mod fold;
 mod geometry;
+mod interpolate;
 mod map_neighborhood;
 mod morphology;
+mod pad;
 mod pyramid;
+mod remap;
 mod resize;
 mod template_match;
 
 pub use crate::pixel::blend;
 pub use combine::{
-    AbsDiff, Blend, ClosureCombine, CombinePixels, Direction, DirectionChannel, LinearCombine,
-    Magnitude, MagnitudeChannel, MagnitudeHypot, Max, Min, PixelAdd, PixelMultiply, PixelSubtract,
-    abs_diff, add, combine_images, combine_images_fn, combine_images_fn_into, combine_images_into,
-    image_max, image_min, subtract,
+    AbsDiff, Blend, ClosureCombine, CombinePixels, ComplexMultiply, Direction, DirectionChannel,
+    FromParts, LinearCombine, Magnitude, MagnitudeChannel, MagnitudeHypot, Max, Min, PixelAdd,
+    PixelMultiply, PixelSubtract, abs_diff, add, combine_images, combine_images_fn,
+    combine_images_fn_into, combine_images_into, image_max, image_min, subtract,
 };
 pub use convert::{
     AddAlpha, BayerToMono, BinaryMask, BinaryThreshold, BinaryThresholdInv, BrightnessContrast,
-    Broadcast, ChannelLut, Clamp, ColorSwap, ConvertPixel, ConvertPixelExt, Depalettize, FullRange,
-    Invert, Luminance, Lut, Narrow, PixelMap, SrgbGamma, Then, ToZeroThreshold, ToZeroThresholdInv,
-    TruncateThreshold, convert_image, convert_image_into,
+    Broadcast, Bt601, Bt709, ChannelLut, Clamp, ColorSwap, ComplexMagnitude, ComplexPhase,
+    ConvertPixel, ConvertPixelExt, Depalettize, FullRange, ImaginaryPart, Invert, Luminance,
+    LuminanceStandard, Lut, Narrow, PixelMap, RealPart, SrgbGamma, Then, ToZeroThreshold,
+    ToZeroThresholdInv, TruncateThreshold, convert_image, convert_image_into,
 };
 pub use convolve::{convolve, convolve_into, correlate, correlate_into};
 pub use convolve_separable::{SeparableScratch, convolve_separable, convolve_separable_into};
@@ -167,6 +172,10 @@ pub use geometry::{
     flip_h, flip_h_into, flip_v, flip_v_into, rotate_90, rotate_90_into, rotate_180,
     rotate_180_into, rotate_270, rotate_270_into, transpose, transpose_into,
 };
+pub use interpolate::{
+    Antialiased, Bilinear, CatmullRom, InterpolationKernel, KeysBicubic, Lanczos, Lanczos2,
+    Lanczos3, MAX_SAMPLE_RADIUS,
+};
 pub use map_neighborhood::{
     ClosureMap, MapItem, MapOp, map_neighborhood, map_neighborhood_fn, map_neighborhood_fn_into,
     map_neighborhood_into,
@@ -175,8 +184,10 @@ pub use morphology::{
     black_hat, closing, closing_into, dilate, dilate_into, erode, erode_into, median_filter,
     morphological_gradient, opening, opening_into, top_hat,
 };
+pub use pad::{Margins, PadGeometry, pad};
 pub use pyramid::{Gaussian, PyramidMethod, ScaledGaussian, pyr_down, pyr_up};
-pub use resize::{Bilinear, NearestNeighbor, ResizeMethod, resize, resize_into};
+pub use remap::{DestToSourceTable, RemapMethod, remap};
+pub use resize::{NearestNeighbor, ResizeMethod, resize, resize_into};
 pub use template_match::{
     MatchMethod, NCC, SAD, SSD, ScorePolarity, match_template, match_template_into,
 };

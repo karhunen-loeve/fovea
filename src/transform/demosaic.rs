@@ -42,7 +42,7 @@
 //! ```
 
 use crate::border::{BorderPolicy, Mirror, compute_interior_region};
-use crate::error::Error;
+use crate::error::{Error, ParameterError, Requirement, Value};
 use crate::image::{Image, ImageView, ImageViewMut};
 use crate::pixel::{
     FromLinear, LinearPixel, MonoF32, RgbF32, ZeroablePixel,
@@ -258,14 +258,14 @@ pub trait DemosaicMethod<B: BayerPixel> {
 /// let _: Image<Rgb8> = demosaic(&raw, BayerBilinear);
 /// ```
 #[must_use]
-pub fn demosaic<I, B, M>(image: &I, method: M) -> Image<B::RgbOutput>
+pub fn demosaic<I, B, M>(image: &I, method: M) -> Image<B::RgbOutput, I::Space>
 where
     I: ImageView<Pixel = B>,
     B: BayerPixel + LinearPixel<f32, Accumulator = MonoF32>,
     B::RgbOutput: ZeroablePixel + FromLinear<RgbF32>,
     M: DemosaicMethod<B>,
 {
-    let mut output = Image::<B::RgbOutput>::zero(image.width(), image.height());
+    let mut output = Image::<B::RgbOutput, _>::zero_in(image.width(), image.height());
     demosaic_into(image, &mut output, method);
     output
 }
@@ -313,7 +313,7 @@ pub fn demosaic_into<I, B, O, M>(image: &I, output: &mut O, method: M)
 where
     I: ImageView<Pixel = B>,
     B: BayerPixel + LinearPixel<f32, Accumulator = MonoF32>,
-    O: ImageViewMut<Pixel = B::RgbOutput>,
+    O: ImageViewMut<Pixel = B::RgbOutput, Space = I::Space>,
     B::RgbOutput: FromLinear<RgbF32>,
     M: DemosaicMethod<B>,
 {
@@ -327,8 +327,11 @@ where
 
     let radius = M::RADIUS;
     let window = 2 * radius + 1;
-    let interior =
-        compute_interior_region(image.size(), Size::new(window, window), (radius, radius));
+    let interior = compute_interior_region(
+        image.size(),
+        Size::new(window, window),
+        Coordinate::new(radius, radius),
+    );
 
     // ── HOT PATH — every tap is inside the frame ──────────────────────────
     //
@@ -367,15 +370,9 @@ where
                 }
             }
 
-            let rgb = method.interpolate(Coordinate::new(x, y), |tap| {
-                Mirror
-                    .pixel_at(
-                        image,
-                        x as isize + tap.dx as isize,
-                        y as isize + tap.dy as isize,
-                    )
-                    .to_accumulator()
-                    .0
+            let site = Coordinate::new(x, y);
+            let rgb = method.interpolate(site, |tap| {
+                Mirror.pixel_at(image, site.step(tap)).to_accumulator().0
             });
             *output.pixel_at_mut(x, y) = FromLinear::from_linear(rgb);
         }
@@ -744,15 +741,21 @@ impl BayerGains {
     /// would erase it — both silent failures at the pixel level, so they
     /// are rejected where the number enters the API.
     pub fn try_new(red: f32, green: f32, blue: f32) -> Result<Self, Error> {
-        let all = [red, green, blue];
-        if all.iter().all(|g| g.is_finite() && *g >= 0.0) {
-            Ok(Self { red, green, blue })
-        } else {
-            Err(Error::InvalidParameter(format!(
-                "BayerGains must be finite and non-negative, got \
-                 red = {red}, green = {green}, blue = {blue}"
-            )))
+        for (name, gain) in [
+            ("red gain", red),
+            ("green gain", green),
+            ("blue gain", blue),
+        ] {
+            if !(gain.is_finite() && gain >= 0.0) {
+                return Err(ParameterError::new(
+                    name,
+                    Requirement::FiniteNonNegative,
+                    Value::F32(gain),
+                )
+                .into());
+            }
         }
+        Ok(Self { red, green, blue })
     }
 
     /// The identity: every gain `1.0`.
@@ -830,12 +833,12 @@ impl BayerGains {
 /// assert_eq!(balanced.pixel_at(1, 1).value(), 1250); // B site
 /// ```
 #[must_use]
-pub fn white_balance<I, B>(image: &I, gains: BayerGains) -> Image<B>
+pub fn white_balance<I, B>(image: &I, gains: BayerGains) -> Image<B, I::Space>
 where
     I: ImageView<Pixel = B>,
     B: BayerPixel + LinearPixel<f32, Accumulator = MonoF32> + FromLinear<MonoF32> + ZeroablePixel,
 {
-    let mut output = Image::<B>::zero(image.width(), image.height());
+    let mut output = Image::<B, _>::zero_in(image.width(), image.height());
     white_balance_into(image, &mut output, gains);
     output
 }
@@ -870,7 +873,7 @@ pub fn white_balance_into<I, B, O>(image: &I, output: &mut O, gains: BayerGains)
 where
     I: ImageView<Pixel = B>,
     B: BayerPixel + LinearPixel<f32, Accumulator = MonoF32> + FromLinear<MonoF32>,
-    O: ImageViewMut<Pixel = B>,
+    O: ImageViewMut<Pixel = B, Space = I::Space>,
 {
     assert_eq!(
         image.size(),
@@ -1357,6 +1360,16 @@ mod tests {
     }
 
     #[test]
+    fn try_new_reports_the_first_unusable_gain() {
+        // Green is checked before blue, so the NaN is reported, not the -1.
+        let Err(Error::InvalidParameter(e)) = BayerGains::try_new(1.0, f32::NAN, -1.0) else {
+            panic!("a NaN gain must be rejected as a parameter");
+        };
+        assert_eq!(e.requirement(), Requirement::FiniteNonNegative);
+        assert_eq!(e.value(), Value::F32(f32::NAN));
+    }
+
+    #[test]
     fn new_rejects_a_negative_gain() {
         assert!(BayerGains::new(1.0, -0.5, 1.0).is_none());
         assert!(BayerGains::new(f32::NAN, 1.0, 1.0).is_none());
@@ -1441,7 +1454,9 @@ mod tests {
         for len in 2..12usize {
             let row: Image<Mono8> = Image::generate(len, 1, |x, _| Mono8::new(x as u8));
             for coord in -6isize..(len as isize + 6) {
-                let reflected = Mirror.pixel_at(&row, coord, 0).value() as isize;
+                let reflected = Mirror
+                    .pixel_at(&row, crate::SignedCoordinate::new(coord, 0))
+                    .value() as isize;
                 assert_eq!(
                     reflected.rem_euclid(2),
                     coord.rem_euclid(2),

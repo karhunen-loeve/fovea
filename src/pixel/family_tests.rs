@@ -245,6 +245,16 @@ test_pixel_family!(monof64, MonoF64, name: "MonoF64",
     sample: MonoF64::new(0.42), different: MonoF64::new(0.99),
     channels: [0.42f64], other_ch: 0.99f64, align: 8);
 
+// ── Complex float ───────────────────────────────────────────────────────────
+
+test_pixel_family!(complexf32, ComplexF32, name: "ComplexF32",
+    sample: ComplexF32::new(0.25, -0.5), different: ComplexF32::new(0.1, 0.2),
+    channels: [0.25f32, -0.5f32], other_ch: 0.99f32, align: 4);
+
+test_pixel_family!(complexf64, ComplexF64, name: "ComplexF64",
+    sample: ComplexF64::new(0.25, -0.5), different: ComplexF64::new(0.1, 0.2),
+    channels: [0.25f64, -0.5f64], other_ch: 0.99f64, align: 8);
+
 // ── MonoA integer ───────────────────────────────────────────────────────────
 
 test_pixel_family!(monoa8, MonoA8, name: "MonoA8",
@@ -595,6 +605,8 @@ fn origin_invariant_marker_covers_all_families() {
         Mono64,
         MonoF32,
         MonoF64,
+        ComplexF32,
+        ComplexF64,
         Mono10,
         Mono12,
         Mono14,
@@ -785,5 +797,230 @@ mod bayer_negative_space {
     #[test]
     fn bayer_families_are_never_in_a_linear_space() {
         for_all_bayer_types!(assert_not_linear_space);
+    }
+}
+
+// ── ChannelwiseMath coverage ─────────────────────────────────────────────────
+//
+// `ChannelwiseMath` is a semantic claim, so its membership list is the whole
+// specification: every type on the positive list is a quantity per channel,
+// and the two types in `nominal_pixels_never_claim_channelwise_math` are not.
+// The positive half fails to compile if a family loses its impl; the negative
+// half fails to build if someone "completes" the list with a label or a
+// palette index, which no other test in the crate would notice.
+mod channelwise_math_coverage {
+    use super::*;
+    use core::marker::PhantomData;
+
+    #[test]
+    fn channelwise_math_covers_every_quantity_family() {
+        fn assert_marker<P: ChannelwiseMath>() {}
+
+        macro_rules! assert_all {
+            ($($t:ty),+ $(,)?) => {{ $( assert_marker::<$t>(); )+ }};
+        }
+
+        assert_all!(
+            u8,
+            u16,
+            u32,
+            u64,
+            i8,
+            i16,
+            i32,
+            i64,
+            Mono8,
+            Mono16,
+            Mono32,
+            Mono64,
+            MonoF32,
+            MonoF64,
+            Mono10,
+            Mono12,
+            Mono14,
+            MonoA8,
+            MonoA16,
+            MonoA32,
+            MonoA64,
+            MonoAF32,
+            MonoAF64,
+            Rgb8,
+            Rgb16,
+            Rgb32,
+            Rgb64,
+            RgbF32,
+            RgbF64,
+            Rgb10,
+            Rgb12,
+            Rgb14,
+            Rgba8,
+            Rgba16,
+            Rgba32,
+            Rgba64,
+            RgbaF32,
+            RgbaF64,
+            Rgba10,
+            Rgba12,
+            Rgba14,
+            Bgr8,
+            Bgr16,
+            Bgr32,
+            Bgr64,
+            BgrF32,
+            BgrF64,
+            Bgr10,
+            Bgr12,
+            Bgr14,
+            Bgra8,
+            Bgra16,
+            Bgra32,
+            Bgra64,
+            BgraF32,
+            BgraF64,
+            Bgra10,
+            Bgra12,
+            Bgra14,
+            Srgb8,
+            Srgba8,
+            SrgbMono8,
+            SrgbMonoA8,
+            Srgb16,
+            Srgba16,
+            SrgbMono16,
+            SrgbMonoA16,
+            BayerRggb8,
+            BayerRggb10,
+            BayerRggb12,
+            BayerRggb14,
+            BayerRggb16,
+            BayerBggr8,
+            BayerBggr10,
+            BayerBggr12,
+            BayerBggr14,
+            BayerBggr16,
+            BayerGrbg8,
+            BayerGrbg10,
+            BayerGrbg12,
+            BayerGrbg14,
+            BayerGrbg16,
+            BayerGbrg8,
+            BayerGbrg10,
+            BayerGbrg12,
+            BayerGbrg14,
+            BayerGbrg16,
+        );
+    }
+
+    // The same absence probe as `bayer_negative_space`: an inherent const
+    // shadows the trait default only where the bound holds.
+    trait Fallback {
+        const IS: bool = false;
+    }
+    struct Probe<T>(PhantomData<T>);
+    impl<T> Fallback for Probe<T> {}
+    impl<T: ChannelwiseMath> Probe<T> {
+        const IS: bool = true;
+    }
+
+    #[test]
+    fn the_probe_reports_true_for_a_type_that_does_carry_the_marker() {
+        // Positive control: without it, a probe that degraded to "always
+        // false" would make the absence test below pass vacuously.
+        const { assert!(Probe::<Mono8>::IS) };
+        const { assert!(Probe::<BayerRggb12>::IS) };
+    }
+
+    #[test]
+    fn nominal_pixels_never_claim_channelwise_math() {
+        const {
+            assert!(
+                !Probe::<Label32>::IS,
+                "Label32 must not implement ChannelwiseMath: a component ID is not a quantity"
+            )
+        };
+        const {
+            assert!(
+                !Probe::<Indexed8>::IS,
+                "Indexed8 must not implement ChannelwiseMath: a palette index is not a quantity"
+            )
+        };
+    }
+
+    #[test]
+    fn complex_pixels_never_claim_channelwise_math() {
+        const {
+            assert!(
+                !Probe::<ComplexF32>::IS,
+                "ComplexF32 must not implement ChannelwiseMath: re and im are one value"
+            )
+        };
+        const {
+            assert!(
+                !Probe::<ComplexF64>::IS,
+                "ComplexF64 must not implement ChannelwiseMath: re and im are one value"
+            )
+        };
+    }
+
+    // A derived `PartialOrd` would compare `re` first and make a "maximum"
+    // of complex values compile.
+    trait OrderFallback {
+        const IS: bool = false;
+    }
+    struct OrderProbe<T>(PhantomData<T>);
+    impl<T> OrderFallback for OrderProbe<T> {}
+    impl<T: PartialOrd> OrderProbe<T> {
+        const IS: bool = true;
+    }
+
+    #[test]
+    fn complex_pixels_have_no_order() {
+        const { assert!(OrderProbe::<MonoF32>::IS) };
+        const {
+            assert!(
+                !OrderProbe::<ComplexF32>::IS,
+                "ComplexF32 must not implement PartialOrd: the complex plane has no order"
+            )
+        };
+        const {
+            assert!(
+                !OrderProbe::<ComplexF64>::IS,
+                "ComplexF64 must not implement PartialOrd: the complex plane has no order"
+            )
+        };
+    }
+
+    // `WhiteChannel: ChannelwiseMath` already makes these impossible; the
+    // probe pins it in case the supertrait is ever loosened.
+    trait WhiteFallback {
+        const IS: bool = false;
+    }
+    struct WhiteProbe<T>(PhantomData<T>);
+    impl<T> WhiteFallback for WhiteProbe<T> {}
+    impl<T: WhiteChannel> WhiteProbe<T> {
+        const IS: bool = true;
+    }
+
+    #[test]
+    fn nominal_pixels_have_no_white() {
+        const { assert!(WhiteProbe::<Mono8>::IS) };
+        const {
+            assert!(
+                !WhiteProbe::<Indexed8>::IS,
+                "Indexed8 must not implement WhiteChannel: index 255 is not white"
+            )
+        };
+        const {
+            assert!(
+                !WhiteProbe::<Label32>::IS,
+                "Label32 must not implement WhiteChannel: a component ID is not a quantity"
+            )
+        };
+        const {
+            assert!(
+                !WhiteProbe::<ComplexF32>::IS,
+                "ComplexF32 must not implement WhiteChannel: a complex value has no white"
+            )
+        };
     }
 }

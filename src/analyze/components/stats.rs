@@ -10,7 +10,10 @@
 //! Euler number, orientation, convexity, and intensity measurements
 //! are deferred to follow-up work.
 
-use crate::{Coordinate, CoordinateF64, Rectangle, Size};
+use core::marker::PhantomData;
+
+use crate::geometry::{PixelSpace, Pixels, Point};
+use crate::{Coordinate, Rectangle, Size};
 
 /// Bounded per-component statistics, accumulated inline during pass 2.
 ///
@@ -29,9 +32,9 @@ use crate::{Coordinate, CoordinateF64, Rectangle, Size};
 ///   sizes).
 ///
 /// All fields are public; the helper methods are derived quantities
-/// only.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ComponentStats {
+/// only. `S` is the space of the labeled image, which the
+/// [`centroid`](ComponentStats::centroid) is reported in.
+pub struct ComponentStats<S = Pixels> {
     /// Number of pixels in the component.
     pub area: u64,
     /// Inclusive lower-right-most-top-left corner of the bounding box.
@@ -42,9 +45,44 @@ pub struct ComponentStats {
     pub sum_x: u64,
     /// Sum of `y` coordinates of every pixel in the component.
     pub sum_y: u64,
+    space: PhantomData<fn() -> S>,
 }
 
-impl ComponentStats {
+// Written by hand rather than derived: a derive would require `S: Clone`,
+// `S: Debug` and `S: PartialEq` of a marker that is never instantiated.
+impl<S> Clone for ComponentStats<S> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<S> Copy for ComponentStats<S> {}
+
+impl<S> PartialEq for ComponentStats<S> {
+    fn eq(&self, other: &Self) -> bool {
+        self.area == other.area
+            && self.bbox_min == other.bbox_min
+            && self.bbox_max_inclusive == other.bbox_max_inclusive
+            && self.sum_x == other.sum_x
+            && self.sum_y == other.sum_y
+    }
+}
+
+impl<S> Eq for ComponentStats<S> {}
+
+impl<S> core::fmt::Debug for ComponentStats<S> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ComponentStats")
+            .field("area", &self.area)
+            .field("bbox_min", &self.bbox_min)
+            .field("bbox_max_inclusive", &self.bbox_max_inclusive)
+            .field("sum_x", &self.sum_x)
+            .field("sum_y", &self.sum_y)
+            .finish()
+    }
+}
+
+impl<S: PixelSpace> ComponentStats<S> {
     /// Seed a new stats record from the first foreground pixel of a
     /// component.
     #[inline]
@@ -55,6 +93,7 @@ impl ComponentStats {
             bbox_max_inclusive: at,
             sum_x: at.x as u64,
             sum_y: at.y as u64,
+            space: PhantomData,
         }
     }
 
@@ -79,13 +118,14 @@ impl ComponentStats {
         self.sum_y += at.y as u64;
     }
 
-    /// Centroid (centre of mass) as a sub-pixel [`CoordinateF64`].
+    /// Centroid (centre of mass) as a sub-pixel position in the space of
+    /// the labeled image.
     ///
     /// Returns `(sum_x / area, sum_y / area)`. `area` is always `>= 1`
     /// for stats produced by the engine, so the division is safe.
-    pub fn centroid(&self) -> CoordinateF64 {
+    pub fn centroid(&self) -> Point<S> {
         let inv = 1.0 / self.area as f64;
-        CoordinateF64::new(self.sum_x as f64 * inv, self.sum_y as f64 * inv)
+        Point::new(self.sum_x as f64 * inv, self.sum_y as f64 * inv)
     }
 
     /// Axis-aligned bounding box as a half-open [`Rectangle`].
@@ -130,6 +170,7 @@ pub(super) mod sink {
     use super::super::measurements::BlobMeasurements;
     use super::ComponentStats;
     use crate::Coordinate;
+    use crate::geometry::PixelSpace;
 
     /// Sealed sink trait \u2014 monomorphisation gate for stats
     /// accumulation. See module docs.
@@ -170,11 +211,11 @@ pub(super) mod sink {
 
     /// Sink that accumulates per-component stats into a `Vec` indexed
     /// by `compact_label - 1`.
-    pub(crate) struct WithStats<'a> {
-        pub(crate) out: &'a mut Vec<ComponentStats>,
+    pub(crate) struct WithStats<'a, Sp> {
+        pub(crate) out: &'a mut Vec<ComponentStats<Sp>>,
     }
 
-    impl StatsSink for WithStats<'_> {
+    impl<Sp: PixelSpace> StatsSink for WithStats<'_, Sp> {
         // `NEEDS_BOUNDARY` stays at its `false` default: area/bbox/centroid
         // do not need the boundary flag, so the engine's neighbour-check is
         // const-folded away and this path is unchanged.
@@ -196,11 +237,11 @@ pub(super) mod sink {
     /// and boundary count) into a `Vec` indexed by `compact_label - 1`. Sets
     /// `NEEDS_BOUNDARY = true` so the engine runs the per-pixel boundary
     /// check that feeds the boundary count.
-    pub(crate) struct WithMeasurements<'a> {
-        pub(crate) out: &'a mut Vec<BlobMeasurements>,
+    pub(crate) struct WithMeasurements<'a, Sp> {
+        pub(crate) out: &'a mut Vec<BlobMeasurements<Sp>>,
     }
 
-    impl StatsSink for WithMeasurements<'_> {
+    impl<Sp: PixelSpace> StatsSink for WithMeasurements<'_, Sp> {
         const NEEDS_BOUNDARY: bool = true;
 
         #[inline]
@@ -221,13 +262,13 @@ mod tests {
 
     #[test]
     fn from_seed_single_pixel() {
-        let s = ComponentStats::from_seed(Coordinate::new(3, 5));
+        let s = ComponentStats::<Pixels>::from_seed(Coordinate::new(3, 5));
         assert_eq!(s.area, 1);
         assert_eq!(s.bbox_min, Coordinate::new(3, 5));
         assert_eq!(s.bbox_max_inclusive, Coordinate::new(3, 5));
         assert_eq!(s.sum_x, 3);
         assert_eq!(s.sum_y, 5);
-        assert_eq!(s.centroid(), CoordinateF64::new(3.0, 5.0));
+        assert_eq!(s.centroid(), Point::new(3.0, 5.0));
         assert_eq!(
             s.bbox(),
             Rectangle::new(Coordinate::new(3, 5), Size::new(1, 1))
@@ -237,7 +278,7 @@ mod tests {
 
     #[test]
     fn extend_grows_area_and_bbox() {
-        let mut s = ComponentStats::from_seed(Coordinate::new(2, 2));
+        let mut s = ComponentStats::<Pixels>::from_seed(Coordinate::new(2, 2));
         s.extend(Coordinate::new(5, 4));
         s.extend(Coordinate::new(3, 1));
         assert_eq!(s.area, 3);
@@ -250,7 +291,7 @@ mod tests {
     #[test]
     fn centroid_of_centred_square() {
         // 3x3 square at (1..=3, 1..=3), 9 pixels.
-        let mut s = ComponentStats::from_seed(Coordinate::new(1, 1));
+        let mut s = ComponentStats::<Pixels>::from_seed(Coordinate::new(1, 1));
         for y in 1..=3usize {
             for x in 1..=3usize {
                 if (x, y) != (1, 1) {
@@ -266,7 +307,7 @@ mod tests {
 
     #[test]
     fn bbox_is_half_open_rectangle() {
-        let mut s = ComponentStats::from_seed(Coordinate::new(2, 3));
+        let mut s = ComponentStats::<Pixels>::from_seed(Coordinate::new(2, 3));
         s.extend(Coordinate::new(7, 9));
         let r = s.bbox();
         assert_eq!(r.offset, Coordinate::new(2, 3));
@@ -276,13 +317,24 @@ mod tests {
     #[test]
     fn aspect_ratio_wide_versus_tall() {
         // 6x2 box
-        let mut s = ComponentStats::from_seed(Coordinate::new(0, 0));
+        let mut s = ComponentStats::<Pixels>::from_seed(Coordinate::new(0, 0));
         s.extend(Coordinate::new(5, 1));
         assert!((s.aspect_ratio() - 3.0).abs() < 1e-12);
 
         // 2x6 box
-        let mut t = ComponentStats::from_seed(Coordinate::new(0, 0));
+        let mut t = ComponentStats::<Pixels>::from_seed(Coordinate::new(0, 0));
         t.extend(Coordinate::new(1, 5));
         assert!((t.aspect_ratio() - (2.0 / 6.0)).abs() < 1e-12);
+    }
+
+    #[test]
+    fn the_record_traits_ask_nothing_of_the_space() {
+        let s = ComponentStats::<Pixels>::from_seed(Coordinate::new(1, 2));
+        assert_eq!(Clone::clone(&s), s);
+        assert_ne!(
+            ComponentStats::<Pixels>::from_seed(Coordinate::new(2, 2)),
+            s
+        );
+        assert!(format!("{s:?}").starts_with("ComponentStats { area: 1,"));
     }
 }

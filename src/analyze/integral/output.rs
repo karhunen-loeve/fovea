@@ -4,6 +4,7 @@ use std::ops::Sub;
 
 use crate::Rectangle;
 use crate::Size;
+use crate::geometry::Pixels;
 use crate::image::{Image, ImageRef, ImageView};
 use crate::pixel::ZeroablePixel;
 
@@ -54,7 +55,7 @@ use crate::pixel::ZeroablePixel;
 pub struct IntegralImage<A: Copy> {
     /// The `(W+1) × (H+1)` accumulator table. Row 0 and column 0 are
     /// all zero; the engine writes every other cell.
-    data: Image<A>,
+    data: Image<A, Pixels>,
     /// The dimensions of the *source* image, cached so `region_sum`
     /// does not have to subtract from `data.size()` on every call.
     source: Size,
@@ -114,7 +115,7 @@ impl<A: Copy> IntegralImage<A> {
                 source.height
             )
         });
-        let data = Image::<A>::zero(table_w, table_h);
+        let data = Image::<A, Pixels>::zero(table_w, table_h);
         IntegralImage { data, source }
     }
 
@@ -192,7 +193,7 @@ impl<A: Copy> IntegralImage<A> {
     /// column are all zero and exist precisely to avoid a boundary
     /// special-case in the four-corner formula.
     #[inline]
-    pub fn as_table_view(&self) -> ImageRef<'_, A> {
+    pub fn as_table_view(&self) -> ImageRef<'_, A, Pixels> {
         // Image<A> always exposes a full-frame ImageRef of width × height.
         let w = self.data.width();
         let h = self.data.height();
@@ -208,7 +209,7 @@ impl<A: Copy> IntegralImage<A> {
     /// left column are pre-zeroed by [`new_zero`](Self::new_zero) and
     /// the engine deliberately does not touch them.
     #[inline]
-    pub(crate) fn data_image_mut(&mut self) -> &mut Image<A> {
+    pub(crate) fn data_image_mut(&mut self) -> &mut Image<A, Pixels> {
         &mut self.data
     }
 
@@ -255,7 +256,7 @@ impl<A: Copy> IntegralImage<A> {
 /// crate does not grow accidental dependencies on `Image`'s internal
 /// layout.
 #[inline]
-fn image_slice<A: Copy>(img: &Image<A>) -> &[A] {
+fn image_slice<A: Copy>(img: &Image<A, Pixels>) -> &[A] {
     use crate::image::ContiguousImage;
     img.as_slice()
 }

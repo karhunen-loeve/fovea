@@ -15,6 +15,7 @@ Pixel types are the vocabulary of a fovea pipeline. Choose the type that says wh
 | Segmentation mask | `bool` / `BinaryImage` | Native binary-image representation. |
 | Connected-component labels | `Label32` | Label pixels are not grayscale pixels. |
 | Raw single-sensor colour (CFA mosaic) | `bayer::BayerRggb12` and the other 19 | The mosaic pattern is part of the type. |
+| Complex values (quadrature filter, analytic signal) | `ComplexF32`, `ComplexF64` | `*` is the complex product; per-part maxima and thresholds do not compile. |
 
 ## `Srgb8` vs `Rgb8`
 
@@ -85,7 +86,7 @@ When a conversion can lose information or change meaning, name the strategy.
 | Strategy | Meaning |
 |---|---|
 | `SrgbGamma` | Decode or encode the sRGB transfer function. |
-| `Luminance` | Convert color to grayscale using BT.601 luminance. |
+| `Luminance` | Convert color to grayscale with a named standard's weights, `Bt709` for linear sRGB data. |
 | `Broadcast` | Copy mono into every color channel. |
 | `ColorSwap` | Swap RGB and BGR channel order. |
 | `FullRange` | Map the full source numeric range to the full destination range. |

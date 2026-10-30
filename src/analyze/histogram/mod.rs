@@ -148,7 +148,7 @@ pub use otsu::{otsu_binary_mask, otsu_threshold};
 
 use crate::Error;
 use crate::image::RasterImage;
-use crate::pixel::HomogeneousPixel;
+use crate::pixel::{ChannelwiseMath, HomogeneousPixel};
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // HistogramOutput
@@ -270,7 +270,7 @@ impl<S, V, const N: usize> HistogramOutput<S, V> for [Histogram<S, V>; N] {
 ///
 /// # Errors
 ///
-/// Returns [`Error::InvalidBinningStrategy`] if `strategy.validate()`
+/// Returns [`Error::InvalidParameter`] if `strategy.validate()`
 /// rejects the strategy's own configuration (Tier 2).
 /// Validation runs once before any per-pixel work.
 ///
@@ -285,7 +285,7 @@ impl<S, V, const N: usize> HistogramOutput<S, V> for [Histogram<S, V>; N] {
 /// See the module-level documentation for end-to-end examples.
 pub fn histogram<P, S, O>(image: &impl RasterImage<Pixel = P>, strategy: &S) -> Result<O, Error>
 where
-    P: HomogeneousPixel,
+    P: ChannelwiseMath,
     S: BinningStrategy<P::Channel> + Clone,
     O: HistogramOutput<S, P::Channel>,
 {
@@ -360,7 +360,7 @@ where
 mod tests {
     use super::*;
     use crate::image::{Image, SubView};
-    use crate::pixel::{Indexed8, Mono8, MonoF32, Rgb8};
+    use crate::pixel::{Mono8, MonoF32, Rgb8};
     use std::num::Saturating;
 
     // Bring the trait into scope so `img.roi(..)` resolves.
@@ -388,16 +388,15 @@ mod tests {
         assert_eq!(h.overflow_count, 0);
     }
 
-    // ── Single-channel: NaturalBins on Indexed8 (channel = u8) ──────────────
+    // ── Single-channel: NaturalBins on a bare u8 channel ────────────────────
+    //
+    // The primitive `u8` pixel covers the bare-`u8` channel impl. `Indexed8`
+    // shares that channel type and is rejected: binning palette indices is
+    // meaningless, which `histogram`'s `ChannelwiseMath` bound enforces.
 
     #[test]
-    fn indexed8_natural_uses_u8_channel_type() {
-        let img = Image::from_vec(
-            2,
-            2,
-            vec![Indexed8(3), Indexed8(3), Indexed8(7), Indexed8(200)],
-        )
-        .unwrap();
+    fn bare_u8_natural_uses_u8_channel_type() {
+        let img = Image::from_vec(2, 2, vec![3u8, 3, 7, 200]).unwrap();
         let h: Histogram<NaturalBins, u8> = histogram(&img, &NaturalBins).unwrap();
 
         assert_eq!(h.count_at_bin(3), 2);
@@ -490,8 +489,8 @@ mod tests {
         };
         let r: Result<Histogram<LinearBins, f32>, _> = histogram(&img, &bad);
         match r {
-            Err(Error::InvalidBinningStrategy(_)) => {}
-            other => panic!("expected InvalidBinningStrategy, got {:?}", other),
+            Err(Error::InvalidParameter(_)) => {}
+            other => panic!("expected InvalidParameter, got {:?}", other),
         }
     }
 
@@ -500,7 +499,7 @@ mod tests {
         let img = Image::from_vec(1, 1, vec![MonoF32::new(0.0)]).unwrap();
         let bad = CustomBins { edges: vec![1.0] };
         let r: Result<Histogram<CustomBins, f32>, _> = histogram(&img, &bad);
-        assert!(matches!(r, Err(Error::InvalidBinningStrategy(_))));
+        assert!(matches!(r, Err(Error::InvalidParameter(_))));
     }
 
     // ── ROI: SubView counts only the selected region ────────────────────────

@@ -36,6 +36,54 @@
 //! let edges: BinaryImage = hysteresis_threshold(&thin, thresholds);
 //! ```
 //!
+//! ## In a loop
+//!
+//! [`canny`] allocates its working images on every call, the Gaussian
+//! blur's working set among them. A caller who runs it over a stream of
+//! frames of one size can keep the blur's working set across frames by
+//! building the pipeline by hand and blurring through a
+//! [`SeparableScratch`](crate::transform::SeparableScratch) into an image
+//! they keep: after the first frame the blur allocates nothing. The other
+//! stages still allocate their outputs. The mask is the one `canny` gives.
+//!
+//! ```
+//! use fovea::analyze::edge::canny;
+//! use fovea::analyze::threshold::{HysteresisThresholds, hysteresis_threshold};
+//! use fovea::border::Clamp;
+//! use fovea::image::{BinaryImage, ContiguousImage, Image};
+//! use fovea::pixel::MonoF32;
+//! use fovea::sigma;
+//! use fovea::transform::{
+//!     SeparableScratch, gradient_direction, gradient_magnitude, non_maximum_suppression,
+//!     scharr_x, scharr_y,
+//! };
+//!
+//! let thresholds = HysteresisThresholds::try_new(0.05_f32, 0.15).unwrap();
+//! let sigma = sigma!(1.4);
+//! let mut scratch = SeparableScratch::new();
+//! let mut blurred = Image::<MonoF32>::zero(64, 48);
+//!
+//! for shift in 0..3 {
+//!     // A frame of the stream: a bright square that moves to the right.
+//!     let frame = Image::generate(64, 48, |x, y| {
+//!         let inside = (16 + shift..40 + shift).contains(&x) && (12..36).contains(&y);
+//!         MonoF32::new(if inside { 0.8 } else { 0.2 })
+//!     });
+//!
+//!     scratch.gaussian_blur_into(&frame, sigma, &Clamp, &mut blurred);
+//!     let gx = scharr_x(&blurred, &Clamp);
+//!     let gy = scharr_y(&blurred, &Clamp);
+//!     let mag = gradient_magnitude(&gx, &gy).unwrap();
+//!     let dir = gradient_direction(&gx, &gy).unwrap();
+//!     let thin = non_maximum_suppression(&mag, &dir).unwrap();
+//!     let edges: BinaryImage = hysteresis_threshold(&thin, thresholds);
+//!
+//!     // The square's outline is found, and it is the mask `canny` gives.
+//!     assert!(edges.as_slice().iter().any(|&on| on));
+//!     assert!(edges == canny(&frame, thresholds, sigma));
+//! }
+//! ```
+//!
 //! ## From a mask to positions
 //!
 //! [`canny`] answers "which pixels are edge pixels". A measurement usually
@@ -48,13 +96,14 @@
 use core::ops::Add;
 
 use crate::border::Clamp;
+use crate::geometry::Point;
 use crate::image::{BinaryImage, Image, RasterImage};
-use crate::pixel::{FromLinear, LinearPixel, SingleChannel, ZeroablePixel};
+use crate::pixel::{ChannelwiseMath, FromLinear, LinearPixel, SingleChannel, ZeroablePixel};
 use crate::transform::{
     MagnitudeChannel, gaussian_blur, gradient_magnitude, non_maximum_suppression_from_gradients,
     scharr_x, scharr_y,
 };
-use crate::{Coordinate, CoordinateF64, Error, Sigma};
+use crate::{Coordinate, Error, Sigma};
 
 use crate::analyze::peak::interpolate_ridge_points;
 use crate::analyze::threshold::{HysteresisThresholds, hysteresis_threshold};
@@ -132,7 +181,7 @@ pub fn canny<I, P, Acc>(
     image: &I,
     thresholds: HysteresisThresholds<f32>,
     sigma: Sigma,
-) -> BinaryImage
+) -> BinaryImage<I::Space>
 where
     I: RasterImage<Pixel = P>,
     P: Copy + LinearPixel<f32, Accumulator = Acc>,
@@ -140,13 +189,14 @@ where
         + Default
         + ZeroablePixel
         + SingleChannel
+        + ChannelwiseMath
         + FromLinear<Acc>
         + LinearPixel<f32, Accumulator = Acc>
         + Add<Output = Acc>,
     Acc::Channel: PartialOrd + Copy + core::fmt::Debug + From<f32> + MagnitudeChannel,
     f64: From<Acc::Channel>,
 {
-    let blurred: Image<Acc> = gaussian_blur(image, sigma, &Clamp);
+    let blurred: Image<Acc, I::Space> = gaussian_blur(image, sigma, &Clamp);
     let gx = scharr_x(&blurred, &Clamp);
     let gy = scharr_y(&blurred, &Clamp);
 
@@ -245,13 +295,13 @@ pub fn interpolate_edge_points<IB, IM, IX, IY, P>(
     magnitude: &IM,
     gx: &IX,
     gy: &IY,
-) -> Result<Vec<CoordinateF64>, Error>
+) -> Result<Vec<Point<IM::Space>>, Error>
 where
-    IB: RasterImage<Pixel = bool>,
+    IB: RasterImage<Pixel = bool, Space = IM::Space>,
     IM: RasterImage<Pixel = P>,
-    IX: RasterImage<Pixel = P>,
-    IY: RasterImage<Pixel = P>,
-    P: SingleChannel,
+    IX: RasterImage<Pixel = P, Space = IM::Space>,
+    IY: RasterImage<Pixel = P, Space = IM::Space>,
+    P: SingleChannel + ChannelwiseMath,
     f64: From<P::Channel>,
 {
     if mask.size() != magnitude.size() {
@@ -435,10 +485,10 @@ mod tests {
 
     // ── interpolate_edge_points ──────────────────────────────────────────
 
-    use crate::CoordinateF64;
     use crate::border::Clamp;
     use crate::error::Error;
     use crate::transform::{gaussian_blur, gradient_magnitude, scharr_x, scharr_y};
+    use crate::{Pixels, Point};
 
     /// The mask, magnitude and gradient pair `interpolate_edge_points`
     /// takes, for a vertical step between columns `edge_x - 1` and
@@ -518,7 +568,7 @@ mod tests {
         let (_, magnitude, gx, gy) = step_edge_stages(12, 6, 6);
         let empty = Image::fill(12, 6, false);
         let points = interpolate_edge_points(&empty, &magnitude, &gx, &gy).unwrap();
-        assert_eq!(points, Vec::<CoordinateF64>::new());
+        assert_eq!(points, Vec::<Point<Pixels>>::new());
     }
 
     #[test]

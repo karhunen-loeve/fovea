@@ -33,13 +33,13 @@ assert_eq!(img.row(1), &[4, 5, 6, 7]);
 
 ## Where do I start if I just want to load a PNG and resize it?
 
-Use `fovea-io` to decode the file, match the returned per-codec image enum once, then run typed fovea operations. For bilinear resize on sRGB images, decode to linear pixels first.
+Use `fovea-io` to decode the file, match the returned per-codec image enum once, then run typed fovea operations. For resize on sRGB images, decode to linear pixels first. Shrinking a photo by more than about two needs the kernel wrapped in `Antialiased`, or fine detail turns into false patterns.
 
 ```rust,ignore
 use fovea::Size;
 use fovea::image::Image;
 use fovea::pixel::{RgbF32, Srgb8};
-use fovea::transform::{Bilinear, SrgbGamma, convert_image, resize};
+use fovea::transform::{Antialiased, Lanczos3, SrgbGamma, convert_image, resize};
 use fovea_io::png::{self, PngImage, PngEncodeOptions};
 
 let bytes = std::fs::read("input.png")?;
@@ -51,7 +51,7 @@ let srgb: Image<Srgb8> = match decoded.image {
 };
 
 let linear: Image<RgbF32> = convert_image(&srgb, SrgbGamma);
-let resized: Image<RgbF32> = resize(&linear, Size::new(800, 600), Bilinear);
+let resized: Image<RgbF32> = resize(&linear, Size::new(800, 600), Antialiased(Lanczos3))?;
 let output: Image<Srgb8> = convert_image(&resized, SrgbGamma);
 
 let encoded = png::encode(&output, &PngEncodeOptions::default())?;
@@ -85,25 +85,26 @@ use fovea::pixel::Srgb8;
 use fovea::transform::{Bilinear, resize};
 
 let srgb = Image::fill(4, 4, Srgb8::new(128, 128, 128));
-let _ = resize(&srgb, Size::new(8, 8), Bilinear);
+let _: Image<Srgb8> = resize(&srgb, Size::new(8, 8), Bilinear)?;
+# Ok::<(), fovea::Error>(())
 ```
 
 Use `SrgbGamma` to move between sRGB and linear-light pixels.
 
 ## How do I convert between pixel types? What is a strategy?
 
-A strategy names the semantics of the conversion. `SrgbGamma` applies the sRGB transfer function. `Luminance` chooses a grayscale formula. `FullRange` maps the full numeric range. `Narrow` preserves numeric values and clamps when narrowing.
+A strategy names the semantics of the conversion. `SrgbGamma` applies the sRGB transfer function. `Luminance(Bt709)` names the weights of a grayscale conversion. `FullRange` maps the full numeric range. `Narrow` preserves numeric values and clamps when narrowing.
 
 ```rust
 use fovea::image::{Image, ImageView};
 use fovea::pixel::{Mono8, Rgb8};
-use fovea::transform::{Broadcast, Luminance, convert_image};
+use fovea::transform::{Broadcast, Bt709, Luminance, convert_image};
 
 let gray = Image::fill(2, 1, Mono8::new(128));
 let rgb: Image<Rgb8> = convert_image(&gray, Broadcast);
 assert_eq!(rgb.pixel_at(0, 0), Rgb8::new(128, 128, 128));
 
-let back: Image<Mono8> = convert_image(&rgb, Luminance);
+let back: Image<Mono8> = convert_image(&rgb, Luminance(Bt709));
 assert_eq!(back.pixel_at(0, 0), Mono8::new(128));
 ```
 
@@ -209,7 +210,7 @@ use fovea::pixel::Label32;
 let mask: BinaryImage =
     Image::generate(16, 16, |x, y| (4..12).contains(&x) && (6..10).contains(&y));
 let (labeling, stats) =
-    connected_components_with_stats::<Label32, Connectivity4>(&mask).unwrap();
+    connected_components_with_stats::<Label32, Connectivity4, _>(&mask).unwrap();
 assert_eq!(labeling.label_count, 1);
 assert_eq!(stats[0].area, 8 * 4);
 # Ok::<(), fovea::Error>(())

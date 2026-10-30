@@ -54,6 +54,7 @@ mod zip;
 mod planar;
 pub(crate) mod sequential;
 
+use crate::geometry::Pixels;
 pub use image_view::{ImageView, ImageViewMut, RasterImage, RasterImageMut};
 pub use neighborhood::{
     Kernel, Kernel3x3, Kernel3x3i, Kernel5x5, Kernel5x5i, Kernel7x7, Mask, Mask3x3, Mask5x5,
@@ -70,7 +71,7 @@ pub use separable::{
 };
 pub use sequential::{
     ContiguousImage, ContiguousImageMut, Image, ImageArray, ImageRef, ImageRefMut, PlainImage,
-    PlainImageMut,
+    PlainImageMut, RowStride,
 };
 pub use tiles::{
     BayerSubView, BayerSubViewMut, EnumeratePositions, IntoTilesMut, SlidingWindow,
@@ -127,10 +128,10 @@ impl crate::pixel::OriginInvariantPixel for bool {}
 /// let mask: BinaryImage = convert_image(&img, BinaryMask { thresh: Mono8::new(128) });
 /// assert!(mask.pixel_at(0, 0));
 /// ```
-pub type BinaryImage = Image<bool>;
+pub type BinaryImage<S = Pixels> = Image<bool, S>;
 
 /// An immutable reference to a binary image. Alias for [`ImageRef<bool>`].
-pub type BinaryImageRef<'a> = ImageRef<'a, bool>;
+pub type BinaryImageRef<'a, S = Pixels> = ImageRef<'a, bool, S>;
 
 /// A mutable reference to a binary image. Alias for [`ImageRefMut<bool>`].
-pub type BinaryImageRefMut<'a> = ImageRefMut<'a, bool>;
+pub type BinaryImageRefMut<'a, S = Pixels> = ImageRefMut<'a, bool, S>;

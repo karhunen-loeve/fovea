@@ -59,7 +59,7 @@ pub use moments::{CentralMoments, ImageMoments, NormalizedMoments, image_moments
 pub use summary::{ChannelStatistics, StatisticsChannel};
 
 use crate::image::RasterImage;
-use crate::pixel::{HomogeneousPixel, SingleChannel};
+use crate::pixel::{ChannelwiseMath, SingleChannel};
 
 /// Caller-chosen output shape for [`image_statistics`].
 ///
@@ -189,7 +189,7 @@ impl<C, P, const N: usize> StatisticsOutput<C, P> for [ChannelStatistics<C>; N] 
 pub fn image_statistics<I, P, O>(image: &I) -> O
 where
     I: RasterImage<Pixel = P>,
-    P: HomogeneousPixel,
+    P: ChannelwiseMath,
     P::Channel: StatisticsChannel,
     O: StatisticsOutput<P::Channel, P>,
 {

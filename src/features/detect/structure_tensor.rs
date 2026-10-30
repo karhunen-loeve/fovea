@@ -7,11 +7,12 @@
 use core::ops::{Add, Mul};
 
 use crate::border::Clamp;
-use crate::error::Error;
+use crate::error::{Error, ParameterError, Requirement, Value};
 use crate::features::Corner;
+use crate::geometry::{PixelSpace, Pixels};
 use crate::image::{Decimated, Image, ImageView, RasterImage, RasterImageMut};
-use crate::pixel::{FromLinear, LinearPixel, SingleChannel, ZeroablePixel};
-use crate::transform::{PixelMultiply, combine_images, gaussian_blur, sobel_x, sobel_y};
+use crate::pixel::{ChannelwiseMath, FromLinear, LinearPixel, SingleChannel, ZeroablePixel};
+use crate::transform::{PixelMultiply, SeparableScratch, combine_images, sobel_x, sobel_y};
 use crate::{Sigma, Size};
 
 use super::peaks::{NmsRadius, corner_peaks, lift_peaks, scan_peaks};
@@ -210,9 +211,7 @@ impl Harris {
         if k.is_finite() && k > 0.0 && k < 0.25 {
             Ok(Self(k))
         } else {
-            Err(Error::InvalidParameter(format!(
-                "Harris k must satisfy 0 < k < 0.25, got {k}"
-            )))
+            Err(ParameterError::new("Harris k", HARRIS_K, Value::F32(k)).into())
         }
     }
 
@@ -253,15 +252,29 @@ impl Harris {
 ///
 /// ```compile_fail
 /// use fovea::harris;
-/// // ERROR: evaluation panicked: Harris k must satisfy 0 < k < 0.25
+/// // ERROR: evaluation panicked: must lie strictly between 0 and 0.25
 /// let _ = harris!(0.25);
 /// ```
 #[macro_export]
 macro_rules! harris {
+    // The bounds are part of the wording, and a `const` block cannot format
+    // a float, so this one message is a literal. A test pins it to the
+    // `Display` of the requirement `Harris::try_new` reports.
     ($k:expr) => {
-        const { $crate::features::detect::Harris::new($k).expect("Harris k must satisfy 0 < k < 0.25") }
+        const {
+            $crate::features::detect::Harris::new($k)
+                .expect("must lie strictly between 0 and 0.25")
+        }
     };
 }
+
+/// The invariant of [`Harris`]'s sensitivity, shared by
+/// [`Harris::try_new`] and the test that pins the
+/// [`harris!`](crate::harris) message.
+const HARRIS_K: Requirement = Requirement::OpenInterval {
+    low: 0.0,
+    high: 0.25,
+};
 
 impl<C: CornerResponseChannel> CornerResponse<C> for Harris {
     #[inline(always)]
@@ -352,14 +365,35 @@ impl<C: CornerResponseChannel> CornerResponse<C> for ShiTomasi {
 /// assert!(tensor.response(harris!(0.04)).pixel_at(8, 8).value() < 0.0);
 /// # Ok::<(), fovea::Error>(())
 /// ```
-#[derive(Clone, Debug)]
-pub struct StructureTensor<P: Copy> {
-    xx: Image<P>,
-    xy: Image<P>,
-    yy: Image<P>,
+pub struct StructureTensor<P: Copy, S = Pixels> {
+    xx: Image<P, S>,
+    xy: Image<P, S>,
+    yy: Image<P, S>,
 }
 
-impl<P> StructureTensor<P>
+// Written by hand rather than derived: a derive would require `S: Clone`
+// and `S: Debug` of a marker that is never instantiated.
+impl<P: Copy, S> Clone for StructureTensor<P, S> {
+    fn clone(&self) -> Self {
+        Self {
+            xx: self.xx.clone(),
+            xy: self.xy.clone(),
+            yy: self.yy.clone(),
+        }
+    }
+}
+
+impl<P: Copy, S> core::fmt::Debug for StructureTensor<P, S> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("StructureTensor")
+            .field("xx", &self.xx)
+            .field("xy", &self.xy)
+            .field("yy", &self.yy)
+            .finish()
+    }
+}
+
+impl<P, S: PixelSpace> StructureTensor<P, S>
 where
     P: Copy
         + Default
@@ -373,7 +407,8 @@ where
     /// by a Gaussian of standard deviation `window`.
     ///
     /// The two stages, in order: the pixel-wise products `Gx·Gx`, `Gx·Gy`,
-    /// `Gy·Gy`, then a [`gaussian_blur`] of each with a [`Clamp`] border.
+    /// `Gy·Gy`, then a [`gaussian_blur`](crate::transform::gaussian_blur) of
+    /// each with a [`Clamp`] border.
     ///
     /// The window is what makes the tensor *have* two eigenvalues: without
     /// it every `M` is the outer product of a single gradient vector, whose
@@ -397,13 +432,14 @@ where
     /// # Panics
     ///
     /// Panics if `window`'s derived kernel radius exceeds
-    /// [`MAX_RADIUS`](crate::image::MAX_RADIUS) (via [`gaussian_blur`]),
-    /// testable up front with
+    /// [`MAX_RADIUS`](crate::image::MAX_RADIUS) (via
+    /// [`gaussian_blur`](crate::transform::gaussian_blur)), testable up front
+    /// with
     /// [`gaussian_kernel_size`](crate::image::gaussian_kernel_size).
     pub fn from_gradients<IX, IY>(gx: &IX, gy: &IY, window: Sigma) -> Result<Self, Error>
     where
-        IX: RasterImage<Pixel = P>,
-        IY: RasterImage<Pixel = P>,
+        IX: RasterImage<Pixel = P, Space = S>,
+        IY: RasterImage<Pixel = P, Space = S>,
     {
         // `gx·gy` is the only product that can mismatch; taking it first
         // means the error surfaces before two blurs have been paid for.
@@ -411,15 +447,23 @@ where
         let xx = combine_images(gx, gx, PixelMultiply).expect("gx shares its own size");
         let yy = combine_images(gy, gy, PixelMultiply).expect("gy shares its own size");
 
+        // The three blurs are the same size, so they share one working set:
+        // the first sizes it, the other two allocate only their outputs.
+        let mut scratch = SeparableScratch::new();
+        let mut blur = |product: &Image<P, S>| {
+            let mut out = Image::<P, S>::zero_in(product.width(), product.height());
+            scratch.gaussian_blur_into(product, window, &Clamp, &mut out);
+            out
+        };
         Ok(Self {
-            xx: gaussian_blur(&xx, window, &Clamp),
-            xy: gaussian_blur(&xy, window, &Clamp),
-            yy: gaussian_blur(&yy, window, &Clamp),
+            xx: blur(&xx),
+            xy: blur(&xy),
+            yy: blur(&yy),
         })
     }
 }
 
-impl<P: Copy> StructureTensor<P> {
+impl<P: Copy, S: PixelSpace> StructureTensor<P, S> {
     /// Assembles a structure tensor from three already-windowed product
     /// images.
     ///
@@ -433,7 +477,11 @@ impl<P: Copy> StructureTensor<P> {
     ///
     /// Returns [`Error::SizeMismatch`] unless all three images have the same
     /// dimensions.
-    pub fn from_smoothed(sxx: Image<P>, sxy: Image<P>, syy: Image<P>) -> Result<Self, Error> {
+    pub fn from_smoothed(
+        sxx: Image<P, S>,
+        sxy: Image<P, S>,
+        syy: Image<P, S>,
+    ) -> Result<Self, Error> {
         for other in [sxy.size(), syy.size()] {
             if other != sxx.size() {
                 return Err(Error::SizeMismatch {
@@ -451,19 +499,19 @@ impl<P: Copy> StructureTensor<P> {
 
     /// Returns the windowed `Gx·Gx` image.
     #[must_use]
-    pub fn xx(&self) -> &Image<P> {
+    pub fn xx(&self) -> &Image<P, S> {
         &self.xx
     }
 
     /// Returns the windowed `Gx·Gy` image, the off-diagonal entry.
     #[must_use]
-    pub fn xy(&self) -> &Image<P> {
+    pub fn xy(&self) -> &Image<P, S> {
         &self.xy
     }
 
     /// Returns the windowed `Gy·Gy` image.
     #[must_use]
-    pub fn yy(&self) -> &Image<P> {
+    pub fn yy(&self) -> &Image<P, S> {
         &self.yy
     }
 
@@ -503,14 +551,14 @@ impl<P: Copy> StructureTensor<P> {
     /// # Ok::<(), fovea::Error>(())
     /// ```
     #[must_use]
-    pub fn response<M>(&self, method: M) -> Image<P>
+    pub fn response<M>(&self, method: M) -> Image<P, S>
     where
         P: SingleChannel + ZeroablePixel,
         P::Channel: CornerResponseChannel,
         M: CornerResponse<P::Channel>,
     {
         let (w, h) = (self.xx.width(), self.xx.height());
-        let mut out = Image::fill(w, h, P::zero());
+        let mut out = Image::fill(w, h, P::zero()).into_space();
         for y in 0..h {
             let (xx, xy, yy) = (self.xx.row(y), self.xy.row(y), self.yy.row(y));
             let dst = out.row_mut(y);
@@ -602,9 +650,12 @@ impl CornerParams {
     /// infinite.
     pub fn try_new(window: Sigma, threshold: f32, nms_radius: NmsRadius) -> Result<Self, Error> {
         if !threshold.is_finite() {
-            return Err(Error::InvalidParameter(format!(
-                "corner response threshold must be finite, got {threshold}"
-            )));
+            return Err(ParameterError::new(
+                "corner response threshold",
+                Requirement::Finite,
+                Value::F32(threshold),
+            )
+            .into());
         }
         Ok(Self {
             window,
@@ -657,7 +708,8 @@ impl CornerParams {
 /// # Panics
 ///
 /// Panics if `window`'s derived kernel radius exceeds
-/// [`MAX_RADIUS`](crate::image::MAX_RADIUS) (via [`gaussian_blur`]).
+/// [`MAX_RADIUS`](crate::image::MAX_RADIUS) (via
+/// [`gaussian_blur`](crate::transform::gaussian_blur)).
 ///
 /// # Example
 ///
@@ -679,7 +731,11 @@ impl CornerParams {
 /// assert!(response.pixel_at(8, 8).value() > response.pixel_at(12, 8).value());
 /// ```
 #[must_use]
-pub fn corner_response_map<I, M, P, Acc>(image: &I, method: M, window: Sigma) -> Image<Acc>
+pub fn corner_response_map<I, M, P, Acc>(
+    image: &I,
+    method: M,
+    window: Sigma,
+) -> Image<Acc, I::Space>
 where
     I: RasterImage<Pixel = P>,
     P: Copy + LinearPixel<f32, Accumulator = Acc>,
@@ -751,9 +807,14 @@ where
 /// # Panics
 ///
 /// Panics if the window σ's derived kernel radius exceeds
-/// [`MAX_RADIUS`](crate::image::MAX_RADIUS) (via [`gaussian_blur`]).
+/// [`MAX_RADIUS`](crate::image::MAX_RADIUS) (via
+/// [`gaussian_blur`](crate::transform::gaussian_blur)).
 #[must_use]
-pub fn detect_corners<I, M, P, Acc>(image: &I, method: M, params: CornerParams) -> Vec<Corner>
+pub fn detect_corners<I, M, P, Acc>(
+    image: &I,
+    method: M,
+    params: CornerParams,
+) -> Vec<Corner<I::Space>>
 where
     I: RasterImage<Pixel = P>,
     P: Copy + LinearPixel<f32, Accumulator = Acc>,
@@ -761,6 +822,7 @@ where
         + Default
         + ZeroablePixel
         + SingleChannel
+        + ChannelwiseMath
         + FromLinear<Acc>
         + LinearPixel<f32, Accumulator = Acc>
         + Add<Output = Acc>
@@ -798,7 +860,7 @@ where
 /// concatenating levels then needs, which is the caller's policy to set:
 ///
 /// ```
-/// use fovea::CoordinateF64;
+/// use fovea::{Pixels, Point};
 /// use fovea::features::detect::{detect_corners_in_level, CornerParams, NmsRadius, ShiTomasi};
 /// use fovea::features::sort_by_response;
 /// use fovea::image::{Image, PlacedPyramid, Pyramid};
@@ -829,13 +891,14 @@ where
 /// # Panics
 ///
 /// Panics if the window σ's derived kernel radius exceeds
-/// [`MAX_RADIUS`](crate::image::MAX_RADIUS) (via [`gaussian_blur`]).
+/// [`MAX_RADIUS`](crate::image::MAX_RADIUS) (via
+/// [`gaussian_blur`](crate::transform::gaussian_blur)).
 #[must_use]
 pub fn detect_corners_in_level<L, M, P, Acc>(
     level: &L,
     method: M,
     params: CornerParams,
-) -> Vec<Corner>
+) -> Vec<Corner<L::Space>>
 where
     L: Decimated<Pixel = P>,
     P: Copy + LinearPixel<f32, Accumulator = Acc>,
@@ -870,6 +933,33 @@ mod tests {
     use crate::pixel::{Mono8, Mono16, MonoF32, MonoF64};
     use crate::transform::{Gaussian, PyramidMethod, pyr_down, rotate_90};
     use crate::{pixel_distance, sigma};
+
+    #[test]
+    fn the_shared_working_set_blurs_bit_for_bit_like_the_free_blur() {
+        // The three windowed products must be exactly what `gaussian_blur`
+        // of each product gives, the path the tensor took before the blurs
+        // shared one scratch.
+        let gx: Image<MonoF32> = Image::generate(23, 17, |x, y| {
+            MonoF32::new(((x * 37 + y * 11) % 29) as f32 * 0.37)
+        });
+        let gy: Image<MonoF32> = Image::generate(23, 17, |x, y| {
+            MonoF32::new(((x * 13 + y * 31) % 23) as f32 * -0.41)
+        });
+        let window = sigma!(1.3);
+        let tensor = StructureTensor::from_gradients(&gx, &gy, window).unwrap();
+
+        let product = |a: &Image<MonoF32>, b: &Image<MonoF32>| -> Image<MonoF32> {
+            let p = combine_images(a, b, PixelMultiply).unwrap();
+            crate::transform::gaussian_blur(&p, window, &Clamp)
+        };
+        use crate::image::ContiguousImage;
+        let bits = |img: &Image<MonoF32>| -> Vec<u32> {
+            img.as_slice().iter().map(|p| p.value().to_bits()).collect()
+        };
+        assert_eq!(bits(tensor.xx()), bits(&product(&gx, &gx)));
+        assert_eq!(bits(tensor.xy()), bits(&product(&gx, &gy)));
+        assert_eq!(bits(tensor.yy()), bits(&product(&gy, &gy)));
+    }
 
     // ── Fixtures ────────────────────────────────────────────────────────
 
@@ -944,14 +1034,19 @@ mod tests {
         // make det − k·tr² non-positive for every tensor, so nothing can
         // ever be detected. Both are silent failures, hence errors.
         for k in [0.0, -0.04, 0.25, 0.5, f32::NAN, f32::INFINITY] {
-            let err = Harris::try_new(k).unwrap_err();
-            match err {
-                Error::InvalidParameter(reason) => {
-                    assert!(reason.contains("k"), "reason {reason:?} does not mention k");
-                }
-                other => panic!("expected InvalidParameter, got {other:?}"),
-            }
+            let Err(Error::InvalidParameter(e)) = Harris::try_new(k) else {
+                panic!("Harris k {k} must be rejected as a parameter");
+            };
+            assert_eq!(e.requirement(), HARRIS_K);
+            assert_eq!(e.value(), Value::F32(k));
         }
+    }
+
+    #[test]
+    fn harris_macro_message_matches_the_runtime_requirement() {
+        // `harris!` cannot format its bounds in a `const` block, so its
+        // message is a literal; this keeps it equal to what `try_new` prints.
+        assert_eq!(HARRIS_K.to_string(), "must lie strictly between 0 and 0.25");
     }
 
     #[test]
@@ -1063,15 +1158,13 @@ mod tests {
     #[test]
     fn corner_params_try_new_rejects_a_non_finite_threshold() {
         for threshold in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
-            let err = CornerParams::try_new(sigma!(1.0), threshold, NmsRadius::new(2).unwrap())
-                .unwrap_err();
-            match err {
-                Error::InvalidParameter(reason) => assert!(
-                    reason.contains("threshold"),
-                    "reason {reason:?} does not mention the threshold"
-                ),
-                other => panic!("expected InvalidParameter, got {other:?}"),
-            }
+            let Err(Error::InvalidParameter(e)) =
+                CornerParams::try_new(sigma!(1.0), threshold, NmsRadius::new(2).unwrap())
+            else {
+                panic!("threshold {threshold} must be rejected as a parameter");
+            };
+            assert_eq!(e.requirement(), Requirement::Finite);
+            assert_eq!(e.value(), Value::F32(threshold));
         }
     }
 
@@ -1483,5 +1576,14 @@ mod tests {
             assert_eq!(shifted.position().x - unshifted.position().x, 0.5);
             assert_eq!(shifted.position().y - unshifted.position().y, 0.5);
         }
+    }
+
+    #[test]
+    fn the_tensor_traits_ask_nothing_of_the_space() {
+        let plane = || Image::fill(2, 2, MonoF32::new(1.0));
+        let tensor = StructureTensor::from_smoothed(plane(), plane(), plane()).unwrap();
+        let copy = tensor.clone();
+        assert_eq!(copy.xy(), tensor.xy());
+        assert!(format!("{tensor:?}").starts_with("StructureTensor { xx:"));
     }
 }

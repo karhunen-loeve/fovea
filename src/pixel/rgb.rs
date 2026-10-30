@@ -4,11 +4,13 @@
 //! variants (`Rgb<BITS>`, etc. for 10/12/14-bit), and floating-point
 //! variants (F32, F64).
 
-use fovea_derive::{HomogeneousPixel, LinearPixel, PlainPixel, WhiteChannel, ZeroablePixel};
+use fovea_derive::{
+    ChannelwiseMath, HomogeneousPixel, LinearPixel, PlainPixel, WhiteChannel, ZeroablePixel,
+};
 
 use crate::pixel::{
-    HomogeneousPixel, IntegralPixel, IntegralSquaredPixel, OriginInvariantPixel, PlainChannel,
-    PlainPixel, ZeroablePixel, impl_origin_invariant_pixel,
+    ChannelwiseMath, HomogeneousPixel, IntegralPixel, IntegralSquaredPixel, OriginInvariantPixel,
+    PlainChannel, PlainPixel, ZeroablePixel, impl_origin_invariant_pixel,
 };
 use std::{
     hash::{Hash, Hasher},
@@ -33,6 +35,7 @@ use super::{canonicalize_f32, canonicalize_f64};
     Hash,
     PlainPixel,
     HomogeneousPixel,
+    ChannelwiseMath,
     ZeroablePixel,
     LinearPixel,
     WhiteChannel,
@@ -68,6 +71,7 @@ impl Rgb8 {
     Hash,
     PlainPixel,
     HomogeneousPixel,
+    ChannelwiseMath,
     ZeroablePixel,
     LinearPixel,
     WhiteChannel,
@@ -106,6 +110,7 @@ impl Rgba8 {
     Hash,
     PlainPixel,
     HomogeneousPixel,
+    ChannelwiseMath,
     ZeroablePixel,
     LinearPixel,
     WhiteChannel,
@@ -141,6 +146,7 @@ impl Rgb16 {
     Hash,
     PlainPixel,
     HomogeneousPixel,
+    ChannelwiseMath,
     ZeroablePixel,
     LinearPixel,
     WhiteChannel,
@@ -179,6 +185,7 @@ impl Rgba16 {
     Hash,
     PlainPixel,
     HomogeneousPixel,
+    ChannelwiseMath,
     ZeroablePixel,
     LinearPixel,
     WhiteChannel,
@@ -214,6 +221,7 @@ impl Rgb32 {
     Hash,
     PlainPixel,
     HomogeneousPixel,
+    ChannelwiseMath,
     ZeroablePixel,
     LinearPixel,
     WhiteChannel,
@@ -252,6 +260,7 @@ impl Rgba32 {
     Hash,
     PlainPixel,
     HomogeneousPixel,
+    ChannelwiseMath,
     ZeroablePixel,
     LinearPixel,
     WhiteChannel,
@@ -287,6 +296,7 @@ impl Rgb64 {
     Hash,
     PlainPixel,
     HomogeneousPixel,
+    ChannelwiseMath,
     ZeroablePixel,
     LinearPixel,
     WhiteChannel,
@@ -401,7 +411,15 @@ pub type Rgba14 = Rgba<14>;
 /// The `RgbF32` struct represents an RGB pixel with 32-bit floating point depth per channel.
 #[repr(C)]
 #[derive(
-    Clone, Copy, Debug, PartialEq, PlainPixel, HomogeneousPixel, ZeroablePixel, LinearPixel,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    PlainPixel,
+    HomogeneousPixel,
+    ChannelwiseMath,
+    ZeroablePixel,
+    LinearPixel,
 )]
 #[linear(accumulator = Self)]
 pub struct RgbF32 {
@@ -434,7 +452,15 @@ impl Hash for RgbF32 {
 /// The `RgbaF32` struct represents an RGBA pixel with 32-bit floating point depth per channel.
 #[repr(C)]
 #[derive(
-    Clone, Copy, Debug, PartialEq, PlainPixel, HomogeneousPixel, ZeroablePixel, LinearPixel,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    PlainPixel,
+    HomogeneousPixel,
+    ChannelwiseMath,
+    ZeroablePixel,
+    LinearPixel,
 )]
 #[linear(accumulator = Self)]
 pub struct RgbaF32 {
@@ -471,7 +497,15 @@ impl Hash for RgbaF32 {
 /// The `RgbF64` struct represents an RGB pixel with 64-bit floating point depth per channel.
 #[repr(C)]
 #[derive(
-    Clone, Copy, Debug, PartialEq, PlainPixel, HomogeneousPixel, ZeroablePixel, LinearPixel,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    PlainPixel,
+    HomogeneousPixel,
+    ChannelwiseMath,
+    ZeroablePixel,
+    LinearPixel,
 )]
 #[linear(accumulator = Self)]
 pub struct RgbF64 {
@@ -504,7 +538,15 @@ impl Hash for RgbF64 {
 /// The `RgbaF64` struct represents an RGBA pixel with 64-bit floating point depth per channel.
 #[repr(C)]
 #[derive(
-    Clone, Copy, Debug, PartialEq, PlainPixel, HomogeneousPixel, ZeroablePixel, LinearPixel,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    PlainPixel,
+    HomogeneousPixel,
+    ChannelwiseMath,
+    ZeroablePixel,
+    LinearPixel,
 )]
 #[linear(accumulator = Self)]
 pub struct RgbaF64 {
@@ -553,6 +595,7 @@ impl Hash for RgbaF64 {
     Hash,
     PlainPixel,
     HomogeneousPixel,
+    ChannelwiseMath,
     ZeroablePixel,
     LinearPixel,
     WhiteChannel,
@@ -590,6 +633,7 @@ impl Bgr8 {
     Hash,
     PlainPixel,
     HomogeneousPixel,
+    ChannelwiseMath,
     ZeroablePixel,
     LinearPixel,
     WhiteChannel,
@@ -625,6 +669,7 @@ impl Bgr16 {
     Hash,
     PlainPixel,
     HomogeneousPixel,
+    ChannelwiseMath,
     ZeroablePixel,
     LinearPixel,
     WhiteChannel,
@@ -660,6 +705,7 @@ impl Bgr32 {
     Hash,
     PlainPixel,
     HomogeneousPixel,
+    ChannelwiseMath,
     ZeroablePixel,
     LinearPixel,
     WhiteChannel,
@@ -699,6 +745,7 @@ impl Bgr64 {
     Hash,
     PlainPixel,
     HomogeneousPixel,
+    ChannelwiseMath,
     ZeroablePixel,
     LinearPixel,
     WhiteChannel,
@@ -737,6 +784,7 @@ impl Bgra8 {
     Hash,
     PlainPixel,
     HomogeneousPixel,
+    ChannelwiseMath,
     ZeroablePixel,
     LinearPixel,
     WhiteChannel,
@@ -775,6 +823,7 @@ impl Bgra16 {
     Hash,
     PlainPixel,
     HomogeneousPixel,
+    ChannelwiseMath,
     ZeroablePixel,
     LinearPixel,
     WhiteChannel,
@@ -813,6 +862,7 @@ impl Bgra32 {
     Hash,
     PlainPixel,
     HomogeneousPixel,
+    ChannelwiseMath,
     ZeroablePixel,
     LinearPixel,
     WhiteChannel,
@@ -921,7 +971,15 @@ pub type Bgra14 = Bgra<14>;
 /// The `BgrF32` struct represents a BGR pixel with 32-bit floating point depth per channel.
 #[repr(C)]
 #[derive(
-    Clone, Copy, Debug, PartialEq, PlainPixel, HomogeneousPixel, ZeroablePixel, LinearPixel,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    PlainPixel,
+    HomogeneousPixel,
+    ChannelwiseMath,
+    ZeroablePixel,
+    LinearPixel,
 )]
 #[linear(accumulator = Self)]
 pub struct BgrF32 {
@@ -954,7 +1012,15 @@ impl Hash for BgrF32 {
 /// The `BgraF32` struct represents a BGRA pixel with 32-bit floating point depth per channel.
 #[repr(C)]
 #[derive(
-    Clone, Copy, Debug, PartialEq, PlainPixel, HomogeneousPixel, ZeroablePixel, LinearPixel,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    PlainPixel,
+    HomogeneousPixel,
+    ChannelwiseMath,
+    ZeroablePixel,
+    LinearPixel,
 )]
 #[linear(accumulator = Self)]
 pub struct BgraF32 {
@@ -991,7 +1057,15 @@ impl Hash for BgraF32 {
 /// The `BgrF64` struct represents a BGR pixel with 64-bit floating point depth per channel.
 #[repr(C)]
 #[derive(
-    Clone, Copy, Debug, PartialEq, PlainPixel, HomogeneousPixel, ZeroablePixel, LinearPixel,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    PlainPixel,
+    HomogeneousPixel,
+    ChannelwiseMath,
+    ZeroablePixel,
+    LinearPixel,
 )]
 #[linear(accumulator = Self)]
 pub struct BgrF64 {
@@ -1024,7 +1098,15 @@ impl Hash for BgrF64 {
 /// The `BgraF64` struct represents a BGRA pixel with 64-bit floating point depth per channel.
 #[repr(C)]
 #[derive(
-    Clone, Copy, Debug, PartialEq, PlainPixel, HomogeneousPixel, ZeroablePixel, LinearPixel,
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    PlainPixel,
+    HomogeneousPixel,
+    ChannelwiseMath,
+    ZeroablePixel,
+    LinearPixel,
 )]
 #[linear(accumulator = Self)]
 pub struct BgraF64 {
@@ -1086,6 +1168,7 @@ unsafe impl<const BITS: usize> HomogeneousPixel for Rgb<BITS> {
     type Channel = Mono<BITS>;
     type Channels = [Mono<BITS>; 3];
 }
+impl<const BITS: usize> ChannelwiseMath for Rgb<BITS> {}
 
 unsafe impl<const BITS: usize> PlainChannel for Rgba<BITS> {}
 unsafe impl<const BITS: usize> PlainPixel for Rgba<BITS> {
@@ -1105,6 +1188,7 @@ unsafe impl<const BITS: usize> HomogeneousPixel for Rgba<BITS> {
     type Channel = Mono<BITS>;
     type Channels = [Mono<BITS>; 4];
 }
+impl<const BITS: usize> ChannelwiseMath for Rgba<BITS> {}
 
 unsafe impl<const BITS: usize> PlainChannel for Bgr<BITS> {}
 unsafe impl<const BITS: usize> PlainPixel for Bgr<BITS> {
@@ -1123,6 +1207,7 @@ unsafe impl<const BITS: usize> HomogeneousPixel for Bgr<BITS> {
     type Channel = Mono<BITS>;
     type Channels = [Mono<BITS>; 3];
 }
+impl<const BITS: usize> ChannelwiseMath for Bgr<BITS> {}
 
 unsafe impl<const BITS: usize> PlainChannel for Bgra<BITS> {}
 unsafe impl<const BITS: usize> PlainPixel for Bgra<BITS> {
@@ -1142,6 +1227,7 @@ unsafe impl<const BITS: usize> HomogeneousPixel for Bgra<BITS> {
     type Channel = Mono<BITS>;
     type Channels = [Mono<BITS>; 4];
 }
+impl<const BITS: usize> ChannelwiseMath for Bgra<BITS> {}
 
 // ---------------------------------------------------------------------------
 // OriginInvariantPixel impls

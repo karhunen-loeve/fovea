@@ -16,6 +16,7 @@ In fovea, BGR and RGB are different types. Blending gamma-encoded pixels is a co
 - **Gamma-incorrect interpolation** — `Bilinear` resize requires pixels in `LinearSpace`. It will not compile for `Srgb8`; linearize first, explicitly.
 - **Silent data loss** — there is no implicit "just convert this image" path. Lossy conversions are named strategies: `Luminance`, `Narrow`, `FullRange`, `SrgbGamma`, `Clamp`.
 - **Raw byte misuse** — `PlainPixel` is an unsafe layout contract. Once a pixel type implements it, byte-level access is guaranteed by the type system.
+- **Unit and space confusion**: a position in pixels and one in millimetres are different types, and so are the camera image and the image corrected for the lens, `Point<Pixels>` and `Point<IdealPixels>`. An image carries its space as well, `Image<P, S>`. Subtracting a millimetre from a pixel, or correcting a point twice, does not compile.
 - **Over-promising APIs** — traits describe exactly what an operation needs: random access, row access, contiguous storage, byte layout, or linear arithmetic.
 
 ## The compiler catches the image bug
@@ -33,13 +34,14 @@ let srgb = Image::generate(4, 3, |x, y| {
 });
 
 // ✓ This compiles: nearest-neighbor copies samples without blending them.
-let preview: Image<Srgb8> = resize(&srgb, Size::new(8, 6), NearestNeighbor);
+let preview: Image<Srgb8> = resize(&srgb, Size::new(8, 6), NearestNeighbor)?;
 assert_eq!(preview.size(), Size::new(8, 6));
 
 // ✓ This compiles: explicit sRGB decode before interpolation.
 let linear: Image<RgbF32> = convert_image(&srgb, SrgbGamma);
-let resized: Image<RgbF32> = resize(&linear, Size::new(8, 6), Bilinear);
+let resized: Image<RgbF32> = resize(&linear, Size::new(8, 6), Bilinear)?;
 assert_eq!(resized.size(), Size::new(8, 6));
+# Ok::<(), fovea::Error>(())
 ```
 
 The version below does **not** compile, and that is the point:
@@ -53,7 +55,8 @@ use fovea::transform::{Bilinear, resize};
 let srgb = Image::fill(4, 3, Srgb8::new(128, 64, 32));
 
 // ✗ Bilinear interpolation blends samples. Srgb8 is gamma-encoded.
-let _: Image<Srgb8> = resize(&srgb, Size::new(8, 6), Bilinear);
+let _: Image<Srgb8> = resize(&srgb, Size::new(8, 6), Bilinear)?;
+# Ok::<(), fovea::Error>(())
 ```
 
 Linearize first with `SrgbGamma`, resize in `RgbF32` or `MonoF32`, then encode back if you need an sRGB output image.
@@ -114,7 +117,7 @@ For a longer first pass, start with the docs.rs guide: [`fovea::guide`](crate::g
 
 | Type or trait | Use it when |
 |---|---|
-| `Image<P>` | You own a heap-allocated image with runtime dimensions. |
+| `Image<P>` / `Image<P, S>` | You own a heap-allocated image with runtime dimensions. `S` is the space its pixels lie in: `Pixels`, the default, for a camera image, `IdealPixels` for one corrected for the lens. |
 | `ImageArray<P, W, H>` | Width and height are compile-time constants. |
 | `ImageRef<'a, P>` / `ImageRefMut<'a, P>` | You want a borrowed view over existing storage, including strided ROIs. |
 | `ImageView` / `ImageViewMut` | An algorithm only needs random pixel access. |
@@ -134,6 +137,7 @@ The image traits intentionally mirror Rust's slice model: borrow views when you 
 | sRGB | `Srgb8`, `Srgba8`, `SrgbMono8` | Gamma-encoded display/file pixels. Not linear-light. |
 | Alpha | `Rgba8`, `Bgra8`, `MonoA16` | Pixels with explicit alpha channels. |
 | Indexed/labels | `Indexed8`, `Label32`, `bool` | Palette indices, connected-component labels, binary masks. |
+| Complex | `ComplexF32`, `ComplexF64` | Frequency-domain values: spectra and their bins. No ordering, no channelwise arithmetic. |
 
 Important distinction: `Rgb8` and `Srgb8` may both store three `u8` channels, but they do not mean the same thing. `Rgb8` is linear-light RGB. `Srgb8` is gamma-encoded sRGB. Algorithms that blend pixels can require the former and reject the latter.
 
@@ -144,16 +148,20 @@ Important distinction: `Rgb8` and `Srgb8` may both store three `u8` channels, bu
 | `image` | `Image`, `ImageView`, `SubView`, `Pyramid` | Storage, views, rows, ROIs, tiles, neighborhoods, and image pyramids. |
 | `pixel` | `Srgb8`, `RgbF32`, `PlainPixel`, `LinearSpace`, `bayer` | Pixel vocabulary — including the raw Bayer CFA family — and the traits that make illegal operations unrepresentable. |
 | `transform` | `convert_image`, `resize`, `demosaic`, `pyr_down` | Image-producing operations: conversion, resize, geometry, convolution, morphology, demosaicing, pyramids. |
-| `analyze` | `histogram`, `connected_components`, `extract_contours`, `image_statistics`, `ssim` | Image analysis that produces data about an image: histograms, components, contours and shape descriptors, whole-image statistics and moments, quality metrics, peak interpolation. |
+| `analyze` | `histogram`, `connected_components`, `extract_contours`, `image_statistics`, `ssim`, `sampling::sample` | Image analysis that produces data about an image: histograms, components, contours and shape descriptors, whole-image statistics and moments, quality metrics, peak interpolation, and the value at a sub-pixel position. |
 | `features` | `detect::detect_corners`, `detect::fast`, `refine_corners`, `Corner` | Corner detection — the structure-tensor and segment-test families — sub-pixel refinement, and the keypoint types they produce. |
-| `draw` | `draw_rect`, `draw_circle`, `Drawable` | Annotation burn-in: lines, rectangles, circles, polylines and crosshairs, clipped, with hard single-pixel strokes. |
+| `draw` | `draw_rect`, `draw_circle`, `draw_text`, `Drawable` | Annotation burn-in: lines, rectangles, circles, polylines, crosshairs and bitmap text, clipped, with hard single-pixel strokes. |
+| `geometry` | `Point`, `Millimeter`, `UniformScale`, `AffineMap`, `BrownConrady` | Units, positions and mappings of the plane: pixels to millimetres, with the mapping's class deciding what converts, and the lens model that corrects measured points. |
+| `measure` | `Caliper`, `profile`, `Profile::edges`, `fit` | Sub-pixel metrology: edges and edge pairs along a caliper, and lines, circles and ellipses fitted to points with a named outlier rule. |
+| `frequency` | `dft`, `Spectrum`, `phase_correlate`, `frequency::convolve` | The discrete Fourier transform: spectra, filters on them, sub-pixel shifts by phase correlation, and convolution with large kernels. |
+| `error` | `Error`, `ParameterError` | The one error type, and what a rejected parameter reports. |
 | `border` | `Clamp`, `Mirror`, `Skip` | Boundary behavior for neighborhood operations. |
-| `guide` | `guide::faq`, `guide::pixel_types` | Task-oriented docs.rs pages for common questions. |
+| `guide` | `guide::faq`, `guide::pixel_types`, `guide::scales_of_measurement` | Task-oriented docs.rs pages for common questions. |
 
 ## FAQ
 
 **Where do I start if I just want to load a PNG and resize it?**
-Use `fovea-io` to decode, match the returned pixel enum once, convert sRGB images to linear pixels with `SrgbGamma`, call `resize(..., Bilinear)`, then encode.
+Use `fovea-io` to decode, match the returned pixel enum once, convert sRGB images to linear pixels with `SrgbGamma`, call `resize(..., Bilinear)?`, then encode.
 
 **Why does `Bilinear` fail for `Srgb8`?**
 Because bilinear interpolation blends samples, and blending gamma-encoded samples is physically wrong. Use `NearestNeighbor` if you are only copying samples; otherwise linearize first.

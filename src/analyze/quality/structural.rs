@@ -5,13 +5,15 @@
 //! and [`SsimParams`] carries the window and the stabilizing constants. See
 //! the [module docs](super) for the full-scale value both need.
 
+use crate::error::{ParameterError, Requirement, Value};
+use crate::geometry::Pixels;
 use crate::image::{
     Image, ImageView, ImageViewMut, MAX_RADIUS, RasterImage, RasterImageMut, gaussian_kernel_1d,
     gaussian_kernel_size,
 };
-use crate::pixel::{MonoF64, SingleChannel};
-use crate::transform::convolve_separable;
-use crate::{Error, Sigma, sigma};
+use crate::pixel::{ChannelwiseMath, MonoF64, SingleChannel};
+use crate::transform::SeparableScratch;
+use crate::{Error, Sigma, Size, sigma};
 
 use crate::analyze::statistics::StatisticsChannel;
 use crate::border::Skip;
@@ -138,28 +140,32 @@ impl SsimParams {
     /// the same reasoning rejected a zero radius in
     /// [`refine_corners`](crate::features::detect::refine_corners).
     pub fn try_new(peak: PeakValue, sigma: Sigma, k1: f64, k2: f64) -> Result<Self, Error> {
-        for (name, value) in [("k1", k1), ("k2", k2)] {
+        for (name, value) in [("ssim k1", k1), ("ssim k2", k2)] {
             if !(value.is_finite() && value > 0.0) {
-                return Err(Error::InvalidParameter(format!(
-                    "ssim {name} must be finite and positive, got {value}"
-                )));
+                return Err(ParameterError::new(
+                    name,
+                    Requirement::FinitePositive,
+                    Value::F64(value),
+                )
+                .into());
             }
         }
 
+        // A one-tap window has no variance and reduces the score to its
+        // luminance term; see the `# Errors` section above.
         let taps = gaussian_kernel_size(sigma, Self::TRUNCATE);
+        let window = |requirement| {
+            ParameterError::new(
+                "ssim window taps derived from sigma",
+                requirement,
+                Value::Usize(taps),
+            )
+        };
         if taps < 3 {
-            return Err(Error::InvalidParameter(format!(
-                "ssim sigma {} derives a one-tap window, which has no variance \
-                 and reduces the score to its luminance term",
-                sigma.get(),
-            )));
+            return Err(window(Requirement::AtLeast(3)).into());
         }
         if taps > 2 * MAX_RADIUS + 1 {
-            return Err(Error::InvalidParameter(format!(
-                "ssim sigma {} needs a {taps}-tap window, above the {}-tap maximum",
-                sigma.get(),
-                2 * MAX_RADIUS + 1,
-            )));
+            return Err(window(Requirement::AtMost(2 * MAX_RADIUS + 1)).into());
         }
 
         Ok(Self {
@@ -219,16 +225,17 @@ impl SsimParams {
 /// settled definition — per channel then averaged, on Y'CbCr, on luma alone —
 /// so this crate declines to pick one silently, and a multi-channel pixel type
 /// simply does not compile. Convert first and name the choice:
-/// `convert_image(&rgb, Luminance)` for the luma reading, or compare planes for
+/// `convert_image(&rgb, Luminance(Bt709))` for a grey reading, or compare planes for
 /// the per-channel one. This is the same bound, for the same reason, as
 /// [`image_moments`](crate::analyze::statistics::image_moments).
 ///
 /// # Errors — Tier 2
 ///
 /// - [`Error::SizeMismatch`] if the two images have different dimensions.
-/// - [`Error::InvalidParameter`] if the window does not fit: an image narrower
-///   or shorter than [`SsimParams::window_size`] has no position where the
-///   full window lies inside the frame, and there is nothing to average.
+/// - [`Error::WindowLargerThanImage`] if the window does not fit: an image
+///   narrower or shorter than [`SsimParams::window_size`] has no position
+///   where the full window lies inside the frame, and there is nothing to
+///   average.
 ///
 /// # Example
 ///
@@ -256,8 +263,8 @@ impl SsimParams {
 pub fn ssim<A, B, P>(a: &A, b: &B, params: SsimParams) -> Result<f64, Error>
 where
     A: RasterImage<Pixel = P>,
-    B: RasterImage<Pixel = P>,
-    P: SingleChannel,
+    B: RasterImage<Pixel = P, Space = A::Space>,
+    P: SingleChannel + ChannelwiseMath,
     P::Channel: StatisticsChannel,
 {
     let map = ssim_map(a, b, params)?;
@@ -373,11 +380,15 @@ where
 /// assert!(clean_score > 0.99, "{clean_score}");
 /// # Ok::<(), fovea::Error>(())
 /// ```
-pub fn ssim_map<A, B, P>(a: &A, b: &B, params: SsimParams) -> Result<Image<MonoF64>, Error>
+pub fn ssim_map<A, B, P>(
+    a: &A,
+    b: &B,
+    params: SsimParams,
+) -> Result<Image<MonoF64, A::Space>, Error>
 where
     A: RasterImage<Pixel = P>,
-    B: RasterImage<Pixel = P>,
-    P: SingleChannel,
+    B: RasterImage<Pixel = P, Space = A::Space>,
+    P: SingleChannel + ChannelwiseMath,
     P::Channel: StatisticsChannel,
 {
     if a.size() != b.size() {
@@ -389,14 +400,10 @@ where
 
     let window = params.window_size();
     if a.width() < window || a.height() < window {
-        return Err(Error::InvalidParameter(format!(
-            "ssim: a {}x{} window does not fit a {}x{} image; no position has the \
-             full window inside the frame",
-            window,
-            window,
-            a.width(),
-            a.height(),
-        )));
+        return Err(Error::WindowLargerThanImage {
+            window: Size::new(window, window),
+            image: a.size(),
+        });
     }
 
     // ── Centre each image on its own mean ────────────────────────────────
@@ -413,7 +420,7 @@ where
 
     let mut plane_a = centered_plane(a, offset_a);
     let mut plane_b = centered_plane(b, offset_b);
-    let mut plane_ab = Image::<MonoF64>::zero(a.width(), a.height());
+    let mut plane_ab = Image::<MonoF64, Pixels>::zero(a.width(), a.height());
     for y in 0..plane_ab.height() {
         for x in 0..plane_ab.width() {
             let product = plane_a.pixel_at(x, y).0 * plane_b.pixel_at(x, y).0;
@@ -427,18 +434,28 @@ where
     // these is already the `(w − 2r) × (h − 2r)` valid block with no border to
     // discard. Each plane is dropped as soon as its moment exists, which caps
     // the live set below the naive eight.
+    //
+    // The five blurs are the same size, so they share one working set: the
+    // first sizes it, the other four allocate only their outputs.
     let kernel = gaussian_kernel_1d(params.sigma, SsimParams::TRUNCATE);
-    let mean_a: Image<MonoF64> = convolve_separable(&plane_a, &kernel, &Skip);
-    let mean_b: Image<MonoF64> = convolve_separable(&plane_b, &kernel, &Skip);
-    let moment_ab: Image<MonoF64> = convolve_separable(&plane_ab, &kernel, &Skip);
+    let valid = Size::new(a.width() + 1 - kernel.len(), a.height() + 1 - kernel.len());
+    let mut scratch = SeparableScratch::new();
+    let mut blur = |plane: &Image<MonoF64, Pixels>| {
+        let mut moment = Image::<MonoF64, Pixels>::zero(valid.width, valid.height);
+        scratch.convolve_separable_into(plane, &kernel, &Skip, &mut moment);
+        moment
+    };
+    let mean_a = blur(&plane_a);
+    let mean_b = blur(&plane_b);
+    let moment_ab = blur(&plane_ab);
     drop(plane_ab);
 
     square_in_place(&mut plane_a);
-    let moment_aa: Image<MonoF64> = convolve_separable(&plane_a, &kernel, &Skip);
+    let moment_aa = blur(&plane_a);
     drop(plane_a);
 
     square_in_place(&mut plane_b);
-    let moment_bb: Image<MonoF64> = convolve_separable(&plane_b, &kernel, &Skip);
+    let moment_bb = blur(&plane_b);
     drop(plane_b);
 
     // ── Combine ──────────────────────────────────────────────────────────
@@ -446,7 +463,7 @@ where
     let c1 = (params.k1 * peak) * (params.k1 * peak);
     let c2 = (params.k2 * peak) * (params.k2 * peak);
 
-    let mut map = Image::<MonoF64>::zero(mean_a.width(), mean_a.height());
+    let mut map = Image::<MonoF64, Pixels>::zero(mean_a.width(), mean_a.height());
     for y in 0..map.height() {
         for x in 0..map.width() {
             // Window means of the centred planes; the true luminances add the
@@ -487,7 +504,7 @@ where
         }
     }
 
-    Ok(map)
+    Ok(map.into_space())
 }
 
 /// The image's mean channel value if it is usable as a centring constant, and
@@ -495,7 +512,7 @@ where
 fn finite_mean<I, P>(image: &I) -> f64
 where
     I: RasterImage<Pixel = P>,
-    P: SingleChannel,
+    P: SingleChannel + ChannelwiseMath,
     P::Channel: StatisticsChannel,
 {
     use crate::analyze::statistics::{ChannelStatistics, image_statistics};
@@ -508,13 +525,13 @@ where
 }
 
 /// The image's single channel widened to `f64`, with `offset` subtracted.
-fn centered_plane<I, P>(image: &I, offset: f64) -> Image<MonoF64>
+fn centered_plane<I, P>(image: &I, offset: f64) -> Image<MonoF64, Pixels>
 where
     I: RasterImage<Pixel = P>,
     P: SingleChannel,
     P::Channel: StatisticsChannel,
 {
-    let mut plane = Image::<MonoF64>::zero(image.width(), image.height());
+    let mut plane = Image::<MonoF64, Pixels>::zero(image.width(), image.height());
     for y in 0..image.height() {
         let source = image.row(y);
         let destination = plane.row_mut(y);
@@ -526,7 +543,7 @@ where
 }
 
 /// Squares every value of `plane` in place.
-fn square_in_place(plane: &mut Image<MonoF64>) {
+fn square_in_place(plane: &mut Image<MonoF64, Pixels>) {
     for y in 0..plane.height() {
         for cell in plane.row_mut(y) {
             cell.0 *= cell.0;
@@ -581,7 +598,12 @@ mod tests {
     fn a_non_positive_stabilizing_constant_is_refused() {
         let peak = PeakValue::of_pixel::<Mono8>();
         assert!(SsimParams::try_new(peak, sigma!(1.5), 0.0, 0.03).is_err());
-        assert!(SsimParams::try_new(peak, sigma!(1.5), 0.01, -0.03).is_err());
+        let Err(Error::InvalidParameter(e)) = SsimParams::try_new(peak, sigma!(1.5), 0.01, -0.03)
+        else {
+            panic!("a negative k2 must be rejected as a parameter");
+        };
+        assert_eq!(e.requirement(), Requirement::FinitePositive);
+        assert_eq!(e.value(), Value::F64(-0.03));
         assert!(SsimParams::try_new(peak, sigma!(1.5), f64::NAN, 0.03).is_err());
         assert!(SsimParams::try_new(peak, sigma!(1.5), 0.01, 0.03).is_ok());
     }
@@ -592,11 +614,12 @@ mod tests {
         // variance at all, and a score that is only the luminance term.
         let peak = PeakValue::of_pixel::<Mono8>();
         assert_eq!(gaussian_kernel_size(sigma!(0.1), SsimParams::TRUNCATE), 1);
-        let refused = SsimParams::try_new(peak, sigma!(0.1), 0.01, 0.03);
-        assert!(
-            matches!(refused, Err(Error::InvalidParameter(_))),
-            "{refused:?}"
-        );
+        let Err(Error::InvalidParameter(e)) = SsimParams::try_new(peak, sigma!(0.1), 0.01, 0.03)
+        else {
+            panic!("a one-tap window must be rejected as a parameter");
+        };
+        assert_eq!(e.requirement(), Requirement::AtLeast(3));
+        assert_eq!(e.value(), Value::Usize(1));
 
         // The smallest accepted window is three taps.
         let accepted = SsimParams::try_new(peak, sigma!(0.2), 0.01, 0.03).unwrap();
@@ -609,11 +632,11 @@ mod tests {
         // not: MAX_RADIUS is 64, so radius = round(3σ) > 64 means σ > 21.5.
         let peak = PeakValue::of_pixel::<Mono8>();
         assert!(SsimParams::try_new(peak, sigma!(21.0), 0.01, 0.03).is_ok());
-        let refused = SsimParams::try_new(peak, sigma!(40.0), 0.01, 0.03);
-        assert!(
-            matches!(refused, Err(Error::InvalidParameter(_))),
-            "{refused:?}"
-        );
+        let Err(Error::InvalidParameter(e)) = SsimParams::try_new(peak, sigma!(40.0), 0.01, 0.03)
+        else {
+            panic!("a window past the kernel capacity must be rejected as a parameter");
+        };
+        assert_eq!(e.requirement(), Requirement::AtMost(2 * MAX_RADIUS + 1));
     }
 
     // ── The identities SSIM must satisfy ─────────────────────────────────
@@ -739,10 +762,12 @@ mod tests {
         let params = reference_params();
         let small: Image<Mono8> = Image::fill(10, 32, Mono8::new(0));
         let other: Image<Mono8> = Image::fill(10, 32, Mono8::new(0));
-        let refused = ssim_map(&small, &other, params);
-        assert!(
-            matches!(refused, Err(Error::InvalidParameter(_))),
-            "{refused:?}"
+        assert_eq!(
+            ssim_map(&small, &other, params).unwrap_err(),
+            Error::WindowLargerThanImage {
+                window: Size::new(11, 11),
+                image: Size::new(10, 32),
+            }
         );
 
         // Exactly the window size is the smallest accepted image, and it has

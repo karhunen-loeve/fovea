@@ -58,24 +58,22 @@ A padded buffer, whose rows sit further apart than the image is wide, still borr
 
 Android's CameraX delivers `YUV_420_888` planes whose `rowStride` is routinely wider than the frame, because the hardware wants every row aligned; a 1920-wide plane commonly arrives with a pitch of 1984. Read back to back, every row starts late, the error accumulates, and the picture shears.
 
-`Image::from_raw_bytes` will not do that to you. It asks for the image dimensions, the buffer length does not match them, and the call fails at the boundary instead of producing a frame that looks almost right. The route that does work costs no copy: view the buffer at the width it actually has, then crop the padding away.
+`Image::from_raw_bytes` will not do that to you. It asks for the image dimensions, the buffer length does not match them, and the call fails at the boundary instead of producing a frame that looks almost right. The route that does work costs no copy: name the stride.
 
 ```rust
-use fovea::image::{ImageRef, ImageView, SubView};
+use fovea::image::{ImageRef, ImageView, RowStride};
 use fovea::pixel::{Mono8, PlainPixel};
-use fovea::{Rectangle, Size};
+use fovea::Size;
 
-// A plane whose rows are 8 bytes apart but only 6 wide.
+// A plane whose rows are 8 bytes apart but only 6 wide. The last row
+// ends without its padding, as Android planes often do.
 let (width, height, row_stride) = (6, 4, 8);
-# let bytes: Vec<u8> = (0..row_stride * height)
+# let bytes: Vec<u8> = (0..row_stride * (height - 1) + width)
 #     .map(|i| if i % row_stride < width { 1 } else { 0xFF })
 #     .collect();
 
 let pixels: &[Mono8] = Mono8::cast_slice(&bytes).unwrap();
-let padded = ImageRef::new(row_stride, height, pixels)?;
-let frame = padded
-    .roi(Rectangle::new((0, 0), Size::new(width, height)))
-    .unwrap();
+let frame = ImageRef::from_strided(width, height, RowStride::bytes(row_stride)?, pixels)?;
 
 assert_eq!(frame.size(), Size::new(width, height));
 // No padding leaked in: the last column is image data, not 0xFF.
@@ -83,11 +81,11 @@ assert_eq!(frame.pixel_at(width - 1, height - 1), Mono8::new(1));
 # Ok::<(), fovea::Error>(())
 ```
 
-No stride argument appears anywhere, because the width slot carries it. `ImageRef::new` sets the row pitch to the width it is given, and a sub-view keeps its parent's pitch while narrowing its size. Passing `row_stride` as the width is what tells the view about the padding; cropping to the image is what removes it.
+The view keeps the stride it was built with, and so does every sub-view cropped from it.
 
-The sub-view borrows its parent, so both `let` bindings are load bearing. Written as one chained expression the same code fails to compile with `E0716`: the `ImageRef` would be a temporary, dropped at the end of the statement while `frame` still points into it.
+`rowStride` counts bytes, as camera SDKs, OpenCV's `step` and numpy's `strides` all do. `RowStride::bytes` converts the count to pixels of the type the slice holds, and returns an error for a count that does not hold whole pixels; a stride that is in pixels already is `RowStride::pixels`. A stride converted for one pixel type does not compile with a buffer of another, so a 16-bit plane cannot be read with the stride of an 8-bit one.
 
-`roi` is available here because `Mono8` implements [`OriginInvariantPixel`](crate::pixel::OriginInvariantPixel). A pixel type you define yourself needs `impl OriginInvariantPixel for MyPixel {}` before it can be cropped, and the trait's own documentation says when that marker is true and when a coordinate-dependent pixel should withhold it.
+`ImageRefMut::from_strided` takes the same arguments over a `&mut [P]`, for writing into a buffer another system owns. It writes the image and leaves the padding alone.
 
 ## Reinterpreting byte slices
 
@@ -137,7 +135,7 @@ The output type follows from the sample type (`BayerRggb12` → `Rgb12`), so a t
 ## Common mistakes
 
 - **Treating BGR as RGB.** Use `Bgr8` / `Bgr16` at the boundary, then convert with `ColorSwap` only when you mean to.
-- **Ignoring stride.** A region in a padded frame is not always contiguous. See [Padded rows](#padded-rows-a-rowstride-wider-than-the-image) for the zero-copy route.
+- **Ignoring stride.** A padded frame's rows are not back to back. See [Padded rows](#padded-rows-a-rowstride-wider-than-the-image) for `ImageRef::from_strided`.
 - **Using `Srgb8` for linear camera data.** sRGB means a transfer function. Most raw camera data is linear mono or linear RGB/BGR.
 - **Inventing runtime flags for layout.** Prefer distinct pixel types. The type should say what the bytes mean.
 - **Typing a CFA frame as `Mono<N>`.** It loses the mosaic pattern, and with it every guard against blurring, resizing, or odd-origin-cropping across colour channels. Use the `bayer` types.

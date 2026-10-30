@@ -5,10 +5,12 @@
 //! and not at all in how their maxima are picked.
 
 use crate::analyze::peak::{Extremum, interpolate_peak};
+use crate::error::{ParameterError, Requirement, Value};
 use crate::features::Corner;
+use crate::geometry::{PixelSpace, Point};
 use crate::image::RasterImage;
-use crate::pixel::SingleChannel;
-use crate::{Coordinate, CoordinateF64, Error};
+use crate::pixel::{ChannelwiseMath, SingleChannel};
+use crate::{Coordinate, Error};
 
 /// A pixel-window radius that is **at least 1**: the half-side of the
 /// square window a detection must be the maximum of, and therefore the
@@ -68,9 +70,12 @@ impl NmsRadius {
     /// Returns [`Error::InvalidParameter`] if `radius == 0`.
     pub fn try_new(radius: usize) -> Result<Self, Error> {
         if radius == 0 {
-            return Err(Error::InvalidParameter(
-                "window radius must be at least 1".to_string(),
-            ));
+            return Err(ParameterError::new(
+                "NMS radius",
+                Requirement::AtLeast(1),
+                Value::Usize(radius),
+            )
+            .into());
         }
         Ok(Self(radius))
     }
@@ -138,10 +143,10 @@ impl NmsRadius {
 /// assert_eq!(positions, [(2.0, 2.0), (6.0, 6.0)]);
 /// ```
 #[must_use]
-pub fn corner_peaks<I, P>(response: &I, threshold: f32, radius: usize) -> Vec<Corner>
+pub fn corner_peaks<I, P>(response: &I, threshold: f32, radius: usize) -> Vec<Corner<I::Space>>
 where
     I: RasterImage<Pixel = P>,
-    P: SingleChannel,
+    P: SingleChannel + ChannelwiseMath,
     P::Channel: PartialOrd + From<f32>,
     f64: From<P::Channel>,
 {
@@ -227,10 +232,10 @@ where
 /// assert!((corners[0].position().x - 3.25).abs() < 1e-3, "{corners:?}");
 /// assert!((corners[0].position().y - 4.00).abs() < 1e-3, "{corners:?}");
 /// ```
-pub fn interpolate_corners<I, P>(corners: &mut [Corner], response: &I) -> usize
+pub fn interpolate_corners<I, P>(corners: &mut [Corner<I::Space>], response: &I) -> usize
 where
     I: RasterImage<Pixel = P>,
-    P: SingleChannel,
+    P: SingleChannel + ChannelwiseMath,
     f64: From<P::Channel>,
 {
     let mut fitted = 0;
@@ -262,7 +267,7 @@ where
 /// gradients vote, so it is a documented rule, not an accident of the
 /// cast.
 #[inline]
-pub(super) fn pixel_site(at: CoordinateF64) -> Option<Coordinate> {
+pub(super) fn pixel_site<S: PixelSpace>(at: Point<S>) -> Option<Coordinate> {
     let (x, y) = (at.x.round(), at.y.round());
     if x >= 0.0 && y >= 0.0 && x.is_finite() && y.is_finite() {
         Some(Coordinate::new(x as usize, y as usize))
@@ -283,7 +288,7 @@ pub(super) fn scan_peaks<I, P>(
     response: &I,
     threshold: f32,
     radius: usize,
-) -> Vec<(CoordinateF64, f32)>
+) -> Vec<(Point<I::Space>, f32)>
 where
     I: RasterImage<Pixel = P>,
     P: SingleChannel,
@@ -301,7 +306,7 @@ where
             // which compares false against everything — is excluded rather
             // than reported as an infinitely strong corner.
             if value >= threshold && is_local_max(response, x, y, radius, value) {
-                let at = CoordinateF64::new(x as f64, y as f64);
+                let at = Point::new(x as f64, y as f64);
                 // Named narrowing: an f64 response map's value is truncated
                 // to Corner's f32 response field. A response is a ranking
                 // score, not a measurement to preserve, so f32 is enough,
@@ -317,10 +322,10 @@ where
 /// Lifts level-local peaks into the base-image frame: the shared tail of
 /// [`detect_corners_in_level`](super::detect_corners_in_level) and
 /// [`fast_in_level`](super::fast_in_level).
-pub(super) fn lift_peaks(
-    level: &impl crate::image::Decimated,
-    peaks: Vec<(CoordinateF64, f32)>,
-) -> Vec<Corner> {
+pub(super) fn lift_peaks<L: crate::image::Decimated>(
+    level: &L,
+    peaks: Vec<(Point<L::Space>, f32)>,
+) -> Vec<Corner<L::Space>> {
     peaks
         .into_iter()
         .map(|(local, response)| Corner::from_level(level, local, response))
@@ -421,7 +426,7 @@ mod tests {
         });
         let corners = corner_peaks(&response, 0.5, 2);
         assert_eq!(corners.len(), 1);
-        assert_eq!(corners[0].position(), CoordinateF64::new(3.0, 3.0));
+        assert_eq!(corners[0].position(), Point::new(3.0, 3.0));
     }
 
     #[test]
@@ -432,7 +437,7 @@ mod tests {
         let response: Image<MonoF32> = Image::fill(8, 8, MonoF32::new(1.0));
         let corners = corner_peaks(&response, 0.5, 2);
         assert_eq!(corners.len(), 1);
-        assert_eq!(corners[0].position(), CoordinateF64::new(0.0, 0.0));
+        assert_eq!(corners[0].position(), Point::new(0.0, 0.0));
     }
 
     #[test]
@@ -461,7 +466,7 @@ mod tests {
         assert_eq!(corner_peaks(&response, 0.1, 3).len(), 2);
         let merged = corner_peaks(&response, 0.1, 4);
         assert_eq!(merged.len(), 1);
-        assert_eq!(merged[0].position(), CoordinateF64::new(3.0, 1.0));
+        assert_eq!(merged[0].position(), Point::new(3.0, 1.0));
     }
 
     #[test]
@@ -472,7 +477,7 @@ mod tests {
         });
         let corners = corner_peaks(&response, 0.5, 2);
         assert_eq!(corners.len(), 1);
-        assert_eq!(corners[0].position(), CoordinateF64::new(0.0, 0.0));
+        assert_eq!(corners[0].position(), Point::new(0.0, 0.0));
     }
 
     #[test]
@@ -587,9 +592,9 @@ mod tests {
         // (its plateau rule always lands on a tied group's boundary) but a
         // caller supplying its own positions can.
         let response: Image<MonoF32> = Image::fill(7, 7, MonoF32::new(1.0));
-        let mut corners = vec![Corner::new(CoordinateF64::new(3.0, 3.0), 1.0)];
+        let mut corners = vec![Corner::new(Point::new(3.0, 3.0), 1.0)];
         assert_eq!(interpolate_corners(&mut corners, &response), 0);
-        assert_eq!(corners[0].position(), CoordinateF64::new(3.0, 3.0));
+        assert_eq!(corners[0].position(), Point::new(3.0, 3.0));
     }
 
     #[test]
@@ -609,7 +614,7 @@ mod tests {
 
         assert_eq!(interpolate_corners(&mut corners, &response), 1);
         // Raster order: the border corner first, unmoved; the crest second.
-        assert_eq!(corners[0].position(), CoordinateF64::new(0.0, 0.0));
+        assert_eq!(corners[0].position(), Point::new(0.0, 0.0));
         assert!((corners[1].position().x - 8.4).abs() < 1e-3, "{corners:?}");
     }
 
@@ -627,11 +632,11 @@ mod tests {
         // not detectable, which is why the requirement is documented.)
         let response = crest_at(9, 9, 4.25, 4.0);
         let mut corners = vec![
-            Corner::new(CoordinateF64::new(40.0, 40.0), 0.9),
-            Corner::new(CoordinateF64::new(-3.0, 2.0), 0.9),
+            Corner::new(Point::new(40.0, 40.0), 0.9),
+            Corner::new(Point::new(-3.0, 2.0), 0.9),
         ];
         assert_eq!(interpolate_corners(&mut corners, &response), 0);
-        assert_eq!(corners[0].position(), CoordinateF64::new(40.0, 40.0));
-        assert_eq!(corners[1].position(), CoordinateF64::new(-3.0, 2.0));
+        assert_eq!(corners[0].position(), Point::new(40.0, 40.0));
+        assert_eq!(corners[1].position(), Point::new(-3.0, 2.0));
     }
 }

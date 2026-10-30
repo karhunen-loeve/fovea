@@ -15,10 +15,12 @@
 //! whose total intensity is negative has no real scale normalisation. Those
 //! are absences rather than errors, so nothing here returns a `Result`.
 
-use crate::CoordinateF64;
+use core::marker::PhantomData;
+
 use crate::common::AxialOrientation;
+use crate::geometry::{PixelSpace, Pixels, Point};
 use crate::image::RasterImage;
-use crate::pixel::SingleChannel;
+use crate::pixel::{ChannelwiseMath, SingleChannel};
 
 use super::summary::StatisticsChannel;
 
@@ -74,8 +76,7 @@ use super::summary::StatisticsChannel;
 /// assert!((centroid.x - 1.5).abs() < 1e-12);
 /// assert!((centroid.y - 1.5).abs() < 1e-12);
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub struct ImageMoments {
+pub struct ImageMoments<S = Pixels> {
     /// `m00`: total intensity, the zeroth moment.
     pub m00: f64,
     /// `m10`: `Σ x·I`.
@@ -96,9 +97,71 @@ pub struct ImageMoments {
     pub m12: f64,
     /// `m03`: `Σ y³·I`.
     pub m03: f64,
+    space: PhantomData<fn() -> S>,
 }
 
-impl ImageMoments {
+// Written by hand rather than derived: a derive would require `S: Clone`,
+// `S: Debug`, `S: PartialEq` and `S: Default` of a marker that is never
+// instantiated.
+impl<S> Clone for ImageMoments<S> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<S> Copy for ImageMoments<S> {}
+
+impl<S> PartialEq for ImageMoments<S> {
+    fn eq(&self, other: &Self) -> bool {
+        self.m00 == other.m00
+            && self.m10 == other.m10
+            && self.m01 == other.m01
+            && self.m20 == other.m20
+            && self.m11 == other.m11
+            && self.m02 == other.m02
+            && self.m30 == other.m30
+            && self.m21 == other.m21
+            && self.m12 == other.m12
+            && self.m03 == other.m03
+    }
+}
+
+impl<S> core::fmt::Debug for ImageMoments<S> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ImageMoments")
+            .field("m00", &self.m00)
+            .field("m10", &self.m10)
+            .field("m01", &self.m01)
+            .field("m20", &self.m20)
+            .field("m11", &self.m11)
+            .field("m02", &self.m02)
+            .field("m30", &self.m30)
+            .field("m21", &self.m21)
+            .field("m12", &self.m12)
+            .field("m03", &self.m03)
+            .finish()
+    }
+}
+
+impl<S> Default for ImageMoments<S> {
+    fn default() -> Self {
+        Self {
+            m00: 0.0,
+            m10: 0.0,
+            m01: 0.0,
+            m20: 0.0,
+            m11: 0.0,
+            m02: 0.0,
+            m30: 0.0,
+            m21: 0.0,
+            m12: 0.0,
+            m03: 0.0,
+            space: PhantomData,
+        }
+    }
+}
+
+impl<S: PixelSpace> ImageMoments<S> {
     /// Centre of brightness, or [`None`] when total intensity is exactly zero.
     ///
     /// `(m10 / m00, m01 / m00)`, in pixel-centre coordinates. `m00 == 0` is
@@ -106,8 +169,8 @@ impl ImageMoments {
     /// whose positive and negative intensity cancel, and in neither case is
     /// there a centre to report.
     #[must_use]
-    pub fn centroid(&self) -> Option<CoordinateF64> {
-        (self.m00 != 0.0).then(|| CoordinateF64::new(self.m10 / self.m00, self.m01 / self.m00))
+    pub fn centroid(&self) -> Option<Point<S>> {
+        (self.m00 != 0.0).then(|| Point::new(self.m10 / self.m00, self.m01 / self.m00))
     }
 
     /// Moments taken about the centroid, so translating the image does not
@@ -401,11 +464,27 @@ pub(crate) fn axis_eccentricity(mu20: f64, mu02: f64, mu11: f64) -> f64 {
 /// assert!(central.eccentricity() > 0.98, "{}", central.eccentricity());
 /// assert!(central.orientation().radians().abs() < 1e-9);
 /// ```
+///
+/// Moments weight positions by the pixel values, which component labels
+/// and palette indices are not, so they do not compile; the pixel must be
+/// [`ChannelwiseMath`]. The shape of each
+/// component is in its
+/// [`BlobMeasurements::central_moments`](crate::analyze::components::BlobMeasurements::central_moments):
+///
+/// ```compile_fail
+/// use fovea::analyze::statistics::image_moments;
+/// use fovea::image::Image;
+/// use fovea::pixel::Label32;
+///
+/// let labels = Image::fill(4, 4, Label32::default());
+/// // ERROR: `Label32: ChannelwiseMath` is not satisfied.
+/// let _ = image_moments(&labels);
+/// ```
 #[must_use]
-pub fn image_moments<I, P>(image: &I) -> ImageMoments
+pub fn image_moments<I, P>(image: &I) -> ImageMoments<I::Space>
 where
     I: RasterImage<Pixel = P>,
-    P: SingleChannel,
+    P: SingleChannel + ChannelwiseMath,
     P::Channel: StatisticsChannel,
 {
     let mut moments = ImageMoments::default();
@@ -825,5 +904,14 @@ mod tests {
         let b = image_moments(&float);
         assert_eq!(a.m00, b.m00);
         assert_eq!(a.m21, b.m21);
+    }
+
+    #[test]
+    fn the_moment_traits_ask_nothing_of_the_space() {
+        let zero = ImageMoments::<crate::Pixels>::default();
+        let one = ImageMoments { m00: 1.0, ..zero };
+        assert_eq!(Clone::clone(&zero), zero);
+        assert_ne!(one, zero);
+        assert!(format!("{zero:?}").starts_with("ImageMoments { m00: 0.0,"));
     }
 }

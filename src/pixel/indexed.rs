@@ -3,7 +3,7 @@
 //! See [`Indexed8`] — a palette index, NOT a color value. The meaning depends
 //! entirely on an external lookup table (see `Depalettize`).
 
-use fovea_derive::{HomogeneousPixel, PlainPixel, WhiteChannel, ZeroablePixel};
+use fovea_derive::{HomogeneousPixel, PlainPixel, ZeroablePixel};
 
 use crate::pixel::{impl_origin_invariant_pixel, impl_single_channel};
 
@@ -25,7 +25,10 @@ use crate::pixel::{impl_origin_invariant_pixel, impl_single_channel};
 /// value.  This type implements `PlainPixel` and `ZeroablePixel` but
 /// intentionally does **not** implement `LinearPixel` or `LinearSpace`,
 /// so the compiler rejects attempts to use it with interpolation
-/// algorithms like bilinear resize.
+/// algorithms like bilinear resize. For the same reason it implements
+/// neither `ChannelwiseMath` nor `WhiteChannel`: an index has a largest
+/// value but no saturated meaning, so thresholding, inverting or
+/// differencing indices does not compile either.
 ///
 /// Convert to a color pixel via [`Depalettize`](crate::transform::Depalettize).
 ///
@@ -49,7 +52,6 @@ use crate::pixel::{impl_origin_invariant_pixel, impl_single_channel};
     PlainPixel,
     HomogeneousPixel,
     ZeroablePixel,
-    WhiteChannel,
 )]
 pub struct Indexed8(pub u8);
 

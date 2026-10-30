@@ -7,6 +7,723 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-10-30
+
+### Added
+
+- **Images carry their space.** `ImageView::Space` names the space an
+  image's grid lies in, bounded by the new open marker trait
+  `geometry::PixelSpace` for spaces measured in pixels: `Pixels`, the
+  image as the camera delivered it, and the new `IdealPixels`, the ideal
+  image of a lens model, where straight lines are straight. Both are at
+  the crate root. `Image<T, S = Pixels>`, `ImageRef`, `ImageRefMut`,
+  `ImageArray`, `BinaryImage` and the other image types carry it with
+  `Pixels` as the default, so `Image<Mono8>` means what it did. Every
+  constructor builds in `Pixels`; every operation passes its input's
+  space through, a filter, a resize or a region of interest alike, and a
+  position found on an image lies in its space. A unit of the world is no
+  pixel space, and the compiler says so: "`Meter<Milli>` is not a space
+  measured in pixels".
+- **The named relabelling, `into_space`, `as_space` and `as_space_mut`.**
+  `image.into_space::<IdealPixels>()` states that an image lies in another
+  space, `ideal.as_space::<Pixels>()` borrows it so, without a copy and
+  without changing a pixel: `abs_diff(&raw, &ideal.as_space::<Pixels>())`
+  compares a camera image with an undistorted one where `abs_diff(&raw,
+  &ideal)` does not compile. `ImageRef`, `ImageRefMut` and `ImageArray`
+  have `into_space` too.
+- **`pixel::ChannelwiseMath`, a marker for pixels whose channels are
+  quantities.** It states that every channel is a scalar quantity on its own,
+  so a scalar operation applied per channel means something.
+  `HomogeneousPixel` keeps its old promise, which was only ever about layout:
+  every channel has the same type, stored as an array. Implemented by the
+  `Mono`, `MonoA`, `Rgb`, `Rgba`, `Bgr` and `Bgra` families (integer and
+  float), the `Srgb` family, the twenty Bayer types and the bare integer
+  pixels (`u8` to `i64`). **Not** implemented by `Label32` and `Indexed8`,
+  whose values are identifiers rather than quantities. The trait is safe to
+  implement: a wrong claim gives meaningless numbers, not undefined
+  behaviour.
+- `#[derive(ChannelwiseMath)]`, re-exported at the crate root beside the
+  other pixel derives. It is deliberately not implied by
+  `#[derive(HomogeneousPixel)]`.
+- `Coordinate::step(Offset) -> SignedCoordinate`, the total sibling of
+  `Coordinate::checked_add`, and `SignedCoordinate::step` and
+  `SignedCoordinate::within(Size) -> Option<Coordinate>`, which is the whole
+  bounds check in one place.
+- **`fovea::error`, a public module for what a parameter error carries.**
+  `ParameterError` holds the rejected parameter's name, the `Requirement` it
+  broke (`Finite`, `FinitePositive`, `FiniteNonNegative`, `Odd`,
+  `AtLeast(n)`, `AtMost(n)`, `InRange`, `OpenInterval`, `Ordered`,
+  `StrictlyOrdered`) and the `Value` it received, plus an `index` for one
+  element of several, such as the channel of a `Clamp`. Equality compares
+  floats by bit pattern, so an error carrying NaN equals itself and
+  `assert_eq!` works on it. `Requirement` and `Value` are
+  `#[non_exhaustive]`, so a new rule is not a breaking change.
+  `fovea::Error` stays at the crate root.
+- **Breaking:** `Error::WindowLargerThanImage { window, image }`, returned
+  by `ssim` and `ssim_map` when no position has the whole window inside
+  the image. `Error` gained a variant, so an exhaustive `match` on it needs
+  an arm.
+- **Complex pixels, `pixel::ComplexF32` and `pixel::ComplexF64`.** One
+  complex value `re + im·i` per pixel, laid out as two floats with `re`
+  first. `*` between two of them is the complex product, so `PixelMultiply`
+  multiplies complex images as complex numbers; `+`, `-`, negation and
+  multiplication by a real scalar work on both parts. Methods `magnitude`,
+  `phase`, `conjugate` and `norm_sqr`. They are `HomogeneousPixel`, so
+  `ImagePlanes` splits a complex image into its two planes, and
+  `LinearSpace`, so blurring, resizing and blending work. They are **not**
+  `ChannelwiseMath`, `WhiteChannel` or `PartialOrd`: a per-part maximum,
+  difference, threshold or gradient magnitude of a complex image does not
+  compile, because it depends on where the real axis lies.
+- Four conversion strategies from a complex image to a real one,
+  `RealPart`, `ImaginaryPart`, `ComplexMagnitude` and `ComplexPhase`
+  (`ComplexF32` to `MonoF32`, `ComplexF64` to `MonoF64`), and the combiner
+  `FromParts`, which builds a complex image from a real and an imaginary one
+  through `combine_images`. `ComplexMultiply` names the complex product of
+  two complex images.
+- **Interpolation kernels, `transform::InterpolationKernel`.** A kernel is a
+  one-dimensional weight function with a compile-time `RADIUS`, applied
+  separably. Shipped: `Bilinear` (now also a kernel), `CatmullRom` (Keys'
+  cubic with `a = −0.5`, Pillow's bicubic), `KeysBicubic` with a chosen `a`
+  (`keys_bicubic!(-0.75)` is OpenCV's bicubic; any finite `a` is valid),
+  and `Lanczos<A>` with `Lanczos2` and `Lanczos3`, both a type and a value.
+  There is deliberately no bare `Bicubic`, because libraries disagree on its
+  coefficient. The trait is open: a kernel of your own works with resize and
+  sampling.
+- **Bicubic and Lanczos resize.** Every kernel is a `ResizeMethod`:
+  `resize(&img, size, Lanczos3)`. A bare kernel interpolates at a fixed
+  width. `Antialiased(kernel)` widens it by the shrink factor, so shrinking
+  by more than about two averages the source instead of aliasing fine
+  detail into false patterns; when enlarging it equals the bare kernel.
+- **Point sampling, `analyze::sampling::sample`.** The value at a sub-pixel
+  position, `sample(&img, Point::new(x, y), kernel, &border)`, as the
+  pixel type's accumulator so the fraction survives. The position is a
+  `Point` in the image's space. The border policy has
+  no default: `Skip` returns `None` when the kernel's taps leave the image,
+  the other policies always answer. Positions follow the pixel-centre
+  convention, `(0.0, 0.0)` being the centre of pixel `(0, 0)`. Kernels up to
+  `MAX_SAMPLE_RADIUS` (8) taps a side; a wider one fails to build.
+- **Units and positions of the plane, `fovea::geometry`.** `Point<U>`,
+  `Vector<U>` and `Length<U>` carry their unit of length in the type:
+  `Pixels`, or a metre with a prefix, `Meter<P>`, with `Millimeter`,
+  `Micrometer` and a bare `Meter`. Mixing units does not compile, the sum
+  of two points does not compile (their difference is a `Vector`), and a
+  prefix changes through an explicit `convert`, which multiplies or
+  divides by an exact power of ten. `Point`, `Length` and the unit markers
+  are also at the crate root.
+- **Calibrations as mappings of the plane.** `UniformScale` (square
+  pixels), `AxisScale` (a factor per axis, for line-scan cameras and binned
+  sensors), `Similarity` (a camera at an angle) and `Affine`, each from one
+  unit to another, with an optional translation and reflections allowed:
+  `axis_scale!(0.02, -0.02)` maps an image's y-down frame to a y-up machine
+  frame. Each stores its inverse, computed and checked at construction
+  under one scale-invariant criterion, shared by every class and the
+  homography: the matrix normalized by its largest entry must have a
+  determinant of at least 10⁻¹² in magnitude, and the inverse's largest
+  coefficient must be normal. The same mapping therefore gets the same
+  verdict on every path, `Affine::from` of a valid member is always a
+  valid `Affine`, and the reflection question is answered on the
+  normalized matrix, so it survives a determinant that would underflow.
+  The class decides what a mapping converts: every `PlaneMap` converts
+  points, every `AffineMap` also displacements and their lengths
+  (`length_of`), and only a `ConformalMap`, the uniform scale and the
+  similarity, converts a length without a direction, so a radius cannot
+  pass through an axis scale. `map_line`, `map_circle`, `map_ellipse`
+  and `Fit::map` return `Option`: `None` where the image of the element
+  would break the element's own certificate, a radius or axis beyond
+  `f64` or underflowed to zero, instead of a `Circle` carrying a value
+  `Circle::try_new` rejects. The unvalidated carriers (`Point`,
+  `Vector`, `Length`, `Segment`) map totally, and `map_ellipse` computes
+  its axes normalized by the largest component, so axes near the ends of
+  the `f64` range map exactly like ordinary ones. `AffineMap` and `ConformalMap` are sealed,
+  since conversions such as `Fit::map` rely on what they certify; an
+  affine calibration of one's own is an `Affine` value, and `PlaneMap`
+  stays open for other models. `uniform_scale!` and `axis_scale!` are
+  literals checked at compile time.
+- `error::Requirement::FiniteNonZero`, for a factor or a determinant that
+  must not be zero.
+- **`Angle`, an amount of turn in `f64`**, at the crate root. Built by
+  `Angle::from_radians` or `Angle::from_degrees`, which reject a value
+  that is not finite, and not wrapped: three quarter turns stay three
+  quarter turns. It is the rotation of `Similarity::try_linear` and
+  `try_new`, the start and the sweep of `Caliper::try_arc`, and what
+  `Line::angle_to` returns, so a scale and an angle cannot change places
+  and the unit is written at the call site. `Orientation` and
+  `AxialOrientation` keep directions and axes, and gain `degrees()`
+  beside `radians()`.
+- `Vector::normalized`, the vector of length one in the same direction,
+  `None` for a zero or non-finite vector.
+- `Vector::from_polar(length, angle)`, the vector of polar coordinates:
+  `length` along the direction `angle` from the `+x` axis. The length
+  carries the unit, the `Angle` none, and the components are Cartesian
+  the moment it is built, as every `Vector`'s are.
+- **The caliper, `fovea::measure`.** A `Caliper` describes where to
+  measure: a segment or an arc, a width to average across and a sampling
+  step, with no default for either. `profile(&img, &caliper, kernel,
+  &border)` reads the averaged intensities along it from a single-channel
+  image. `Profile::edges(polarity, sigma, min_contrast)` returns every edge
+  of the polarity (`DarkToLight`, `LightToDark`, `Either`) whose contrast
+  reaches `min_contrast!`: the profile is differentiated with a derivative
+  of a Gaussian of the given σ, the contrast of an ideal step is its
+  height, and the position is the centroid of the derivative's lobe, which
+  stays within about 0.001 px of a sub-pixel edge at σ = 1 px where the
+  vertex of a parabola would be pulled up to 0.05 px towards a pixel
+  boundary. That figure holds for an edge with no other edge of either
+  polarity within about 7σ and no more blur than σ: the two sides of a bar
+  or a gap narrower than 7σ push each other outward (a bar of 4σ measures
+  about 0.23σ too wide), so choose σ at most W/7 for a pair of width W, and
+  an edge blurrier than σ locks towards the samples (up to 0.04 px for a
+  blur of 2 px at σ = 1 px). `Edges` offers the named selections `first`, `last`,
+  `strongest` and `nearest_to`, and `pairs(first, rule)` forms edge pairs
+  by a rule the caller names, `Neighbors` or `StrongestOfRun`, or one of
+  their own through the `PairRule` trait. A pair's `width` is measured
+  along the path, the arc length on an arc. The caliper, its profile and
+  its edges lie in the space of the image they are read from: a caliper's
+  constructors take the space of their points, `profile` requires the
+  image's, and an edge on an image remapped through a lens model is in
+  `IdealPixels`. A caliper whose space nothing pins is written
+  `let cal: Caliper = ...`, the default `Pixels`. `Edge` has private
+  fields, read through `position()`, `along()` and `contrast()` and built
+  by the total `Edge::new(position, along, contrast)`, so an edge can carry
+  more later without a breaking change; `EdgePair` keeps its public
+  fields. `PairRule::pairs` is generic over the space.
+- **Breaking:** `Error::CaliperOutsideImage { sample }`, returned by
+  `profile` under `Skip` when the caliper's footprint leaves the image.
+  `Error` gained a variant, so an exhaustive `match` on it needs an arm.
+- **Geometric elements, `Line`, `Segment`, `Circle` and `Ellipse`.** In
+  `fovea::geometry` and at the crate root, each in the unit of its points.
+  A `Line` is infinite and has a direction of unit length; a `Segment` is
+  two points; a `Circle` has a finite positive radius; an `Ellipse` has
+  semi-axes with `semi_major >= semi_minor > 0` and the orientation of its
+  major axis as an `AxialOrientation`. Constructors report an invalid value
+  through their `Result`; semi-axes in the wrong order are an error, not a
+  swap. They convert by the class of the mapping: `AffineMap` gained
+  `map_line`, `map_segment` and `map_ellipse`, and `ConformalMap` gained
+  `map_circle`, so a circle does not pass through an axis scale, where it
+  becomes an ellipse. The sealed trait `Element` names an element's unit.
+  `draw::Line` and `draw::Circle` keep their names and meaning: they paint
+  pixels.
+- **Geometric fits, `measure::fit`.** `fit(&points, estimator,
+  outliers)` fits a line by `TotalLeastSquares`, a circle by `Taubin` or an
+  ellipse by `Fitzgibbon` (the direct least squares method, in Halíř and
+  Flusser's stable form), with the outlier rule written out: `AllPoints`,
+  `Huber` or `Tukey`, whose threshold is a length in the unit of the
+  points (`tukey!(0.5)`, `huber!(0.5)`, or `try_new` for a computed value),
+  so a threshold in pixels does not compile against points in millimetres.
+  Tukey starts from Huber's result, and must keep a majority: a Tukey fit
+  that uses no more than half of the points is `TooFewPoints`, since its
+  threshold then lies below the noise and the RMS over the few points kept
+  would flatter a poor element. For data whose outliers are the majority,
+  the documentation points to a consensus method such as RANSAC, which
+  fovea does not provide. The returned `Fit` carries the element
+  and its residuals as exact geometric distances, the ellipse's included:
+  `rms_residual` over the points that shaped the element, `max_residual`
+  and `peak_to_valley` (the form deviation, furthest point outside plus
+  furthest inside) over all points, so a chip that Tukey rejects still
+  shows where the part is judged; and `used_count` and `outlier_count`. A
+  fitted line points from its first input point towards its last, and
+  `extent()` is the segment its points cover. `Fit::map` converts a fit and
+  its residuals through a `ConformalMap`; under any other calibration the
+  points convert first. Each estimator has `MIN_POINTS` (2, 3, 5).
+- **Breaking:** `Error::TooFewPoints { required, actual }` and
+  `Error::DegeneratePoints`, returned by `fit`. `Error` gained two
+  variants, so an exhaustive `match` on it needs two arms.
+- **Geometric relations, as methods on the elements.** `distance(p)` and
+  `closest_point(p)` on `Line`, `Segment`, `Circle` and `Ellipse`, exact
+  for the ellipse. Where the nearest point is not unique, a stated rule
+  picks it: at a circle's centre the point in the `+y` direction, on an
+  ellipse the one on the positive side of its minor axis, which at the
+  centre is the end of the minor axis. `Line::angle_to` returns the signed
+  `Angle` that turns one line's direction onto the other's, in
+  `(−π, π]`, positive from `+x` towards `+y` (clockwise on the screen in
+  an image); `Line::axis` returns the line's `AxialOrientation`, for the
+  angle between two lines regardless of direction; `Line::reversed` turns
+  a line round. `Line::intersection`
+  returns where two lines meet, `None` for parallel lines.
+  `Segment::distances_to(&line)` returns the smallest and largest
+  distance of the segment from a line, so the extent of one fitted edge
+  and the line of another give the width of a slot and its taper.
+- **Homography and lens distortion, in `fovea::geometry`.** `Homography`,
+  built from its 3×3 matrix by rows, rejects a singular matrix and stores
+  its inverse; it converts points only, and none on its vanishing line.
+  `CameraMatrix::try_new(FocalLength { x, y }, principal_point)` and
+  `BrownConrady::try_new(camera, BrownConradyCoefficients { radial: Radial
+  { k1, k2, k3 }, tangential: Tangential { p1, p2 } })`, every coefficient
+  by name; `BrownConrady::from_opencv(camera, &coeffs)` takes OpenCV's
+  order `(k1, k2, p1, p2[, k3])` and accepts a longer array only if every
+  further coefficient is zero. As a mapping the lens sends a pixel of the
+  ideal image, `IdealPixels`, to where the camera sees it, `Pixels`.
+  `undistort_point` corrects a point measured on the camera image into the
+  ideal image, `Point<Pixels>` to `Point<IdealPixels>`, so correcting a
+  point twice does not compile. It works by Newton's method to 10⁻⁹ px, accepts only a point where the model is
+  one-to-one, inside the fold where the distorted radius stops rising
+  (also when it rises again further out, as with `k1 < 0 < k2`), and
+  reports `Error::DidNotConverge` otherwise; OpenCV's
+  default of five fixed-point steps leaves up to half a pixel in the
+  corner of a strong lens.
+- **Direction types and composition.** `DestToSource(map)` and
+  `SourceToDest::new(map)` say which way a mapping runs; `SourceToDest`
+  accepts an `Invertible` mapping (the affine family and the homography),
+  not a lens model. Every `AffineMap` is
+  `Invertible` through one blanket impl whose inverse is its
+  `AffineMap::inverse`, so the two traits cannot name different inverses.
+  Each names the space of its destination and of its
+  source (`SourceLookup::Dest`, `SourceLookup::Source`), both spaces
+  measured in pixels, so a remap through a calibration into world units
+  does not compile. `PlaneMap::then` chains any mapping that ends in the
+  ideal image with a lens model into a `Chain`, so undistorting and
+  rectifying is one remap.
+- **`transform::remap`** remaps an image through a direction type with a
+  method and a border policy that gives every pixel a value (`Skip` does
+  not compile), into an image of the given size. The image must lie in the
+  lookup's source space, and the result lies in its destination space: a
+  remap through a lens model returns the ideal image, in `IdealPixels`.
+  The method is a `RemapMethod`, the shape of `ResizeMethod`: every
+  interpolation kernel, on pixels in a linear space, or `NearestNeighbor`,
+  which copies the pixel whose extent holds the position and so remaps
+  masks, label images and sRGB images. The output pixel type is the
+  caller's to name, as for `resize`, so an 8-bit frame can be remapped
+  into `MonoF32` without rounding. `RemapMethod` is sealed; a kernel of
+  one's own joins through `InterpolationKernel`.
+  `DestToSourceTable::new(&lookup, size)` computes the sources once, as
+  `f32` displacements from each destination pixel, carries the lookup's
+  two spaces, and `table.remap(&frame, method, &border)` applies it to
+  every frame.
+- `error::Requirement::Zero` and `error::Requirement::OneOf`, for a
+  coefficient the model does not use and for an array length.
+- **Breaking:** `Error::DidNotConverge { steps }`, returned by
+  `undistort_point`. `Error` gained a variant, so an exhaustive `match` on
+  it needs an arm.
+- **The discrete Fourier transform, `fovea::frequency`.**
+  `dft(&img, method)` returns the `Spectrum<P, S>` of a `MonoF32` or
+  `MonoF64` image in the space `S`, and `spectrum.inverse(method)` the
+  image again, at the source's size, in the same space and with no factor
+  to apply. The values are the textbook
+  transform, unscaled and with the negative exponent, as numpy, OpenCV and
+  FFTW compute it by default; only the half that a real image's symmetry
+  leaves independent is stored, and `dft` makes the bins that a real
+  image's symmetry ties together exact conjugates. A spectrum is not an
+  image, so image operations do not apply to it. The method is always written out:
+  `Radix2` for sides that are powers of two, returning a `Result`;
+  `Bluestein` for any size; `Auto`, which picks `Radix2` or `Bluestein`
+  per side and may pick faster algorithms in later releases. In the
+  functions that pad anyway, `phase_correlate`, `PhaseReference` and
+  `frequency::convolve`, `Auto` pads every side to a power of two and
+  transforms by radix-2, faster than Bluestein at the exact size; this is
+  fixed for good, since the padded size changes a phase correlation's
+  result. Each method
+  answers which sizes it accepts, `Radix2.accepts(size)` and
+  `Radix2.next_size(size)`. Nothing is padded behind the caller's back:
+  the image is transformed as one period of a periodic signal. An image
+  without pixels has an empty spectrum under every method. The
+  documentation describes the accuracy and promises no bound: every
+  twiddle factor comes from its exact integer index, and `Bluestein`
+  rounds more than `Radix2`.
+- **Reading and changing a spectrum by frequency.** `FrequencyIndex`
+  addresses a bin exactly; an index passed in is taken modulo the size,
+  and the spectrum hands indices out in numpy's `fftfreq` range.
+  `Frequency<U>` carries its unit, `Bins` or `CyclesPerPixel`, which
+  convert only through a spectrum, since only it knows the size.
+  `spectrum.at(index)`, `spectrum.frequency_of(index)` and
+  `spectrum.convert(f)` read, each returning `None` for the spectrum of an
+  image without pixels, which has no bin; `spectrum.apply(|f: Frequency<U>, bin| ...)`
+  changes every bin, the unit named by the closure. `apply` visits each
+  independent frequency once and keeps the symmetry of a real image:
+  what it writes at `f` holds at `−f` as the conjugate, and a bin that is
+  its own mirror keeps only its real part.
+- **Showing a spectrum.** `spectrum.centered()` is the full spectrum as a
+  complex image with the zero frequency in the middle, and
+  `magnitude()`, `power()` (the squared magnitude) and `phase()` are real
+  images in the same layout, of the source's real type
+  `SpectrumSource::Real`, so a later complex source adds without changing
+  them. All four lie in `SpectrumPixels`, a space of their own at the
+  crate root: a position on a view names a frequency, so it cannot slip
+  into an API that expects a position on the image, and
+  `FrequencyIndex::from_centered(x, y, size)` is the step back to the bin
+  a view pixel shows.
+- **Filters in the frequency domain.** `spectrum.filter(&transfer)`
+  multiplies every bin by the real gain of a transfer function, a value
+  of the open trait `TransferFunction`: `LowPass`, `HighPass`,
+  `BandPass`, `BandStop`, `Notch`, or one of the caller's own. The
+  methods `low_pass`, `high_pass`, `band_pass`, `band_stop` and `notch`
+  build the value and call `filter`. The shapes are `Cutoff<U>` and
+  `Band<U>`, validated, with `cutoff!` and `band!` for literals (the
+  word other libraries use for the frequency where the gain is a half); the
+  profiles are `Ideal`, `Butterworth<N>` with the order as a const
+  parameter, and `Gaussian`. Every smooth profile halves the amplitude at
+  the cutoff, so exchanging one keeps the place of the edge; a band is the
+  difference of two low-passes, so bands add up to the whole spectrum.
+  The documentation shows the ideal profile's ringing, measured: 8.8 %
+  overshoot at a step, against 3.4 % for `Butterworth::<2>`.
+- **Breaking:** `Error::EmptySource { target }`, for an image without
+  pixels asked to fill a result that has some; see `pad`, `resize` and
+  `remap`.
+- `Frequency<CyclesPerPixel>::axis()`, the axis a frequency lies on, an
+  `AxialOrientation`, or `None` for the zero frequency.
+- **Products of spectra.** `spectrum.multiply(&other)` and
+  `spectrum.multiply_conjugate(&other)`, the cyclic convolution and
+  cross-correlation of two images, return `Error::SizeMismatch` for
+  spectra of images of different sizes.
+- **`frequency::convolve(&img, &kernel, &border, method)`** computes what
+  `transform::convolve` computes, with the same border policy and output
+  region, through the DFT, for `MonoF32` and `MonoF64` images. The DFT
+  method is written out; `Radix2` pads on to powers of two. Its
+  documentation states the cost of the padding, the crossover against
+  the direct path as measured (the direct path faster up to about
+  15 × 15 on 512 × 512, this one from about 21 × 21), that one NaN spreads
+  to every output pixel, and that its accuracy is relative to the whole
+  image. `transform::convolve` is unchanged.
+- **Phase correlation, `frequency::phase_correlate(&reference, &moving,
+  radius, method)`**, the translation between two images of one size.
+  `Ok(Some(found))` carries `found.shift()`, a `Vector` in the images'
+  space saying where the content of `moving` lies, so a point `p` of the reference is
+  at `p + shift`, and `found.peak()`, 1 for identical images. The phase
+  of the cross-power spectrum is weighted by a Gaussian of a mandatory
+  radius, a `CorrelationRadius` strictly between 0 and 0.2 cycles per
+  pixel (`correlation_radius!(0.06)` for a literal, so a size in pixels
+  written by mistake fails to build; above about 0.18 the weight is cut at
+  the Nyquist frequency and the peak fit is biased even on clean images,
+  so a phase correlation needs an image of at least 16 px a side), and
+  its peak is located by a
+  three-point Gaussian fit. Both images are windowed by Hann, and a
+  second pass windows them over the part they share. The documentation
+  gives the accuracy measured by radius and sharpness of the images,
+  0.03 as the start for an unknown image, and a recipe to check a radius
+  on one's own images. A radius not exceeding 3 frequency bins of the
+  shorter side is an `Error::InvalidParameter` naming the smallest one
+  allowed, images of different sizes an `Error::SizeMismatch`, and an
+  image without structure or with a NaN gives `Ok(None)`. Both images
+  lie in one space. `PhaseReference` prepares one reference for many
+  images.
+- **`transform::pad`**, which enlarges an image and fills the new pixels by
+  a border policy: `pad(&img, Size::new(2048, 1024), &Mirror)?` to a target
+  size with the image at the origin, or `pad(&img, Margins { left, right,
+  top, bottom }, &Constant(v))?` on each side. A target smaller than the
+  image is an error, never a crop. An empty image pads under `Constant`,
+  whose value needs no pixel, and is an `Error::EmptySource` under the
+  policies that copy from the image, as `numpy.pad` does. `Skip` has
+  nothing to fill with and does not compile here.
+- **Breaking:** `Error::UnsupportedDftSize { method, size }`, returned by
+  `dft` and `Spectrum::inverse` under `Radix2`, and
+  `Error::PadTargetTooSmall { source, target }`, returned by `pad`. `Error`
+  gained two variants, so an exhaustive `match` on it needs two arms.
+- **Borrowing a buffer with padded rows, `ImageRef::from_strided` and
+  `ImageRefMut::from_strided`.** `from_strided(width, height, row_stride,
+  data)` views a buffer whose rows sit further apart than the image is
+  wide, as cameras, array libraries and GPU buffers deliver them, without a
+  copy and without first viewing the buffer wider than the image. The last
+  row may end without its padding. A stride smaller than the width is an
+  `Error::InvalidParameter`, a buffer that ends before the last pixel an
+  `Error::LengthMismatch` with the length the view needs. The mutable twin
+  writes into a buffer another system owns and leaves the padding alone;
+  both are safe code.
+- **`image::RowStride<P>`**, the distance between rows in pixels of `P`.
+  `RowStride::bytes(n)?` converts a count in bytes, as OpenCV's `step`,
+  numpy's `strides` and Android's `rowStride` give it, and is an
+  `Error::InvalidParameter` when `n` does not hold whole pixels;
+  `RowStride::pixels(n)` takes one in pixels. The stride carries its pixel
+  type, so a stride converted for `Mono8` does not compile with a buffer of
+  `Mono16`.
+- `Requirement::MultipleOf(n)`, the rule a byte stride that does not hold
+  whole pixels breaks. `Requirement` is `#[non_exhaustive]`, so this is
+  not breaking.
+- **Text, `draw::Text` and `draw::draw_text`.** A label burned into the
+  image next to the geometry it describes: `draw_text(&mut img, "12.5 µm",
+  (8, 8), color, background, scale, &FONT_6X13)`. The text is borrowed,
+  so drawing allocates nothing; `\n` starts a new line; an integer
+  `scale` enlarges each glyph pixel to a block, and a scale of 0 draws
+  nothing; `background: Some(bg)` paints whole cells so the text reads on
+  any image. Like every shape it clips silently, and its cost follows the
+  visible part whatever the scale or position. A character the font does
+  not cover is drawn as its `?`.
+- **Bitmap fonts, `draw::BitmapFont`, `FONT_6X13` and `FONT_10X20`.** The
+  two built-in fonts are the public-domain X11 misc-fixed fonts in cells of
+  6 × 13 and 10 × 20 pixels, covering printable ASCII and the printable
+  half of ISO 8859-1, so `µ`, `°`, `±`, `Ø` and umlauts render as written.
+  `font.text_size(text, scale)` returns the size a text covers before it
+  is drawn, which is what placing a label beside a shape needs.
+  `BitmapFont::try_new(cell, chars, pixels)` builds a font of your own and
+  reports a zero cell, characters out of order or a table that does not
+  fit as an error.
+
+### Changed
+
+- **Breaking:** `ImageView` gained the associated type `Space`, which an
+  implementor must name; `type Space = Pixels;` keeps the old meaning.
+  Generic code that returns `Image<I::Pixel>` from an `ImageView` input
+  keeps compiling but returns its image in `Pixels`; write
+  `Image<I::Pixel, I::Space>`. Every `_into` function requires its output
+  in the input's space, and so do `ResizeMethod` and `MatchMethod`, so
+  generic code that passes its own output type adds `Space = I::Space` to
+  its bound. Every function that reads two images of one scene (the
+  combine family, `zip_pixels`, the gradients, `non_maximum_suppression`,
+  `squared_error`, `ssim`, `phase_correlate`) requires them in one space.
+  `PyramidMethod::Output` takes the space, `type Output<S: PixelSpace>`;
+  `IntoTilesMut` and `HasPosition` gained `Space` as well. The image
+  holders `ImagePlanes`, `PlacedImage`, `ScaledImage`, `StructureTensor`
+  and `Labeling` carry the space with `Pixels` as the default. A kernel,
+  a neighbourhood's weights and a template carry no constraint: they are
+  patterns, matched in any space. `IntegralImage` stays in `Pixels`, its
+  table being one cell larger than the image on each axis.
+- **Breaking:** every position the older analysis functions report is a
+  `Point` in the image's space, where it was a `CoordinateF64`:
+  `interpolate_peak`, `interpolate_peak_along`, `interpolate_ridge_points`,
+  `interpolate_edge_points`, the centroids of `BlobMeasurements`,
+  `ComponentStats`, `Contour` and `ImageMoments`, `polygon_centroid`
+  (whose integer vertices carry no space, so the result takes the one it
+  is used in), `Corner::at` and `ScaleKeypoint::at`, `HasPosition::position`,
+  `Decimated::origin_offset`, `to_base` and `to_local`, and
+  `OriginOffset::get`. `Corner`, `ScaleKeypoint`, `OriginOffset`,
+  `ComponentStats`, `BlobMeasurements`, `Contour`, `ComponentContour`,
+  `ContourHierarchy` and `ImageMoments` carry the space with `Pixels` as
+  the default. A corner found on an ideal image is a `Corner<IdealPixels>`,
+  and passing its position to `undistort_point` does not compile.
+  Migration: `CoordinateF64::new(x, y)` becomes `Point::new(x, y)`; a
+  corner built from literals with nothing else to pin its space is written
+  `let c: Corner = Corner::new(Point::new(x, y), r);`; an implementor of
+  `HasPosition` adds `type Space = Pixels;` and returns a `Point<Pixels>`.
+  `ComponentStats`, `BlobMeasurements` and `ImageMoments` keep their public
+  fields but can no longer be built by a struct literal.
+- **Breaking:** `CoordinateF64` and its `From` bridges with `Point<Pixels>`
+  are removed; `Point<Pixels>` is the sub-pixel position. There is no
+  deprecated alias.
+- **Breaking:** `connected_components`, `connected_components_into`,
+  `connected_components_with_stats`, `connected_components_with_measurements`
+  and `extract_contours` take the image as a named type parameter, so
+  that their results can carry its space. A call with a turbofish names
+  it with `_`: `connected_components::<Label32, Connectivity4, _>(&img)`.
+- **In results:** the `Debug` output of `Image` names its space, and
+  `ImageRef` is `Copy` and `Clone` for every pixel type.
+- **Breaking:** `resize`, `resize_into`, `remap` and
+  `DestToSourceTable::remap` return a `Result`. An image without pixels
+  resized or remapped to a target that has some is an
+  `Error::EmptySource`, where it panicked before; `remap` under
+  `Constant` fills such a target with the constant instead. Migration:
+  add `?`, or `.expect(...)` where the source cannot be empty.
+  `ResizeMethod::resize_into` returns `Result<(), Error>` too, so calling
+  the method directly reports the empty source as the free function does;
+  an implementation outside the crate returns `Ok(())` and reports
+  `Error::EmptySource` itself.
+- **Breaking:** `Orientation::signed_difference` and
+  `AxialOrientation::signed_difference` return an `Angle` instead of bare
+  radians (`f32` and `f64`). The difference of two directions or two axes
+  is an amount of turn, the quantity `Angle` carries; `Angle::abs()` gives
+  its magnitude. Migration: append `.radians()` where the raw number is
+  wanted, so `a.signed_difference(b).abs() < 1e-6` becomes
+  `a.signed_difference(b).abs().radians() < 1e-6`; a printed
+  `.to_degrees()` becomes `.degrees()`. For `Orientation` the wrap still
+  runs in `f32` and the exact result is widened, so no value changes.
+- **Breaking:** `Error` is `#[non_exhaustive]`. It gained eight variants
+  in this release, each breaking every exhaustive `match`; from here on a
+  new variant can arrive in a patch release. Migration: end a `match` on
+  `Error` with a wildcard arm, `_ => ...`.
+- **Breaking:** `Error::InvalidParameter` carries a `ParameterError`
+  instead of a `String`. A caller or a test now asks which rule failed
+  (`e.requirement()`) and with which value (`e.value()`) instead of
+  searching the message. The message keeps its form, for example
+  `invalid parameter: sigma must be finite and strictly positive, got -1`,
+  and the literal macros `sigma!`, `pixel_distance!`, `tolerance!`,
+  `window!`, `harris!` and `peak!` fail to build with the same wording that
+  `try_new` reports at run time. `Error` no longer allocates. **Migration:**
+  match `Error::InvalidParameter(e)` and read `e.requirement()`,
+  `e.value()` or `e.index()`; code that needs the text calls
+  `e.to_string()`.
+- **Breaking:** `Error::InvalidBinningStrategy` is gone. `LinearBins`,
+  `CustomBins` and every other `BinningStrategy` report an invalid
+  configuration as `Error::InvalidParameter`, and so does `histogram`,
+  which calls `validate`.
+  **Migration:** match `InvalidParameter` instead; a custom strategy's
+  `validate` returns `Err(ParameterError::new(name, requirement, value).into())`.
+- **Breaking:** `ssim` and `ssim_map` report a window larger than the image
+  as `Error::WindowLargerThanImage` instead of `InvalidParameter`, because
+  the failure is a relation between the parameters and the image, like
+  `TemplateTooLarge`.
+- **Breaking:** `Luminance` takes the colour standard whose weights it uses,
+  as a value: `Luminance(Bt709)` or `Luminance(Bt601)`. A bare `Luminance`
+  no longer compiles, so no conversion to grey picks a standard silently.
+  Until now every `Luminance` used the BT.601 weights `0.299, 0.587, 0.114`
+  on linear light, where they give the luminance of no primaries in current
+  use. `Bt709` has the weights `0.2126, 0.7152, 0.0722`, which on linear
+  light give the luminance for the BT.709 and sRGB primaries: the right
+  choice for an image decoded from sRGB with `SrgbGamma`. For integer
+  pixels `Bt709` uses fixed-point weights that sum to 65536, so grey stays
+  exactly grey. `LuminanceStandard` is the sealed trait both implement, and
+  its `WEIGHTS` constant gives their weights. **Migration:** `Luminance`
+  becomes `Luminance(Bt601)` to keep every result bit for bit, or
+  `Luminance(Bt709)` for physical luminance, which changes the numbers
+  (pure red in `Rgb8` goes from 77 to 54, pure green from 149 to 182).
+- **Breaking, in results:** `resize` maps pixel centres onto pixel centres
+  through the extent of the image, `src = (x + 0.5) · in / out − 0.5`, as
+  OpenCV and Pillow do, for `Bilinear` and `NearestNeighbor` as for the new
+  kernels. Before, both mapped the corner pixels onto each other,
+  `src = x · (in − 1) / (out − 1)`, which put a resized image up to half a
+  source pixel off the crate's own pixel-centre geometry. Signatures are
+  unchanged; resized pixel values move. A 3×3 image resized to 1×1 now
+  yields its centre pixel rather than its top-left one. `Bilinear` runs on
+  the shared separable engine: in a benchmark on 2026-09-29, enlarging an
+  RGB image was about twice as fast, and shrinking a grey one about a fifth
+  slower. **Migration:** none in code; tests that pin resized values need
+  new expectations.
+- `HysteresisThresholds::try_new` no longer requires `C: Debug`. The bound
+  existed only to print the two thresholds into the message, and the error
+  now records no value for this generic pair.
+- **Breaking:** the channel-wise operations require `ChannelwiseMath`
+  instead of `HomogeneousPixel`. That covers the combiners `AbsDiff`,
+  `Max`, `Min`, `Magnitude`, `MagnitudeHypot` and `Direction` with
+  `abs_diff`, `image_max` and `image_min`; `gradient_magnitude`,
+  `gradient_direction` and `non_maximum_suppression`; the conversions
+  `TruncateThreshold`, `ToZeroThreshold`, `ToZeroThresholdInv`, `BinaryMask`
+  and `Clamp`; `image_statistics`, `squared_error`, `histogram`,
+  `equalize_image` and `equalize_image_into`; `match_template` with `SAD`,
+  `SSD` and `NCC`; and, because they call those, `canny`,
+  `otsu_binary_mask`, `ssim` and `ssim_map`. Functions that required only
+  `SingleChannel` require `ChannelwiseMath` as well: `hysteresis_threshold`
+  and `hysteresis_threshold_into`, `image_moments`, the sub-pixel peak
+  interpolation (`interpolate_peak`, `interpolate_peak_along`,
+  `interpolate_ridge_points`, `interpolate_edge_points`,
+  `interpolate_corners`, `refine_corners`) and `corner_peaks`, with
+  `detect_corners` passing the bound to its response type. The
+  channel-wise maximum of two `Label32` images, the difference of two
+  `Indexed8` images, a histogram or Otsu threshold of palette indices, a
+  hysteresis threshold of indices and the moments of a label image compiled
+  before and are compile errors now. `dilate`, `erode` and `median_filter`
+  still accept labels through the pixel's `Ord`, as region growing on a
+  label image needs. `BrightnessContrast` requires `ChannelwiseMath` on top of
+  `LinearPixel`, because its brightness is added to every channel: on
+  `ComplexF32` and `ComplexF64` it landed in both the real and the
+  imaginary part (`3 + 4i` plus 10 gave `13 + 14i`), and those two are now
+  rejected; every other pixel of the crate that it accepted before it
+  still accepts. `ImagePlanes` and `ChannelLut` still need only
+  `HomogeneousPixel`: splitting into planes and an arbitrary per-channel
+  lookup are meaningful on identifiers too. **Migration:** a custom pixel
+  type used with any of these operations adds `ChannelwiseMath` to its
+  derive list, next to `HomogeneousPixel`. A generic function that forwards
+  to one of them replaces its `HomogeneousPixel` bound with
+  `ChannelwiseMath`, which implies it.
+- **Breaking:** `WhiteChannel` has `ChannelwiseMath` as its supertrait
+  instead of `HomogeneousPixel`, because "white" is the top of a quantity's
+  range. `Indexed8` no longer implements `WhiteChannel`: index 255 is
+  whatever colour the palette stores there. `Invert`, `BinaryThreshold`,
+  `BinaryThresholdInv` and `PeakValue::of_pixel` therefore reject palette
+  indices, which they accepted before. **Migration:** a custom pixel that
+  derives or implements `WhiteChannel` also derives `ChannelwiseMath`.
+- **Breaking:** one type for a pixel position that may lie outside the
+  image. `SignedCoordinate { x: isize, y: isize }` replaces
+  `CoordinateI32`, and it is what the drawing primitives, the border
+  policies and the contour tracer now share; before, the same concept was
+  spelled `CoordinateI32`, a bare `(isize, isize)` pair and a private
+  `i64` pair. The width is `isize` because every pixel of every image fits
+  it, so `Coordinate::step` never fails. The drawing primitives stay exact
+  over the whole `isize` plane: a line clipped from endpoints near
+  `isize::MIN` and `isize::MAX` paints the same pixels as the unclipped
+  walk. Its `TryFrom<Coordinate>` fails with `core::num::TryFromIntError`,
+  std's error for an integer that does not fit, where `CoordinateI32`'s
+  returned `fovea::Error`. **Migration:** `CoordinateI32` becomes
+  `SignedCoordinate`; tuple literals such as `(3, -2)` still convert with
+  `.into()`, but a tuple of `i32` variables needs `as isize`. A
+  `CoordinateI32::try_from(c)?` in a function that returns `fovea::Error`
+  no longer compiles, because `TryFromIntError` does not convert into it;
+  write the total `c.step(Offset::ZERO)`, since no pixel of an image lies
+  past `isize::MAX`.
+- **Breaking:** `BorderPolicy::pixel_at(&self, image, at: SignedCoordinate)`
+  replaces `pixel_at(&self, image, x: isize, y: isize)`. The four callers in
+  the crate formed that position by hand as `x as isize + dx as isize`;
+  they now write `Coordinate::step`, and `Constant` tests the bounds with
+  `SignedCoordinate::within`. **Migration:** a custom border policy reads
+  `at.x` and `at.y`; a caller passes `SignedCoordinate::new(x, y)` or
+  `coordinate.step(offset)`.
+- **Breaking:** an anchor is a `Coordinate`, not a `(usize, usize)` tuple:
+  `Kernel::anchor`, `Neighborhood::anchor`,
+  `BorderPolicy::output_region`, `compute_interior_region`, and the
+  `anchor` parameter of `fold_neighborhood`, `map_neighborhood` and their
+  `_into` and `_fn` variants. **Migration:** `(1, 1)` becomes
+  `Coordinate::new(1, 1)`; code that reads `kernel.anchor().0` reads
+  `.x`.
+- **Breaking:** a displacement in the neighbourhood API is an `Offset`.
+  `MapItem { pixel, dx, dy }` becomes `MapItem { pixel, offset }`, and
+  `Neighborhood::positions()` yields `(Offset, weight)` pairs instead of
+  `(dx, dy, weight)` triples. These were the last public displacement
+  pairs, spelled `isize` where `Offset` is `i32`. **Migration:** read
+  `item.offset.dx` for `item.dx`, and destructure `(offset, w)` or
+  `(Offset { dx, dy }, w)`.
+- **Breaking:** a kernel's explicit anchor is a pair of const generics, so
+  an anchor outside the kernel no longer panics at run time but fails to
+  build. `Neighborhood::with_anchor::<AX, AY>(data)` replaces
+  `with_anchor(data, anchor)`, and
+  `SeparableKernel::with_anchors::<HA, VA>(h_weights, v_weights)` replaces
+  `with_anchors(h_weights, h_anchor, v_weights, v_anchor)`. The kernel's
+  size was already const generic, and every anchor in the crate was a
+  literal. **Migration:** `with_anchor(data, (0, 2))` becomes
+  `with_anchor::<0, 2>(data)`; `with_anchors(h, 0, v, 2)` becomes
+  `with_anchors::<0, 2>(h, v)`.
+- **In results:** when several vertices are equally far from the first,
+  `approximate_polygon` splits the outline at the earliest of them, where
+  it took the last. The result changes only on such an exact tie, for
+  instance on a shape symmetric about its first vertex. The earlier
+  candidate is the rule every other tie in the crate follows.
+- **In results:** `by_response_then_position`, and with it
+  `sort_by_response` and `retain_top_n`, rank a keypoint whose response is
+  NaN after every keypoint with a number. Before, a NaN with the sign bit
+  clear ranked first and survived every top-N cut. Among equal responses a
+  NaN coordinate ranks last as well. Results change only where a NaN
+  occurs.
+- **In results:** `NCC` subtracts from each channel its own mean, where it
+  subtracted one mean over all channels, and so computes the score of
+  OpenCV's `TM_CCOEFF_NORMED`. A brightness change that differs between
+  channels, such as a colour cast, no longer lowers the score: a grey
+  template against the same part under a red cast of +30 scored 0.33 and
+  scores 1.0. Single-channel images score as before, bit for bit. The
+  price is that a colour difference that is the same across the whole
+  patch cannot be seen, so a colour variant of a part scores like the
+  part; `SSD` and `SAD` compare the colour itself. The documentation of
+  `NCC` now says that it is zero-mean and what it ignores.
+
+### Performance
+
+- `transform::transpose` and `transpose_into` move the image in square
+  blocks of 32 × 32 pixels, so the rows read and the rows written both stay
+  in cache. Measured on `Mono8`: 1.37 GiB/s at 256 × 256, 1.23 GiB/s at
+  1024 × 1024 and 524 MiB/s at 4096 × 4096, against 428 MiB/s, 211 MiB/s
+  and 80 MiB/s before. The output is unchanged, pinned by the existing
+  tests.
+- `StructureTensor::from_gradients` runs its three same-size blurs through
+  one `SeparableScratch`, `ssim` and `ssim_map` their five, and a Gaussian
+  pyramid passes one scratch and one blurred buffer to every level. On a
+  64 × 48 `MonoF32` pair the tensor allocates 10 times per call instead of
+  21; on a 64 × 48 `Mono8` pair `ssim_map` allocates 12 times instead of
+  34; each pyramid level after the first allocates only its own pixels,
+  once instead of 7 times. `tests/allocation.rs` asserts all three. The
+  results are bit for bit the same. No wall-clock claim is made.
+
+### Documentation
+
+- **A guide page on numerics.** `guide::numerics` says that fovea promises
+  no bit pattern across builds (FMA, target, compiler, and later threads
+  and SIMD), and that a caller who needs identical bits validates and keeps
+  one binary; that accuracy is described where it depends on a choice, and
+  no numeric precision is guaranteed; and which rule resolves a tie, with
+  the operations that apply one.
+- `otsu_threshold` states that the lowest of several equally good
+  thresholds wins, and `Labeling` states that components are numbered in
+  raster order of their first pixel. Both were already the behaviour.
+- **A guide page on scales of measurement.** `guide::scales_of_measurement`
+  explains which operations a value admits, using Stevens' levels (nominal,
+  ordinal, interval, ratio), circular scales for `Orientation` and
+  `AxialOrientation`, and vector quantities such as complex amplitudes. It
+  shows how `HomogeneousPixel` (layout) and `ChannelwiseMath` (level) keep
+  the two questions apart, and where one marker is stricter than the
+  systematic requires. Its section on vector quantities says how
+  `ComplexF32` and `ComplexF64` map onto them, and the quick choice table of
+  `guide::pixel_types` lists them.
+- The `analyze::edge` module documentation shows Canny in a loop over
+  frames: built from its public stages, with the blur through a
+  `SeparableScratch` kept across frames, so the blur allocates nothing
+  after the first frame. The mask is the one `canny` gives.
+- **The camera-buffer guide names the stride.** *Padded rows* in
+  `guide::camera_buffers` takes a plane with `ImageRef::from_strided` and
+  `RowStride::bytes` in one call, where it viewed the buffer at its stride
+  as if that were the width and cropped the padding away. The paragraphs
+  that explained that route and its borrow trap are gone with it.
+
 ## [0.5.1] — 2026-09-22
 
 ### Documentation
@@ -1524,6 +2241,7 @@ actual functionality.
   `Result<T, Error>` for caller-data failures, `panic!` for
   programmer bugs.
 
+[0.6.0]: https://github.com/karhunen-loeve/fovea/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/karhunen-loeve/fovea/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/karhunen-loeve/fovea/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/karhunen-loeve/fovea/compare/v0.3.0...v0.4.0
